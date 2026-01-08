@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { FolderOpen, Folder, ChevronRight, HardDrive, Clock, X } from 'lucide-react';
+import { FolderOpen, Folder, ChevronRight, HardDrive, Clock, X, FolderPlus } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -11,10 +11,16 @@ import {
 import { Button } from '@/components/ui/button';
 import { PathInput } from '@/components/ui/path-input';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
+import { Input } from '@/components/ui/input';
 import { getJSON, setJSON } from '@/lib/storage';
 import { getDefaultWorkspaceDirectory, saveLastProjectDirectory } from '@/lib/workspace-config';
 import { useOSDetection } from '@/hooks';
 import { apiPost } from '@/lib/api-fetch';
+import { createLogger } from '@automaker/utils/logger';
+import { toast } from 'sonner';
+import { getElectronAPI } from '@/lib/electron';
+
+const logger = createLogger('FileBrowserDialog');
 
 interface DirectoryEntry {
   name: string;
@@ -79,6 +85,8 @@ export function FileBrowserDialog({
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
   const [recentFolders, setRecentFolders] = useState<string[]>([]);
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
 
   // Load recent folders when dialog opens
   useEffect(() => {
@@ -93,7 +101,7 @@ export function FileBrowserDialog({
     setRecentFolders(updated);
   }, []);
 
-  const browseDirectory = useCallback(async (dirPath?: string) => {
+  const browseDirectory = useCallback(async (dirPath?: string, isInitialLoad = false) => {
     setLoading(true);
     setError('');
     setWarning('');
@@ -108,9 +116,24 @@ export function FileBrowserDialog({
         setDrives(result.drives || []);
         setWarning(result.warning || '');
       } else {
+        // If this was the initial load and it failed, automatically fall back to home
+        if (isInitialLoad && dirPath) {
+          logger.debug('Initial path failed, falling back to home directory');
+          // Recursively call without path to load home directory
+          setLoading(false);
+          browseDirectory(undefined, false);
+          return;
+        }
         setError(result.error || 'Failed to browse directory');
       }
     } catch (err) {
+      // If this was the initial load and it failed, automatically fall back to home
+      if (isInitialLoad && dirPath) {
+        logger.debug('Initial path failed with exception, falling back to home directory');
+        setLoading(false);
+        browseDirectory(undefined, false);
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Failed to load directories');
     } finally {
       setLoading(false);
@@ -119,7 +142,7 @@ export function FileBrowserDialog({
 
   const handleSelectRecent = useCallback(
     (path: string) => {
-      browseDirectory(path);
+      browseDirectory(path, false);
     },
     [browseDirectory]
   );
@@ -132,6 +155,8 @@ export function FileBrowserDialog({
       setDirectories([]);
       setError('');
       setWarning('');
+      setIsCreatingFolder(false);
+      setNewFolderName('');
     }
   }, [open]);
 
@@ -153,17 +178,17 @@ export function FileBrowserDialog({
           const pathToUse = initialPath || defaultDir;
 
           if (pathToUse) {
-            browseDirectory(pathToUse);
+            browseDirectory(pathToUse, true); // Mark as initial load for auto-fallback
           } else {
             // No default directory, browse home directory
-            browseDirectory();
+            browseDirectory(undefined, false);
           }
         } catch {
           // If config fetch fails, try initialPath or fall back to home directory
           if (initialPath) {
-            browseDirectory(initialPath);
+            browseDirectory(initialPath, true); // Mark as initial load for auto-fallback
           } else {
-            browseDirectory();
+            browseDirectory(undefined, false);
           }
         }
       };
@@ -173,23 +198,73 @@ export function FileBrowserDialog({
   }, [open, initialPath, currentPath, browseDirectory]);
 
   const handleSelectDirectory = (dir: DirectoryEntry) => {
-    browseDirectory(dir.path);
+    browseDirectory(dir.path, false);
   };
 
   const handleGoHome = useCallback(() => {
-    browseDirectory();
+    browseDirectory(undefined, false);
   }, [browseDirectory]);
 
   const handleNavigate = useCallback(
     (path: string) => {
-      browseDirectory(path);
+      browseDirectory(path, false);
     },
     [browseDirectory]
   );
 
   const handleSelectDrive = (drivePath: string) => {
-    browseDirectory(drivePath);
+    browseDirectory(drivePath, false);
   };
+
+  const handleCreateFolder = useCallback(async () => {
+    if (!newFolderName.trim() || !currentPath) return;
+
+    const folderName = newFolderName.trim();
+    // Use platform-specific path separator
+    const pathSep = currentPath.includes('\\') ? '\\' : '/';
+    const newFolderPath = currentPath.endsWith(pathSep)
+      ? `${currentPath}${folderName}`
+      : `${currentPath}${pathSep}${folderName}`;
+
+    try {
+      const api = getElectronAPI();
+      const result = await api.mkdir(newFolderPath);
+
+      if (result.success) {
+        toast.success(`Created folder: ${folderName}`);
+        setIsCreatingFolder(false);
+        setNewFolderName('');
+        // Refresh the directory listing
+        browseDirectory(currentPath, false);
+      } else {
+        toast.error('Failed to create folder', {
+          description: result.error || 'Unknown error occurred',
+        });
+      }
+    } catch (err) {
+      toast.error('Failed to create folder', {
+        description: err instanceof Error ? err.message : 'Unknown error occurred',
+      });
+    }
+  }, [newFolderName, currentPath, browseDirectory]);
+
+  const handleCancelCreateFolder = useCallback(() => {
+    setIsCreatingFolder(false);
+    setNewFolderName('');
+  }, []);
+
+  const handleCreateFolderKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleCreateFolder();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleCancelCreateFolder();
+      }
+    },
+    [handleCreateFolder, handleCancelCreateFolder]
+  );
 
   const handleSelect = useCallback(() => {
     if (currentPath) {
@@ -239,21 +314,70 @@ export function FileBrowserDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-2 min-h-[350px] flex-1 overflow-hidden py-1">
-          {/* Path navigation */}
-          <PathInput
-            currentPath={currentPath}
-            parentPath={parentPath}
-            loading={loading}
-            error={!!error}
-            onNavigate={handleNavigate}
-            onHome={handleGoHome}
-            entries={directories.map((dir) => ({ ...dir, isDirectory: true }))}
-            onSelectEntry={(entry) => {
-              if (entry.isDirectory) {
-                handleSelectDirectory(entry);
-              }
-            }}
-          />
+          {/* Path navigation and create folder */}
+          <div className="flex items-center gap-2">
+            <div className="flex-1">
+              <PathInput
+                currentPath={currentPath}
+                parentPath={parentPath}
+                loading={loading}
+                error={!!error}
+                onNavigate={handleNavigate}
+                onHome={handleGoHome}
+                entries={directories.map((dir) => ({ ...dir, isDirectory: true }))}
+                onSelectEntry={(entry) => {
+                  if (entry.isDirectory) {
+                    handleSelectDirectory(entry);
+                  }
+                }}
+              />
+            </div>
+            {!isCreatingFolder && currentPath && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsCreatingFolder(true)}
+                disabled={loading}
+                className="shrink-0 h-7 px-2"
+                title="Create new folder"
+              >
+                <FolderPlus className="w-4 h-4" />
+              </Button>
+            )}
+          </div>
+
+          {/* Create folder input */}
+          {isCreatingFolder && (
+            <div className="flex items-center gap-2 p-2 rounded-md bg-sidebar-accent/10 border border-sidebar-border">
+              <FolderPlus className="w-4 h-4 text-brand-500 shrink-0" />
+              <Input
+                type="text"
+                placeholder="New folder name"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={handleCreateFolderKeyDown}
+                className="h-7 text-sm flex-1"
+                autoFocus
+              />
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleCreateFolder}
+                disabled={!newFolderName.trim()}
+                className="h-7 px-3 text-xs"
+              >
+                Create
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleCancelCreateFolder}
+                className="h-7 px-2 text-xs"
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
 
           {/* Recent folders */}
           {recentFolders.length > 0 && (

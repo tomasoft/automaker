@@ -12,11 +12,31 @@ const logger = createLogger('Setup');
 // Storage for API keys (in-memory cache) - private
 const apiKeys: Record<string, string> = {};
 
+// Initialize from environment on module load
+if (process.env.GITHUB_TOKEN) {
+  apiKeys['github_token'] = process.env.GITHUB_TOKEN;
+  logger.info('[Setup] Loaded GitHub token from environment');
+}
+if (process.env.GH_TOKEN && !apiKeys['github_token']) {
+  apiKeys['github_token'] = process.env.GH_TOKEN;
+  logger.info('[Setup] Loaded GitHub token from GH_TOKEN environment');
+}
+
 /**
  * Get an API key for a provider
  */
 export function getApiKey(provider: string): string | undefined {
-  return apiKeys[provider];
+  const key = apiKeys[provider];
+  if (!key && provider === 'github_token') {
+    // Fallback: check process.env if not in memory
+    const envKey = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+    if (envKey) {
+      logger.debug('[Setup] Found GitHub token in process.env, adding to memory cache');
+      apiKeys['github_token'] = envKey;
+      return envKey;
+    }
+  }
+  return key;
 }
 
 /**
@@ -24,6 +44,7 @@ export function getApiKey(provider: string): string | undefined {
  */
 export function setApiKey(provider: string, key: string): void {
   apiKeys[provider] = key;
+  logger.debug(`[Setup] Set API key for provider: ${provider}, length: ${key.length}`);
 }
 
 /**

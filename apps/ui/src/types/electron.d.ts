@@ -865,6 +865,15 @@ export interface WorktreeAPI {
     error?: string;
   }>;
 
+  // Open a worktree directory in the file explorer
+  openInExplorer: (worktreePath: string) => Promise<{
+    success: boolean;
+    result?: {
+      message: string;
+    };
+    error?: string;
+  }>;
+
   // Get the default code editor name
   getDefaultEditor: () => Promise<{
     success: boolean;

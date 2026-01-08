@@ -75,10 +75,22 @@ export class ProviderFactory {
    * Get the appropriate provider for a given model ID
    *
    * @param modelId Model identifier (e.g., "claude-opus-4-5-20251101", "cursor-gpt-4o", "cursor-auto")
+   * @param options Optional configuration (e.g., projectRoot for agentic providers)
    * @returns Provider instance for the model
    */
-  static getProviderForModel(modelId: string): BaseProvider {
+  static getProviderForModel(
+    modelId: string,
+    options?: { projectRoot?: string; agenticMode?: boolean }
+  ): BaseProvider {
     const providerName = this.getProviderNameForModel(modelId);
+
+    // If it's a local-llm model and we're in agentic mode, use the agent provider
+    if (providerName === 'local-llm' && options?.agenticMode) {
+      return new LocalLLMAgentProvider({
+        projectRoot: options.projectRoot || process.cwd(),
+      });
+    }
+
     const provider = this.getProviderByName(providerName);
 
     if (!provider) {
@@ -166,6 +178,8 @@ export class ProviderFactory {
 import { ClaudeProvider } from './claude-provider.js';
 import { CursorProvider } from './cursor-provider.js';
 import { GitHubCopilotProvider } from './github-copilot-provider.js';
+import { LocalLLMProvider } from './local-llm-provider.js';
+import { LocalLLMAgentProvider } from './local-llm-agent-provider.js';
 
 // Register Claude provider
 registerProvider('claude', {
@@ -193,13 +207,45 @@ registerProvider('github-copilot', {
   canHandleModel: (model: string) => {
     // Check for copilot- prefix
     if (model.startsWith('copilot-')) return true;
-    
+
     // Check for common OpenAI/Copilot model patterns
     const copilotPatterns = [
-      'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 
-      'gpt-3.5-turbo', 'o1-preview', 'o1-mini'
+      'gpt-4o',
+      'gpt-4o-mini',
+      'gpt-4-turbo',
+      'gpt-4',
+      'gpt-3.5-turbo',
+      'o1-preview',
+      'o1-mini',
     ];
-    return copilotPatterns.some(pattern => model === pattern || model.startsWith(pattern));
+    return copilotPatterns.some((pattern) => model === pattern || model.startsWith(pattern));
   },
   priority: 5, // Medium priority - check after Cursor but before Claude
+});
+
+// Register Local LLM provider
+registerProvider('local-llm', {
+  factory: () => new LocalLLMProvider(),
+  aliases: ['local', 'lm-studio', 'ollama', 'vllm'],
+  canHandleModel: (model: string) => {
+    // Check for local- prefix
+    if (model.startsWith('local-')) return true;
+
+    // Check for common local model patterns
+    const localPatterns = [
+      'qwen',
+      'deepseek',
+      'codellama',
+      'llama',
+      'mistral',
+      'mixtral',
+      'phi',
+      'gemma',
+      'yi',
+      'starcoder',
+      'wizardcoder',
+    ];
+    return localPatterns.some((pattern) => model.toLowerCase().includes(pattern));
+  },
+  priority: 3, // Lower priority - check after Copilot but before Claude
 });

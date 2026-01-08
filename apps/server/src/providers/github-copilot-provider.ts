@@ -1,6 +1,6 @@
 /**
  * GitHub Copilot Provider - Executes queries using GitHub Copilot API
- * 
+ *
  * Provides OpenAI-compatible chat completions using GitHub Copilot as the backend.
  * Based on: https://github.com/ericc-ch/copilot-api
  */
@@ -51,7 +51,9 @@ interface CopilotStreamChunk {
  */
 export class GitHubCopilotProvider extends BaseProvider {
   private static readonly CHAT_COMPLETIONS_URL = 'https://api.githubcopilot.com/chat/completions';
+  private static readonly MODELS_URL = 'https://api.githubcopilot.com/models';
   private authManager: CopilotAuthManager;
+  private cachedModels: string[] | null = null;
 
   constructor(config: { githubToken?: string } = {}) {
     super(config);
@@ -66,12 +68,7 @@ export class GitHubCopilotProvider extends BaseProvider {
    * Execute a query using GitHub Copilot API
    */
   async *executeQuery(options: ExecuteOptions): AsyncGenerator<ProviderMessage> {
-    const {
-      prompt,
-      model,
-      systemPrompt,
-      conversationHistory = [],
-    } = options;
+    const { prompt, model, systemPrompt, conversationHistory = [] } = options;
 
     try {
       // Get Copilot authentication token
@@ -92,16 +89,14 @@ export class GitHubCopilotProvider extends BaseProvider {
       for (const msg of conversationHistory) {
         messages.push({
           role: msg.role,
-          content: Array.isArray(msg.content) 
+          content: Array.isArray(msg.content)
             ? this.extractTextFromContent(msg.content)
             : msg.content,
         });
       }
 
       // Add current prompt
-      const promptText = Array.isArray(prompt) 
-        ? this.extractTextFromContent(prompt) 
-        : prompt;
+      const promptText = Array.isArray(prompt) ? this.extractTextFromContent(prompt) : prompt;
 
       messages.push({
         role: 'user',
@@ -109,14 +104,16 @@ export class GitHubCopilotProvider extends BaseProvider {
       });
 
       // Prepare request
+      const mappedModel = this.mapModelToCopilot(model);
       const requestBody: CopilotChatRequest = {
         messages,
-        model: this.mapModelToCopilot(model),
+        model: mappedModel,
         stream: true,
         temperature: 0.7,
         max_tokens: 4096,
       };
 
+      logger.info(`Copilot API request: original model="${model}", mapped model="${mappedModel}"`);
       logger.debug('Sending request to GitHub Copilot:', {
         model: requestBody.model,
         messageCount: messages.length,
@@ -126,9 +123,9 @@ export class GitHubCopilotProvider extends BaseProvider {
       const response = await fetch(GitHubCopilotProvider.CHAT_COMPLETIONS_URL, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
+          Accept: 'text/event-stream',
           'Editor-Version': 'vscode/1.95.0',
           'Editor-Plugin-Version': 'copilot-chat/0.22.4',
           'User-Agent': 'Mozilla/5.0',
@@ -138,15 +135,27 @@ export class GitHubCopilotProvider extends BaseProvider {
 
       if (!response.ok) {
         const errorText = await response.text();
+
+        // If model is not supported, fetch and log available models
+        if (errorText.includes('model_not_supported')) {
+          const availableModels = await this.fetchAvailableModels();
+          const availableModelsMsg =
+            availableModels.length > 0
+              ? `\n\nAvailable models for your Copilot subscription: ${availableModels.join(', ')}`
+              : '\n\nUnable to fetch available models. Your Copilot plan may not support this model.';
+          throw new Error(
+            `GitHub Copilot API error: ${response.statusText}\n${errorText}${availableModelsMsg}`
+          );
+        }
+
         throw new Error(`GitHub Copilot API error: ${response.statusText}\n${errorText}`);
       }
 
       // Stream the response
       yield* this.streamResponse(response);
-
     } catch (error) {
       logger.error('Error executing query:', error);
-      
+
       // Yield error message
       yield {
         type: 'error',
@@ -173,7 +182,7 @@ export class GitHubCopilotProvider extends BaseProvider {
     try {
       while (true) {
         const { done, value } = await reader.read();
-        
+
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
@@ -182,18 +191,19 @@ export class GitHubCopilotProvider extends BaseProvider {
 
         for (const line of lines) {
           if (!line.trim() || line.trim() === 'data: [DONE]') continue;
-          
+
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
-            
+
             try {
               const chunk: CopilotStreamChunk = JSON.parse(data);
-              
+
               for (const choice of chunk.choices) {
                 if (choice.delta.content) {
                   accumulatedText += choice.delta.content;
-                  
-                  // Yield accumulated message
+
+                  // Yield only the delta (new content), not the accumulated text
+                  // This prevents duplication when the consumer appends chunks
                   yield {
                     type: 'assistant',
                     message: {
@@ -201,14 +211,14 @@ export class GitHubCopilotProvider extends BaseProvider {
                       content: [
                         {
                           type: 'text',
-                          text: accumulatedText,
+                          text: choice.delta.content, // Only the new content
                         },
                       ],
                     },
                   };
                 }
 
-                // Check for finish
+                // Check for finish - yield the final accumulated result
                 if (choice.finish_reason === 'stop') {
                   yield {
                     type: 'result',
@@ -231,7 +241,9 @@ export class GitHubCopilotProvider extends BaseProvider {
   /**
    * Extract text content from multi-part content array
    */
-  private extractTextFromContent(content: Array<{ type: string; text?: string; source?: object }>): string {
+  private extractTextFromContent(
+    content: Array<{ type: string; text?: string; source?: object }>
+  ): string {
     return content
       .filter((part) => part.type === 'text' && part.text)
       .map((part) => part.text)
@@ -242,28 +254,108 @@ export class GitHubCopilotProvider extends BaseProvider {
    * Map model names to GitHub Copilot model identifiers
    */
   private mapModelToCopilot(model: string): string {
+    // Strip copilot- prefix if present
+    const bareModel = model.startsWith('copilot-') ? model.slice(8) : model;
+
     const modelMap: Record<string, string> = {
+      // Claude 4.x models (via Copilot)
+      'claude-haiku-4.5': 'claude-3-haiku',
+      'claude-sonnet-4': 'claude-3-5-sonnet',
+      'claude-sonnet-4.5': 'claude-3-5-sonnet',
+      'claude-opus-4.1': 'claude-3-opus',
+      'claude-opus-4.5': 'claude-3-opus',
+
+      // Claude 3.x models (via Copilot)
+      'claude-3.5-sonnet': 'claude-3-5-sonnet',
+      'claude-3-opus': 'claude-3-opus',
+      'claude-3-sonnet': 'claude-3-sonnet',
+      'claude-3-haiku': 'claude-3-haiku',
+
       // GPT-4 models
       'gpt-4': 'gpt-4',
+      'gpt-4.1': 'gpt-4',
       'gpt-4o': 'gpt-4o',
       'gpt-4o-mini': 'gpt-4o-mini',
-      'gpt-4-turbo': 'gpt-4-turbo-2024-04-09',
-      
+      'gpt-4-turbo': 'gpt-4-turbo',
+
+      // GPT-5 models (map to closest available)
+      'gpt-5': 'gpt-4o',
+      'gpt-5-mini': 'gpt-4o-mini',
+      'gpt-5-codex': 'gpt-4o',
+      'gpt-5.1': 'gpt-4o',
+      'gpt-5.1-codex': 'gpt-4o',
+      'gpt-5.1-codex-mini': 'gpt-4o-mini',
+      'gpt-5.1-codex-max': 'gpt-4o',
+      'gpt-5.2': 'gpt-4o',
+
       // GPT-3.5
       'gpt-3.5-turbo': 'gpt-3.5-turbo',
-      
-      // Claude models (via Copilot)
-      'claude-3.5-sonnet': 'claude-3.5-sonnet',
-      'claude-3-opus': 'claude-3-opus-20240229',
-      'claude-3-sonnet': 'claude-3-sonnet-20240229',
-      'claude-3-haiku': 'claude-3-haiku-20240307',
-      
+
+      // Gemini models (map to closest available)
+      'gemini-2.5-pro': 'gpt-4o',
+      'gemini-3-flash': 'gpt-4o-mini',
+      'gemini-3-pro': 'gpt-4o',
+
       // o1 models
-      'o1-preview': 'o1-preview-2024-09-12',
-      'o1-mini': 'o1-mini-2024-09-12',
+      'o1-preview': 'o1-preview',
+      'o1-mini': 'o1-mini',
+
+      // Other models (map to closest available)
+      'grok-code-fast-1': 'gpt-4o-mini',
+      'raptor-mini': 'gpt-4o-mini',
     };
 
-    return modelMap[model] || model;
+    const mapped = modelMap[bareModel] || bareModel;
+    logger.debug(`Mapped Copilot model: "${model}" (bare: "${bareModel}") -> "${mapped}"`);
+    return mapped;
+  }
+
+  /**
+   * Fetch available models from GitHub Copilot API
+   */
+  private async fetchAvailableModels(): Promise<string[]> {
+    if (this.cachedModels) {
+      return this.cachedModels;
+    }
+
+    try {
+      const token = await this.authManager.getToken();
+
+      const response = await fetch(GitHubCopilotProvider.MODELS_URL, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'Editor-Version': 'vscode/1.95.0',
+          'Editor-Plugin-Version': 'copilot-chat/0.22.4',
+          'User-Agent': 'Mozilla/5.0',
+        },
+      });
+
+      if (!response.ok) {
+        logger.warn(`Failed to fetch models from Copilot API: ${response.statusText}`);
+        return [];
+      }
+
+      const data = await response.json();
+      logger.info('Fetched available models from Copilot API:', data);
+
+      // Extract model IDs from the response
+      // The API response format varies, but typically has a 'data' array with model objects
+      if (Array.isArray(data?.data)) {
+        this.cachedModels = data.data.map((m: any) => m.id || m.model || m.name).filter(Boolean);
+      } else if (Array.isArray(data)) {
+        this.cachedModels = data.map((m: any) => m.id || m.model || m.name).filter(Boolean);
+      } else {
+        this.cachedModels = [];
+      }
+
+      logger.info(`Available Copilot models: ${this.cachedModels.join(', ')}`);
+      return this.cachedModels;
+    } catch (error) {
+      logger.error('Error fetching available models:', error);
+      return [];
+    }
   }
 
   /**
@@ -272,7 +364,12 @@ export class GitHubCopilotProvider extends BaseProvider {
   async detectInstallation(): Promise<InstallationStatus> {
     try {
       const hasAccess = await this.authManager.checkAccess();
-      
+
+      // Try to fetch available models to verify API access
+      if (hasAccess) {
+        await this.fetchAvailableModels();
+      }
+
       return {
         installed: true,
         method: 'sdk',

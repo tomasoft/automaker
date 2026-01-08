@@ -34,6 +34,16 @@ export interface CursorCliStatus {
   error?: string;
 }
 
+// GitHub Copilot Status
+export interface CopilotStatus {
+  installed: boolean;
+  authenticated: boolean;
+  hasApiKey: boolean;
+  method: string;
+  error?: string;
+  instructions?: string;
+}
+
 // Claude Auth Method - all possible authentication sources
 export type ClaudeAuthMethod =
   | 'oauth_token_env'
@@ -71,6 +81,7 @@ export type SetupStep =
   | 'claude_detect'
   | 'claude_auth'
   | 'cursor'
+  | 'copilot'
   | 'github'
   | 'complete';
 
@@ -90,6 +101,9 @@ export interface SetupState {
 
   // Cursor CLI state
   cursorCliStatus: CursorCliStatus | null;
+
+  // GitHub Copilot state
+  copilotStatus: CopilotStatus | null;
 
   // Setup preferences
   skipClaudeSetup: boolean;
@@ -114,6 +128,9 @@ export interface SetupActions {
 
   // Cursor CLI
   setCursorCliStatus: (status: CursorCliStatus | null) => void;
+
+  // GitHub Copilot
+  setCopilotStatus: (status: CopilotStatus | null) => void;
 
   // Preferences
   setSkipClaudeSetup: (skip: boolean) => void;
@@ -140,6 +157,7 @@ const initialState: SetupState = {
 
   ghCliStatus: null,
   cursorCliStatus: null,
+  copilotStatus: null,
 
   skipClaudeSetup: shouldSkipSetup,
 };
@@ -191,6 +209,9 @@ export const useSetupStore = create<SetupState & SetupActions>()(
 
       // Cursor CLI
       setCursorCliStatus: (status) => set({ cursorCliStatus: status }),
+
+      // GitHub Copilot
+      setCopilotStatus: (status) => set({ copilotStatus: status }),
 
       // Preferences
       setSkipClaudeSetup: (skip) => set({ skipClaudeSetup: skip }),

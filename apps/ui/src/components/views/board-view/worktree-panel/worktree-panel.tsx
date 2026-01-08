@@ -73,6 +73,7 @@ export function WorktreePanel({
     handlePull,
     handlePush,
     handleOpenInEditor,
+    handleOpenInExplorer,
   } = useWorktreeActions({
     fetchWorktrees,
     fetchBranches,
@@ -221,6 +222,7 @@ export function WorktreePanel({
             onPull={handlePull}
             onPush={handlePush}
             onOpenInEditor={handleOpenInEditor}
+            onOpenInExplorer={handleOpenInExplorer}
             onCommit={onCommit}
             onCreatePR={onCreatePR}
             onAddressPRComments={onAddressPRComments}
@@ -276,6 +278,7 @@ export function WorktreePanel({
                   onPull={handlePull}
                   onPush={handlePush}
                   onOpenInEditor={handleOpenInEditor}
+                  onOpenInExplorer={handleOpenInExplorer}
                   onCommit={onCommit}
                   onCreatePR={onCreatePR}
                   onAddressPRComments={onAddressPRComments}

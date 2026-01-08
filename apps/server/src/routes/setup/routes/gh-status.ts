@@ -6,14 +6,38 @@ import type { Request, Response } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getGitHubCliPaths, getExtendedPath, systemPathAccess } from '@automaker/platform';
-import { getErrorMessage, logError } from '../common.js';
+import { getErrorMessage, logError, getApiKey } from '../common.js';
+import { createLogger } from '@automaker/utils';
 
 const execAsync = promisify(exec);
 
-const execEnv = {
-  ...process.env,
-  PATH: getExtendedPath(),
-};
+const logger = createLogger('GhStatus');
+
+function getExecEnv() {
+  const extendedPath = getExtendedPath();
+  const env = {
+    ...process.env,
+    PATH: extendedPath,
+  };
+
+  // If we have a stored GitHub token from Copilot auth, use it for gh CLI
+  const githubToken = getApiKey('github_token');
+  if (githubToken) {
+    env.GH_TOKEN = githubToken;
+    logger.info(`[GhStatus] Using stored GitHub token for gh CLI (length: ${githubToken.length})`);
+  } else {
+    logger.info('[GhStatus] No stored GitHub token found for gh CLI');
+  }
+
+  logger.debug(
+    `[GhStatus] Extended PATH: ${extendedPath
+      .split(process.platform === 'win32' ? ';' : ':')
+      .slice(0, 5)
+      .join(', ')}...`
+  );
+
+  return env;
+}
 
 export interface GhStatus {
   installed: boolean;
@@ -35,26 +59,49 @@ async function getGhStatus(): Promise<GhStatus> {
 
   const isWindows = process.platform === 'win32';
 
+  // Log environment info for debugging
+  logger.debug(`[GhStatus] Platform: ${process.platform}`);
+  logger.debug(`[GhStatus] ProgramFiles: ${process.env.ProgramFiles || 'undefined'}`);
+  logger.debug(`[GhStatus] LOCALAPPDATA: ${process.env.LOCALAPPDATA || 'undefined'}`);
+
+  const execEnv = getExecEnv();
+
   // Check if gh CLI is installed
   try {
     const findCommand = isWindows ? 'where gh' : 'command -v gh';
+    logger.debug(`[GhStatus] Running command: ${findCommand}`);
     const { stdout } = await execAsync(findCommand, { env: execEnv });
     status.path = stdout.trim().split(/\r?\n/)[0];
     status.installed = true;
-  } catch {
+    logger.info(`[GhStatus] Found gh CLI at: ${status.path}`);
+  } catch (error) {
+    logger.warn(`[GhStatus] 'where gh' failed, trying common locations`);
     // gh not in PATH, try common locations from centralized system paths
     const commonPaths = getGitHubCliPaths();
+    logger.info(`[GhStatus] Checking ${commonPaths.length} common paths for gh CLI`);
+    logger.info(`[GhStatus] Paths to check: ${commonPaths.join(', ')}`);
 
     for (const p of commonPaths) {
       try {
-        if (await systemPathAccess(p)) {
+        logger.debug(`[GhStatus] Checking: ${p}`);
+        const exists = await systemPathAccess(p);
+        logger.debug(`[GhStatus] Result for ${p}: ${exists}`);
+        if (exists) {
           status.path = p;
           status.installed = true;
+          logger.info(`[GhStatus] Found gh CLI at: ${p}`);
           break;
         }
-      } catch {
+      } catch (err) {
         // Not found at this path
+        logger.debug(
+          `[GhStatus] Not found at: ${p}, error: ${err instanceof Error ? err.message : err}`
+        );
       }
+    }
+
+    if (!status.installed) {
+      logger.warn(`[GhStatus] gh CLI not found in any common location`);
     }
   }
 
@@ -62,13 +109,21 @@ async function getGhStatus(): Promise<GhStatus> {
     return status;
   }
 
+  // Use the full path to gh.exe if we have it (especially important on Windows)
+  const ghCommand = status.path || 'gh';
+  logger.info(`[GhStatus] Using gh command: ${ghCommand}`);
+
   // Get version
   try {
-    const { stdout } = await execAsync('gh --version', { env: execEnv });
+    const { stdout } = await execAsync(`"${ghCommand}" --version`, { env: execEnv });
     // Extract version from output like "gh version 2.40.1 (2024-01-09)"
     const versionMatch = stdout.match(/gh version ([\d.]+)/);
     status.version = versionMatch ? versionMatch[1] : stdout.trim().split('\n')[0];
-  } catch {
+  } catch (error) {
+    logger.warn(
+      '[GhStatus] Failed to get version:',
+      error instanceof Error ? error.message : error
+    );
     // Version command failed
   }
 
@@ -76,22 +131,29 @@ async function getGhStatus(): Promise<GhStatus> {
   // gh auth status can return non-zero even when GH_TOKEN is valid
   let apiCallSucceeded = false;
   try {
-    const { stdout } = await execAsync('gh api user --jq ".login"', { env: execEnv });
+    logger.debug('[GhStatus] Attempting gh api user call with token');
+    const { stdout } = await execAsync(`"${ghCommand}" api user --jq ".login"`, { env: execEnv });
     const user = stdout.trim();
     if (user) {
       status.authenticated = true;
       status.user = user;
       apiCallSucceeded = true;
+      logger.info(`[GhStatus] Successfully authenticated as: ${user}`);
     }
     // If stdout is empty, fall through to gh auth status fallback
-  } catch {
+  } catch (error) {
+    logger.warn(
+      '[GhStatus] gh api user call failed:',
+      error instanceof Error ? error.message : error
+    );
     // API call failed - fall through to gh auth status fallback
   }
 
   // Fallback: try gh auth status if API call didn't succeed
   if (!apiCallSucceeded) {
     try {
-      const { stdout } = await execAsync('gh auth status', { env: execEnv });
+      logger.debug('[GhStatus] Attempting gh auth status fallback');
+      const { stdout } = await execAsync(`"${ghCommand}" auth status`, { env: execEnv });
       status.authenticated = true;
 
       // Try to extract username from output
@@ -101,8 +163,13 @@ async function getGhStatus(): Promise<GhStatus> {
       if (userMatch) {
         status.user = userMatch[1];
       }
-    } catch {
+      logger.info('[GhStatus] gh auth status succeeded');
+    } catch (error) {
       // Auth status returns non-zero if not authenticated
+      logger.warn(
+        '[GhStatus] gh auth status failed:',
+        error instanceof Error ? error.message : error
+      );
       status.authenticated = false;
     }
   }

@@ -143,6 +143,24 @@ export function useWorktreeActions({ fetchWorktrees, fetchBranches }: UseWorktre
     }
   }, []);
 
+  const handleOpenInExplorer = useCallback(async (worktree: WorktreeInfo) => {
+    try {
+      const api = getElectronAPI();
+      if (!api?.worktree?.openInExplorer) {
+        logger.warn('Open in explorer API not available');
+        return;
+      }
+      const result = await api.worktree.openInExplorer(worktree.path);
+      if (result.success && result.result) {
+        toast.success(result.result.message);
+      } else if (result.error) {
+        toast.error(result.error);
+      }
+    } catch (error) {
+      logger.error('Open in explorer failed:', error);
+    }
+  }, []);
+
   return {
     isPulling,
     isPushing,
@@ -153,5 +171,6 @@ export function useWorktreeActions({ fetchWorktrees, fetchBranches }: UseWorktre
     handlePull,
     handlePush,
     handleOpenInEditor,
+    handleOpenInExplorer,
   };
 }

@@ -30,6 +30,7 @@ import { createMigrateHandler } from './routes/migrate.js';
 import { createStartDevHandler } from './routes/start-dev.js';
 import { createStopDevHandler } from './routes/stop-dev.js';
 import { createListDevServersHandler } from './routes/list-dev-servers.js';
+import { createOpenInExplorerHandler } from './routes/open-in-explorer.js';
 
 export function createWorktreeRoutes(): Router {
   const router = Router();
@@ -76,6 +77,11 @@ export function createWorktreeRoutes(): Router {
   );
   router.post('/switch-branch', requireValidWorktree, createSwitchBranchHandler());
   router.post('/open-in-editor', validatePathParams('worktreePath'), createOpenInEditorHandler());
+  router.post(
+    '/open-in-explorer',
+    validatePathParams('worktreePath'),
+    createOpenInExplorerHandler()
+  );
   router.get('/default-editor', createGetDefaultEditorHandler());
   router.post('/init-git', validatePathParams('projectPath'), createInitGitHandler());
   router.post('/migrate', createMigrateHandler());

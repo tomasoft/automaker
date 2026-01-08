@@ -5,6 +5,8 @@ import { router } from './utils/router';
 import { SplashScreen } from './components/splash-screen';
 import { useSettingsMigration } from './hooks/use-settings-migration';
 import { useCursorStatusInit } from './hooks/use-cursor-status-init';
+import { useCopilotStatusInit } from './hooks/use-copilot-status-init';
+import { useLocalLlmInit } from './hooks/use-local-llm-init';
 import './styles/global.css';
 import './styles/theme-imports';
 
@@ -40,6 +42,12 @@ export default function App() {
 
   // Initialize Cursor CLI status at startup
   useCursorStatusInit();
+
+  // Initialize GitHub Copilot status at startup
+  useCopilotStatusInit();
+
+  // Initialize Local LLM models on startup (auto-enable on first run)
+  useLocalLlmInit();
 
   const handleSplashComplete = useCallback(() => {
     sessionStorage.setItem('automaker-splash-shown', 'true');

@@ -1,6 +1,6 @@
 /**
  * GitHub Copilot Authentication Utilities
- * 
+ *
  * Handles authentication flow for GitHub Copilot API access
  * Based on: https://github.com/ericc-ch/copilot-api
  */
@@ -51,6 +51,10 @@ export class CopilotAuthManager {
   constructor(githubToken?: string) {
     if (githubToken) {
       this.githubAccessToken = githubToken;
+    } else {
+      // Try to load from stored token (for persistence across requests)
+      // This will be populated by the polling endpoint after successful auth
+      this.githubAccessToken = null;
     }
   }
 
@@ -60,42 +64,57 @@ export class CopilotAuthManager {
   async getToken(): Promise<string> {
     // Check if we have a valid cached token
     if (this.cachedToken && this.cachedToken.expiresAt > Date.now() + 60000) {
+      logger.debug('[CopilotAuth] Using cached Copilot token');
       return this.cachedToken.token;
     }
 
     // Check for GitHub token from environment
     if (!this.githubAccessToken) {
       this.githubAccessToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
+      logger.debug('[CopilotAuth] Checked environment for GitHub token:', !!this.githubAccessToken);
     }
 
     // If no GitHub token, need to do device flow
     if (!this.githubAccessToken) {
+      logger.warn('[CopilotAuth] No GitHub access token found');
       throw new Error(
         'No GitHub access token found. Please set GITHUB_TOKEN environment variable or run authentication flow.'
       );
     }
 
     // Get Copilot token using GitHub access token
-    const copilotToken = await this.fetchCopilotToken(this.githubAccessToken);
-    
-    this.cachedToken = {
-      token: copilotToken.token,
-      expiresAt: copilotToken.expires_at,
-      organizationsList: copilotToken.organization_list,
-    };
+    logger.debug('[CopilotAuth] Fetching Copilot API token using GitHub access token');
+    try {
+      const copilotToken = await this.fetchCopilotToken(this.githubAccessToken);
 
-    return this.cachedToken.token;
+      this.cachedToken = {
+        token: copilotToken.token,
+        expiresAt: copilotToken.expires_at,
+        organizationsList: copilotToken.organization_list,
+      };
+
+      logger.debug('[CopilotAuth] Successfully obtained and cached Copilot token');
+      return this.cachedToken.token;
+    } catch (error) {
+      logger.error(
+        '[CopilotAuth] Failed to fetch Copilot token:',
+        error instanceof Error ? error.message : error
+      );
+      throw error;
+    }
   }
 
   /**
    * Perform GitHub device flow authentication
+   *
+   * @param onDeviceCode Optional callback to receive device code info (for UI display)
    */
-  async authenticate(): Promise<string> {
+  async authenticate(onDeviceCode?: (data: DeviceCodeResponse) => void): Promise<string> {
     logger.info('Starting GitHub device flow authentication...');
 
     // Step 1: Request device code
     const deviceCode = await this.requestDeviceCode();
-    
+
     logger.info('\n===========================================');
     logger.info('GitHub Authentication Required');
     logger.info('===========================================');
@@ -103,15 +122,20 @@ export class CopilotAuthManager {
     logger.info(`\nAnd enter code: ${deviceCode.user_code}\n`);
     logger.info('===========================================\n');
 
+    // Notify callback with device code info (for UI to display)
+    if (onDeviceCode) {
+      onDeviceCode(deviceCode);
+    }
+
     // Step 2: Poll for access token
     const accessToken = await this.pollForAccessToken(deviceCode);
-    
+
     this.githubAccessToken = accessToken;
     logger.info('Successfully authenticated with GitHub!');
 
     // Step 3: Get Copilot token
     const copilotToken = await this.fetchCopilotToken(accessToken);
-    
+
     this.cachedToken = {
       token: copilotToken.token,
       expiresAt: copilotToken.expires_at,
@@ -128,7 +152,7 @@ export class CopilotAuthManager {
     const response = await fetch(CopilotAuthManager.DEVICE_CODE_URL, {
       method: 'POST',
       headers: {
-        'Accept': 'application/json',
+        Accept: 'application/json',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -159,7 +183,7 @@ export class CopilotAuthManager {
         const response = await fetch(CopilotAuthManager.ACCESS_TOKEN_URL, {
           method: 'POST',
           headers: {
-            'Accept': 'application/json',
+            Accept: 'application/json',
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -198,8 +222,8 @@ export class CopilotAuthManager {
     const response = await fetch(CopilotAuthManager.COPILOT_TOKEN_URL, {
       method: 'GET',
       headers: {
-        'Authorization': `token ${githubToken}`,
-        'Accept': 'application/json',
+        Authorization: `token ${githubToken}`,
+        Accept: 'application/json',
       },
     });
 
@@ -218,10 +242,73 @@ export class CopilotAuthManager {
    */
   async checkAccess(): Promise<boolean> {
     try {
-      await this.getToken();
+      logger.debug('[CopilotAuth] Checking access. GitHub token exists:', !!this.githubAccessToken);
+      const token = await this.getToken();
+      logger.debug('[CopilotAuth] Successfully obtained Copilot token');
       return true;
-    } catch {
+    } catch (error) {
+      logger.warn(
+        '[CopilotAuth] Failed to check access:',
+        error instanceof Error ? error.message : error
+      );
       return false;
+    }
+  }
+
+  /**
+   * Get user's Copilot subscription information
+   * Returns the plan type: 'free', 'pro', 'pro+', 'business', or 'enterprise'
+   *
+   * Note: GitHub doesn't have a public API endpoint for this yet,
+   * so we infer from available information or return a default.
+   */
+  async getUserCopilotPlan(): Promise<{
+    plan: 'free' | 'pro' | 'pro+' | 'business' | 'enterprise';
+    seat_management_setting?: string;
+    organization?: string;
+  } | null> {
+    if (!this.githubAccessToken) {
+      logger.error('[CopilotAuth] No GitHub access token available');
+      return null;
+    }
+
+    try {
+      // Try to get basic user info first
+      const userResponse = await fetch('https://api.github.com/user', {
+        headers: {
+          Authorization: `Bearer ${this.githubAccessToken}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      });
+
+      if (!userResponse.ok) {
+        logger.error(
+          `[CopilotAuth] Failed to fetch user info: ${userResponse.status} ${userResponse.statusText}`
+        );
+        // Token might be valid for Copilot but not for user API, return default plan
+        return {
+          plan: 'pro', // Default assumption if authenticated
+          seat_management_setting: 'individual',
+        };
+      }
+
+      const userData = await userResponse.json();
+      const username = userData.login;
+      logger.info(`[CopilotAuth] Authenticated as: ${username}`);
+
+      // GitHub's Copilot REST API endpoints are for org admins, not individual users
+      // See: https://docs.github.com/en/rest/copilot/copilot-user-management
+      // For individual plan detection, we'll return a default 'pro' plan
+      // Users can click "Manage Plan" to see their actual tier on GitHub.com
+
+      return {
+        plan: 'pro', // Most common plan for authenticated users
+        seat_management_setting: 'individual',
+      };
+    } catch (error) {
+      logger.error('Failed to get Copilot plan:', error);
+      return null;
     }
   }
 

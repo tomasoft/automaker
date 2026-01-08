@@ -1180,6 +1180,62 @@ export class HttpApiClient implements ElectronAPI {
         `/api/setup/cursor-permissions/example${profileId ? `?profileId=${profileId}` : ''}`
       ),
 
+    // GitHub Copilot methods
+    getCopilotStatus: (): Promise<{
+      success: boolean;
+      installed: boolean;
+      authenticated: boolean;
+      hasApiKey: boolean;
+      method: string;
+      error?: string;
+      instructions?: string;
+    }> => this.get('/api/setup/copilot-status'),
+
+    getCopilotPlan: (): Promise<{
+      success: boolean;
+      plan?: 'free' | 'pro' | 'pro+' | 'business' | 'enterprise';
+      seat_management_setting?: string;
+      organization?: string;
+      error?: string;
+    }> => this.get('/api/copilot/plan'),
+
+    authCopilot: (): Promise<{
+      success: boolean;
+      stage?: 'device_code';
+      deviceCode?: {
+        verificationUri: string;
+        userCode: string;
+        expiresIn: number;
+      };
+      authenticated?: boolean;
+      message?: string;
+      tokenPreview?: string;
+      error?: string;
+    }> => this.post('/api/setup/auth-copilot', {}),
+
+    startCopilotAuth: (): Promise<{
+      success: boolean;
+      deviceCode?: {
+        verificationUri: string;
+        userCode: string;
+        expiresIn: number;
+        deviceCodeId: string;
+        interval: number;
+      };
+      error?: string;
+    }> => this.post('/api/setup/start-copilot-auth', {}),
+
+    pollCopilotAuth: (
+      deviceCodeId: string
+    ): Promise<{
+      success: boolean;
+      status: 'pending' | 'completed' | 'error' | 'expired';
+      authenticated?: boolean;
+      tokenPreview?: string;
+      slowDown?: boolean;
+      error?: string;
+    }> => this.post('/api/setup/poll-copilot-auth', { deviceCodeId }),
+
     onInstallProgress: (callback: (progress: unknown) => void) => {
       return this.subscribeToEvent('agent:stream', callback);
     },
@@ -1187,6 +1243,31 @@ export class HttpApiClient implements ElectronAPI {
     onAuthProgress: (callback: (progress: unknown) => void) => {
       return this.subscribeToEvent('agent:stream', callback);
     },
+  };
+
+  // Local LLM API
+  localLlm = {
+    getStatus: (): Promise<{
+      success: boolean;
+      installed: boolean;
+      authenticated: boolean;
+      hasApiKey: boolean;
+      method: string;
+      error?: string;
+    }> => this.get('/api/local-llm/status'),
+
+    getModels: (): Promise<{
+      success: boolean;
+      models: Array<{
+        id: string;
+        label: string;
+        description: string;
+        provider: string;
+        contextWindow: number;
+      }>;
+      endpoint?: string;
+      error?: string;
+    }> => this.get('/api/local-llm/models'),
   };
 
   // Features API
@@ -1353,6 +1434,8 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/worktree/switch-branch', { worktreePath, branchName }),
     openInEditor: (worktreePath: string) =>
       this.post('/api/worktree/open-in-editor', { worktreePath }),
+    openInExplorer: (worktreePath: string) =>
+      this.post('/api/worktree/open-in-explorer', { worktreePath }),
     getDefaultEditor: () => this.get('/api/worktree/default-editor'),
     initGit: (projectPath: string) => this.post('/api/worktree/init-git', { projectPath }),
     startDevServer: (projectPath: string, worktreePath: string) =>

@@ -19,6 +19,7 @@ import {
 import {
   CLAUDE_MODELS,
   CURSOR_MODELS,
+  COPILOT_MODELS,
   THINKING_LEVELS,
   THINKING_LEVEL_LABELS,
 } from '@/components/views/board-view/shared/model-constants';
@@ -64,6 +65,8 @@ export function PhaseModelSelector({
   align = 'end',
   disabled = false,
 }: PhaseModelSelectorProps) {
+  // Get enabled Copilot models from store
+  const { enabledCopilotModels } = useAppStore();
   const [open, setOpen] = React.useState(false);
   const [expandedGroup, setExpandedGroup] = React.useState<string | null>(null);
   const [expandedClaudeModel, setExpandedClaudeModel] = React.useState<ModelAlias | null>(null);
@@ -199,10 +202,11 @@ export function PhaseModelSelector({
   }, [availableCursorModels, enabledCursorModels]);
 
   // Group models
-  const { favorites, claude, cursor } = React.useMemo(() => {
+  const { favorites, claude, cursor, copilot } = React.useMemo(() => {
     const favs: typeof CLAUDE_MODELS = [];
     const cModels: typeof CLAUDE_MODELS = [];
     const curModels: typeof CURSOR_MODELS = [];
+    const copilotModels: typeof COPILOT_MODELS = [];
 
     // Process Claude Models
     CLAUDE_MODELS.forEach((model) => {
@@ -222,8 +226,74 @@ export function PhaseModelSelector({
       }
     });
 
-    return { favorites: favs, claude: cModels, cursor: curModels };
-  }, [favoriteModels, availableCursorModels]);
+    // Process GitHub Copilot Models - filter by enabled models
+    COPILOT_MODELS.forEach((model) => {
+      // Extract copilot model ID (e.g., "copilot-gpt-4o" -> "gpt-4o")
+      const copilotModelId = stripProviderPrefix(model.id);
+      if (enabledCopilotModels.includes(copilotModelId)) {
+        if (favoriteModels.includes(model.id)) {
+          favs.push(model);
+        } else {
+          copilotModels.push(model);
+        }
+      }
+    });
+
+    return { favorites: favs, claude: cModels, cursor: curModels, copilot: copilotModels };
+  }, [favoriteModels, availableCursorModels, enabledCopilotModels]);
+
+  // Render GitHub Copilot model item (no thinking level needed)
+  const renderCopilotModelItem = (model: (typeof COPILOT_MODELS)[0]) => {
+    const modelValue = stripProviderPrefix(model.id);
+    const isSelected = selectedModel === modelValue;
+    const isFavorite = favoriteModels.includes(model.id);
+
+    return (
+      <CommandItem
+        key={model.id}
+        value={model.label}
+        onSelect={() => {
+          onChange({ model: modelValue as any });
+          setOpen(false);
+        }}
+        className="group flex items-center justify-between py-2"
+      >
+        <div className="flex items-center gap-3 overflow-hidden">
+          <Sparkles
+            className={cn(
+              'h-4 w-4 shrink-0',
+              isSelected ? 'text-primary' : 'text-muted-foreground'
+            )}
+          />
+          <div className="flex flex-col truncate">
+            <span className={cn('truncate font-medium', isSelected && 'text-primary')}>
+              {model.label}
+            </span>
+            {model.description && (
+              <span className="text-xs text-muted-foreground truncate">{model.description}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {isSelected && <Check className="h-4 w-4 text-primary shrink-0" />}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              'h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity',
+              isFavorite && 'opacity-100'
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFavoriteModel(model.id);
+            }}
+          >
+            <Star className={cn('h-3 w-3', isFavorite ? 'fill-amber-400 text-amber-400' : '')} />
+          </Button>
+        </div>
+      </CommandItem>
+    );
+  };
 
   // Render Cursor model item (no thinking level needed)
   const renderCursorModelItem = (model: (typeof CURSOR_MODELS)[0]) => {
@@ -603,6 +673,10 @@ export function PhaseModelSelector({
                       // Standalone Cursor model
                       return renderCursorModelItem(model);
                     }
+                    // GitHub Copilot model
+                    if (model.provider === 'github-copilot') {
+                      return renderCopilotModelItem(model as any);
+                    }
                     // Claude model
                     return renderClaudeModelItem(model);
                   });
@@ -624,6 +698,12 @@ export function PhaseModelSelector({
               {groupedModels.map((group) => renderGroupedModelItem(group))}
               {/* Standalone models */}
               {standaloneCursorModels.map((model) => renderCursorModelItem(model))}
+            </CommandGroup>
+          )}
+
+          {copilot.length > 0 && (
+            <CommandGroup heading="GitHub Copilot Models">
+              {copilot.map((model) => renderCopilotModelItem(model))}
             </CommandGroup>
           )}
         </CommandList>

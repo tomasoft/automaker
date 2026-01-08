@@ -504,6 +504,14 @@ export interface AppState {
   enabledCursorModels: CursorModelId[]; // Which Cursor models are available in feature modal
   cursorDefaultModel: CursorModelId; // Default Cursor model selection
 
+  // GitHub Copilot Settings (global)
+  enabledCopilotModels: string[]; // Which Copilot models user has enabled based on their plan
+
+  // Local LLM Settings (global)
+  enabledLocalLlmModels: string[]; // Which Local LLM models are available in model selector
+  seenLocalLlmModels: string[]; // Track which models we've seen before (to auto-enable only new ones)
+  localLlmDefaultModel: string; // Default Local LLM model selection
+
   // Claude Agent SDK Settings
   autoLoadClaudeMd: boolean; // Auto-load CLAUDE.md files using SDK's settingSources option
   enableSandboxMode: boolean; // Enable sandbox mode for bash commands (may cause issues on some systems)
@@ -802,6 +810,16 @@ export interface AppActions {
   setCursorDefaultModel: (model: CursorModelId) => void;
   toggleCursorModel: (model: CursorModelId, enabled: boolean) => void;
 
+  // GitHub Copilot Settings actions
+  setEnabledCopilotModels: (models: string[]) => void;
+  toggleCopilotModel: (modelId: string, enabled: boolean) => void;
+
+  // Local LLM Settings actions
+  setEnabledLocalLlmModels: (models: string[]) => void;
+  setLocalLlmDefaultModel: (model: string) => void;
+  toggleLocalLlmModel: (modelId: string, enabled: boolean) => void;
+  updateSeenLocalLlmModels: (modelIds: string[]) => void;
+
   // Claude Agent SDK Settings actions
   setAutoLoadClaudeMd: (enabled: boolean) => Promise<void>;
   setEnableSandboxMode: (enabled: boolean) => Promise<void>;
@@ -1012,12 +1030,23 @@ const initialState: AppState = {
   showProfilesOnly: false, // Default to showing all options (not profiles only)
   keyboardShortcuts: DEFAULT_KEYBOARD_SHORTCUTS, // Default keyboard shortcuts
   muteDoneSound: false, // Default to sound enabled (not muted)
-  enhancementModel: 'sonnet', // Default to sonnet for feature enhancement
+  enhancementModel: 'copilot-gpt-4o', // Default to Copilot GPT-4o for feature enhancement
   validationModel: 'opus', // Default to opus for GitHub issue validation
   phaseModels: DEFAULT_PHASE_MODELS, // Phase-specific model configuration
   favoriteModels: [],
   enabledCursorModels: getAllCursorModelIds(), // All Cursor models enabled by default
   cursorDefaultModel: 'auto', // Default to auto selection
+  enabledCopilotModels: [
+    'gpt-4o',
+    'gpt-4o-mini',
+    'claude-sonnet-4',
+    'claude-haiku-4.5',
+    'gpt-5',
+    'gpt-5-mini',
+  ], // Common models enabled by default
+  enabledLocalLlmModels: [], // Empty by default - will be populated dynamically from /v1/models
+  seenLocalLlmModels: [], // Track which models we've seen before (to auto-enable only new ones)
+  localLlmDefaultModel: '', // Empty by default - user must select their preferred model
   autoLoadClaudeMd: false, // Default to disabled (user must opt-in)
   enableSandboxMode: false, // Default to disabled (can be enabled for additional security)
   skipSandboxWarning: false, // Default to disabled (show sandbox warning dialog)
@@ -1700,6 +1729,27 @@ export const useAppStore = create<AppState & AppActions>()(
             ? [...state.enabledCursorModels, model]
             : state.enabledCursorModels.filter((m) => m !== model),
         })),
+
+      // GitHub Copilot Settings actions
+      setEnabledCopilotModels: (models) => set({ enabledCopilotModels: models }),
+      toggleCopilotModel: (modelId, enabled) =>
+        set((state) => ({
+          enabledCopilotModels: enabled
+            ? [...state.enabledCopilotModels, modelId]
+            : state.enabledCopilotModels.filter((m) => m !== modelId),
+        })),
+
+      // Local LLM Settings actions
+      setEnabledLocalLlmModels: (models) => set({ enabledLocalLlmModels: models }),
+      setLocalLlmDefaultModel: (model) => set({ localLlmDefaultModel: model }),
+      toggleLocalLlmModel: (modelId, enabled) =>
+        set((state) => ({
+          enabledLocalLlmModels: enabled
+            ? [...state.enabledLocalLlmModels, modelId]
+            : state.enabledLocalLlmModels.filter((m) => m !== modelId),
+        })),
+
+      updateSeenLocalLlmModels: (modelIds) => set({ seenLocalLlmModels: modelIds }),
 
       // Claude Agent SDK Settings actions
       setAutoLoadClaudeMd: async (enabled) => {
@@ -3004,8 +3054,13 @@ export const useAppStore = create<AppState & AppActions>()(
           enhancementModel: state.enhancementModel,
           validationModel: state.validationModel,
           phaseModels: state.phaseModels,
+          favoriteModels: state.favoriteModels,
           enabledCursorModels: state.enabledCursorModels,
           cursorDefaultModel: state.cursorDefaultModel,
+          enabledCopilotModels: state.enabledCopilotModels,
+          enabledLocalLlmModels: state.enabledLocalLlmModels,
+          seenLocalLlmModels: state.seenLocalLlmModels,
+          localLlmDefaultModel: state.localLlmDefaultModel,
           autoLoadClaudeMd: state.autoLoadClaudeMd,
           enableSandboxMode: state.enableSandboxMode,
           skipSandboxWarning: state.skipSandboxWarning,

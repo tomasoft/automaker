@@ -1893,9 +1893,14 @@ You can use the Read tool to view these images at any time during implementation
 
 Implement this feature by:
 1. First, explore the codebase to understand the existing structure
-2. Plan your implementation approach
-3. Write the necessary code changes
-4. Ensure the code follows existing patterns and conventions
+2. **IMPORTANT**: If creating test files:
+   - First check if package.json exists and has test dependencies (Vitest, Jest, etc.)
+   - If not, create or update package.json with appropriate test framework
+   - Use \`execute_command\` to run \`npm install\` to install dependencies
+   - Create tsconfig.json if needed for TypeScript projects
+3. Plan your implementation approach
+4. Write the necessary code changes
+5. Ensure the code follows existing patterns and conventions
 
 When done, wrap your final summary in <summary> tags like this:
 
@@ -1920,9 +1925,13 @@ This helps parse your summary correctly in the output logs.`;
 
 Implement this feature by:
 1. First, explore the codebase to understand the existing structure
-2. Plan your implementation approach
-3. Write the necessary code changes
-4. Ensure the code follows existing patterns and conventions
+2. **IMPORTANT**: If the project doesn't have package.json or test dependencies:
+   - Create or update package.json with appropriate test framework (Vitest, Jest, Playwright, etc.)
+   - Use \`execute_command\` to run \`npm install\` to install dependencies
+   - Create tsconfig.json if needed for TypeScript projects
+3. Plan your implementation approach
+4. Write the necessary code changes
+5. Ensure the code follows existing patterns and conventions
 
 ## Verification with Playwright (REQUIRED)
 
@@ -2090,8 +2099,11 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
       `runAgent called for feature ${featureId} with model: ${finalModel}, planningMode: ${planningMode}, requiresApproval: ${requiresApproval}`
     );
 
-    // Get provider for this model
-    const provider = ProviderFactory.getProviderForModel(finalModel);
+    // Get provider for this model (with agentic mode for autonomous implementation)
+    const provider = ProviderFactory.getProviderForModel(finalModel, {
+      projectRoot: projectPath,
+      agenticMode: true,
+    });
 
     logger.info(`Using provider "${provider.getName()}" for model "${finalModel}"`);
 
@@ -2208,7 +2220,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
         // Log raw stream event for debugging
         appendRawEvent(msg);
 
-        logger.info(`Stream message received:`, msg.type, msg.subtype || '');
+        logger.debug(`Stream message received:`, msg.type, msg.subtype || '');
         if (msg.type === 'assistant' && msg.message?.content) {
           for (const block of msg.message.content) {
             if (block.type === 'text') {
@@ -2670,7 +2682,7 @@ Implement all the changes described in the plan above.`;
 
               // Only emit progress for non-marker text (marker was already handled above)
               if (!specDetected) {
-                logger.info(
+                logger.debug(
                   `Emitting progress event for ${featureId}, content length: ${block.text?.length || 0}`
                 );
                 this.emitAutoModeEvent('auto_mode_progress', {

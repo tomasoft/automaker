@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createLogger } from '@automaker/utils/logger';
 import {
   Dialog,
@@ -27,6 +27,7 @@ import {
   Sparkles,
   ChevronDown,
   Play,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getElectronAPI } from '@/lib/electron';
@@ -147,6 +148,8 @@ export function AddFeatureDialog({
   >('improve');
   const [planningMode, setPlanningMode] = useState<PlanningMode>('skip');
   const [requirePlanApproval, setRequirePlanApproval] = useState(false);
+  const enhancementAbortRef = useRef<AbortController | null>(null);
+  const enhancementTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Spawn mode state
   const [ancestors, setAncestors] = useState<AncestorContext[]>([]);
@@ -314,10 +317,34 @@ export function AddFeatureDialog({
     }
   };
 
+  const handleCancelEnhancement = () => {
+    if (enhancementAbortRef.current) {
+      enhancementAbortRef.current.abort();
+      enhancementAbortRef.current = null;
+    }
+    if (enhancementTimeoutRef.current) {
+      clearTimeout(enhancementTimeoutRef.current);
+      enhancementTimeoutRef.current = null;
+    }
+    setIsEnhancing(false);
+    toast.info('Enhancement cancelled');
+  };
+
   const handleEnhanceDescription = async () => {
     if (!newFeature.description.trim() || isEnhancing) return;
 
     setIsEnhancing(true);
+
+    // Create abort controller for cancellation
+    const abortController = new AbortController();
+    enhancementAbortRef.current = abortController;
+
+    // Set timeout to auto-cancel after 30 seconds
+    enhancementTimeoutRef.current = setTimeout(() => {
+      handleCancelEnhancement();
+      toast.error('Enhancement timed out after 30 seconds');
+    }, 30000);
+
     try {
       const api = getElectronAPI();
       const result = await api.enhancePrompt?.enhance(
@@ -327,6 +354,12 @@ export function AddFeatureDialog({
         enhancementOverride.effectiveModelEntry.thinkingLevel // Pass thinking level
       );
 
+      // Clear timeout if successful
+      if (enhancementTimeoutRef.current) {
+        clearTimeout(enhancementTimeoutRef.current);
+        enhancementTimeoutRef.current = null;
+      }
+
       if (result?.success && result.enhancedText) {
         const enhancedText = result.enhancedText;
         setNewFeature((prev) => ({ ...prev, description: enhancedText }));
@@ -335,9 +368,21 @@ export function AddFeatureDialog({
         toast.error(result?.error || 'Failed to enhance description');
       }
     } catch (error) {
+      // Clear timeout on error
+      if (enhancementTimeoutRef.current) {
+        clearTimeout(enhancementTimeoutRef.current);
+        enhancementTimeoutRef.current = null;
+      }
+
+      // Don't show error if it was manually cancelled
+      if (error instanceof Error && error.name === 'AbortError') {
+        return;
+      }
+
       logger.error('Enhancement failed:', error);
       toast.error('Failed to enhance description');
     } finally {
+      enhancementAbortRef.current = null;
       setIsEnhancing(false);
     }
   };
@@ -500,17 +545,30 @@ export function AddFeatureDialog({
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleEnhanceDescription}
-                disabled={!newFeature.description.trim() || isEnhancing}
-                loading={isEnhancing}
-              >
-                <Sparkles className="w-4 h-4 mr-2" />
-                Enhance with AI
-              </Button>
+              {isEnhancing ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCancelEnhancement}
+                  className="text-destructive hover:text-destructive"
+                >
+                  <X className="w-4 h-4 mr-2" />
+                  Cancel
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEnhanceDescription}
+                  disabled={!newFeature.description.trim()}
+                  loading={isEnhancing}
+                >
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Enhance with AI
+                </Button>
+              )}
 
               <ModelOverrideTrigger
                 currentModelEntry={enhancementOverride.effectiveModelEntry}

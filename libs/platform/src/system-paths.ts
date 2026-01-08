@@ -247,15 +247,31 @@ export function getWslVersionPath(): string {
  * Extended PATH environment for finding system tools
  */
 export function getExtendedPath(): string {
-  const paths = [
-    process.env.PATH,
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    '/home/linuxbrew/.linuxbrew/bin',
-    `${process.env.HOME}/.local/bin`,
-  ];
+  const isWindows = process.platform === 'win32';
+  const paths = [process.env.PATH];
 
-  return paths.filter(Boolean).join(process.platform === 'win32' ? ';' : ':');
+  if (isWindows) {
+    // Windows: Add common GitHub CLI installation directories
+    if (process.env.LOCALAPPDATA) {
+      paths.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'gh', 'bin'));
+    }
+    if (process.env.ProgramFiles) {
+      paths.push(path.join(process.env.ProgramFiles, 'GitHub CLI'));
+    }
+    if (process.env['ProgramFiles(x86)']) {
+      paths.push(path.join(process.env['ProgramFiles(x86)'], 'GitHub CLI'));
+    }
+  } else {
+    // Unix: Add common bin directories
+    paths.push(
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/home/linuxbrew/.linuxbrew/bin',
+      `${process.env.HOME}/.local/bin`
+    );
+  }
+
+  return paths.filter(Boolean).join(isWindows ? ';' : ':');
 }
 
 // =============================================================================

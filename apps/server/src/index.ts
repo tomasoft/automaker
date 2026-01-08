@@ -64,6 +64,7 @@ import { pipelineService } from './services/pipeline-service.js';
 import { createIdeationRoutes } from './routes/ideation/index.js';
 import { IdeationService } from './services/ideation-service.js';
 import { createCopilotRoutes } from './routes/copilot/index.js';
+import createLocalLLMRoutes from './routes/local-llm/index.js';
 
 // Load environment variables
 dotenv.config();
@@ -224,6 +225,7 @@ app.use('/api/mcp', createMCPRoutes(mcpTestService));
 app.use('/api/pipeline', createPipelineRoutes(pipelineService));
 app.use('/api/ideation', createIdeationRoutes(events, ideationService, featureLoader));
 app.use('/api/copilot', createCopilotRoutes());
+app.use('/api/local-llm', createLocalLLMRoutes);
 
 // Create HTTP server
 const server = createServer(app);
@@ -301,7 +303,7 @@ wss.on('connection', (ws: WebSocket) => {
 
   // Subscribe to all events and forward to this client
   const unsubscribe = events.subscribe((type, payload) => {
-    logger.info('Event received:', {
+    logger.debug('Event received:', {
       type,
       hasPayload: !!payload,
       payloadKeys: payload ? Object.keys(payload) : [],
@@ -311,14 +313,14 @@ wss.on('connection', (ws: WebSocket) => {
 
     if (ws.readyState === WebSocket.OPEN) {
       const message = JSON.stringify({ type, payload });
-      logger.info('Sending event to client:', {
+      logger.debug('Sending event to client:', {
         type,
         messageLength: message.length,
         sessionId: (payload as any)?.sessionId,
       });
       ws.send(message);
     } else {
-      logger.info('WARNING: Cannot send event, WebSocket not open. ReadyState:', ws.readyState);
+      logger.warn('Cannot send event, WebSocket not open. ReadyState:', ws.readyState);
     }
   });
 

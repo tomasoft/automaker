@@ -182,8 +182,8 @@ export function NewProjectModal({
 
   const handleBrowseDirectory = async () => {
     const selectedPath = await openFileBrowser({
-      title: 'Select Base Project Directory',
-      description: 'Choose the parent directory where your project will be created',
+      title: 'Select Parent Directory',
+      description: 'Choose an existing directory where your new project folder will be created',
       initialPath: workspaceDir || undefined,
     });
     if (selectedPath) {

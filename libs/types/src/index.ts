@@ -151,6 +151,7 @@ export {
   isCursorModel,
   isClaudeModel,
   isGitHubCopilotModel,
+  isLocalLLMModel,
   getModelProvider,
   stripProviderPrefix,
   addProviderPrefix,

@@ -1587,6 +1587,16 @@ function createMockWorktreeAPI(): WorktreeAPI {
       };
     },
 
+    openInExplorer: async (worktreePath: string) => {
+      console.log('[Mock] Opening in explorer:', worktreePath);
+      return {
+        success: true,
+        result: {
+          message: `Opened ${worktreePath} in File Explorer`,
+        },
+      };
+    },
+
     getDefaultEditor: async () => {
       console.log('[Mock] Getting default editor');
       return {

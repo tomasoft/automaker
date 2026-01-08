@@ -21,6 +21,7 @@ import {
   MessageSquare,
   GitMerge,
   AlertCircle,
+  FolderOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { WorktreeInfo, DevServerInfo, PRInfo, GitRepoStatus } from '../types';
@@ -42,6 +43,7 @@ interface WorktreeActionsDropdownProps {
   onPull: (worktree: WorktreeInfo) => void;
   onPush: (worktree: WorktreeInfo) => void;
   onOpenInEditor: (worktree: WorktreeInfo) => void;
+  onOpenInExplorer: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
   onAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;
@@ -68,6 +70,7 @@ export function WorktreeActionsDropdown({
   onPull,
   onPush,
   onOpenInEditor,
+  onOpenInExplorer,
   onCommit,
   onCreatePR,
   onAddressPRComments,
@@ -203,6 +206,10 @@ export function WorktreeActionsDropdown({
         <DropdownMenuItem onClick={() => onOpenInEditor(worktree)} className="text-xs">
           <ExternalLink className="w-3.5 h-3.5 mr-2" />
           Open in {defaultEditorName}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onOpenInExplorer(worktree)} className="text-xs">
+          <FolderOpen className="w-3.5 h-3.5 mr-2" />
+          Open in Explorer
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {worktree.hasChanges && (

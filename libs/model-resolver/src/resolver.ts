@@ -3,7 +3,8 @@
  *
  * Provides centralized model resolution logic:
  * - Maps Claude model aliases to full model strings
- * - Passes through Cursor models unchanged (handled by CursorProvider)
+ * - Adds copilot- prefix to GitHub Copilot models for provider routing
+ * - Adds cursor- prefix to Cursor models for provider routing
  * - Provides default models per provider
  * - Handles multiple model sources with priority
  */
@@ -14,6 +15,7 @@ import {
   DEFAULT_MODELS,
   PROVIDER_PREFIXES,
   isCursorModel,
+  isGitHubCopilotModel,
   stripProviderPrefix,
   type PhaseModelEntry,
   type ThinkingLevel,
@@ -22,9 +24,9 @@ import {
 /**
  * Resolve a model key/alias to a full model string
  *
- * @param modelKey - Model key (e.g., "opus", "cursor-composer-1", "claude-sonnet-4-20250514")
+ * @param modelKey - Model key (e.g., "opus", "gpt-4o", "cursor-composer-1", "claude-sonnet-4-20250514")
  * @param defaultModel - Fallback model if modelKey is undefined
- * @returns Full model string
+ * @returns Full model string with provider prefix if applicable
  */
 export function resolveModelString(
   modelKey?: string,
@@ -56,7 +58,30 @@ export function resolveModelString(
     return modelKey;
   }
 
-  // Check if it's a bare Cursor model ID (e.g., "composer-1", "auto", "gpt-4o")
+  // GitHub Copilot model with explicit prefix (e.g., "copilot-gpt-4o") - pass through unchanged
+  if (modelKey.startsWith(PROVIDER_PREFIXES['github-copilot'])) {
+    console.log(`[ModelResolver] Using Copilot model with prefix: ${modelKey}`);
+    return modelKey;
+  }
+
+  // Local LLM model with explicit prefix (e.g., "local-qwen2.5-coder-32b") - pass through unchanged
+  if (modelKey.startsWith(PROVIDER_PREFIXES['local-llm'])) {
+    console.log(`[ModelResolver] Using Local LLM model with prefix: ${modelKey}`);
+    return modelKey;
+  }
+
+  // Check if it's a bare Copilot model ID (e.g., "gpt-4o", "gpt-4o-mini", "claude-sonnet-4")
+  // isGitHubCopilotModel checks for common OpenAI/Copilot model names
+  if (isGitHubCopilotModel(modelKey)) {
+    // Return with copilot- prefix so provider routing works correctly
+    const prefixedModel = `${PROVIDER_PREFIXES['github-copilot']}${modelKey}`;
+    console.log(
+      `[ModelResolver] Detected bare Copilot model ID: "${modelKey}" -> "${prefixedModel}"`
+    );
+    return prefixedModel;
+  }
+
+  // Check if it's a bare Cursor model ID (e.g., "composer-1", "auto")
   if (modelKey in CURSOR_MODEL_MAP) {
     // Return with cursor- prefix so provider routing works correctly
     const prefixedModel = `${PROVIDER_PREFIXES.cursor}${modelKey}`;

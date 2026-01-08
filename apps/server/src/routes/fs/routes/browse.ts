@@ -85,6 +85,7 @@ export function createBrowseHandler() {
         // Handle permission errors gracefully - still return path info so user can navigate away
         const errorMessage = error instanceof Error ? error.message : 'Failed to read directory';
         const isPermissionError = errorMessage.includes('EPERM') || errorMessage.includes('EACCES');
+        const isNotFound = errorMessage.includes('ENOENT');
 
         if (isPermissionError) {
           // Return success with empty directories so user can still navigate to parent
@@ -96,6 +97,23 @@ export function createBrowseHandler() {
             drives,
             warning:
               'Permission denied - grant Full Disk Access to Terminal in System Preferences > Privacy & Security',
+          });
+        } else if (isNotFound) {
+          // Check if parent directory exists
+          let helperMessage = `Directory does not exist: ${targetPath}`;
+          try {
+            const parentStats = await secureFs.stat(parentPath);
+            if (parentStats.isDirectory()) {
+              helperMessage = `Directory "${path.basename(targetPath)}" does not exist. Please select an existing directory or navigate to "${parentPath}" first.`;
+            }
+          } catch {
+            // Parent also doesn't exist
+            helperMessage = `Path does not exist: ${targetPath}. Please select an existing directory.`;
+          }
+
+          res.status(400).json({
+            success: false,
+            error: helperMessage,
           });
         } else {
           res.status(400).json({

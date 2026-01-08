@@ -12,6 +12,7 @@ import { resolveModelString } from '@automaker/model-resolver';
 import {
   CLAUDE_MODEL_MAP,
   isCursorModel,
+  isGitHubCopilotModel,
   ThinkingLevel,
   getThinkingTokenBudget,
 } from '@automaker/types';
@@ -73,30 +74,40 @@ async function extractTextFromStream(
   }>
 ): Promise<string> {
   let responseText = '';
+  let messageCount = 0;
 
-  for await (const msg of stream) {
-    if (msg.type === 'assistant' && msg.message?.content) {
-      for (const block of msg.message.content) {
-        if (block.type === 'text' && block.text) {
-          responseText += block.text;
+  try {
+    for await (const msg of stream) {
+      messageCount++;
+      logger.debug(`[EnhancePrompt] Received message ${messageCount}, type: ${msg.type}`);
+
+      if (msg.type === 'assistant' && msg.message?.content) {
+        for (const block of msg.message.content) {
+          if (block.type === 'text' && block.text) {
+            responseText += block.text;
+          }
         }
+      } else if (msg.type === 'result' && msg.subtype === 'success') {
+        responseText = msg.result || responseText;
       }
-    } else if (msg.type === 'result' && msg.subtype === 'success') {
-      responseText = msg.result || responseText;
     }
+    logger.debug(`[EnhancePrompt] Stream completed after ${messageCount} messages`);
+  } catch (error) {
+    logger.error(`[EnhancePrompt] Error in stream extraction:`, error);
+    throw error;
   }
 
   return responseText;
 }
 
 /**
- * Execute enhancement using Cursor provider
+ * Execute enhancement using generic provider (Cursor, GitHub Copilot, etc.)
  *
  * @param prompt - The enhancement prompt
- * @param model - The Cursor model to use
+ * @param model - The model to use
  * @returns The enhanced text
  */
-async function executeWithCursor(prompt: string, model: string): Promise<string> {
+async function executeWithProvider(prompt: string, model: string): Promise<string> {
   const provider = ProviderFactory.getProviderForModel(model);
 
   let responseText = '';
@@ -202,13 +213,14 @@ export function createEnhanceHandler(
       let enhancedText: string;
 
       // Route to appropriate provider based on model
-      if (isCursorModel(resolvedModel)) {
-        // Use Cursor provider for Cursor models
-        logger.info(`Using Cursor provider for model: ${resolvedModel}`);
+      if (isCursorModel(resolvedModel) || isGitHubCopilotModel(resolvedModel)) {
+        // Use provider for Cursor or GitHub Copilot models
+        const providerName = isCursorModel(resolvedModel) ? 'Cursor' : 'GitHub Copilot';
+        logger.info(`Using ${providerName} provider for model: ${resolvedModel}`);
 
-        // Cursor doesn't have a separate system prompt concept, so combine them
+        // These providers don't have a separate system prompt concept, so combine them
         const combinedPrompt = `${systemPrompt}\n\n${userPrompt}`;
-        enhancedText = await executeWithCursor(combinedPrompt, resolvedModel);
+        enhancedText = await executeWithProvider(combinedPrompt, resolvedModel);
       } else {
         // Use Claude SDK for Claude models
         logger.info(`Using Claude provider for model: ${resolvedModel}`);
@@ -226,12 +238,15 @@ export function createEnhanceHandler(
           queryOptions.maxThinkingTokens = maxThinkingTokens;
         }
 
+        logger.debug('[EnhancePrompt] Starting Claude SDK query...');
         const stream = query({
           prompt: userPrompt,
           options: queryOptions,
         });
 
+        logger.debug('[EnhancePrompt] Extracting text from stream...');
         enhancedText = await extractTextFromStream(stream);
+        logger.debug('[EnhancePrompt] Stream extraction complete');
       }
 
       if (!enhancedText || enhancedText.trim().length === 0) {

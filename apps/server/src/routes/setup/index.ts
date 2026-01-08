@@ -13,6 +13,10 @@ import { createPlatformHandler } from './routes/platform.js';
 import { createVerifyClaudeAuthHandler } from './routes/verify-claude-auth.js';
 import { createGhStatusHandler } from './routes/gh-status.js';
 import { createCursorStatusHandler } from './routes/cursor-status.js';
+import { createCopilotStatusHandler } from './routes/copilot-status.js';
+import { createAuthCopilotHandler } from './routes/auth-copilot.js';
+import { createStartCopilotAuthHandler } from './routes/start-copilot-auth.js';
+import { createPollCopilotAuthHandler } from './routes/poll-copilot-auth.js';
 import {
   createGetCursorConfigHandler,
   createSetCursorDefaultModelHandler,
@@ -36,6 +40,12 @@ export function createSetupRoutes(): Router {
   router.get('/platform', createPlatformHandler());
   router.post('/verify-claude-auth', createVerifyClaudeAuthHandler());
   router.get('/gh-status', createGhStatusHandler());
+
+  // GitHub Copilot routes
+  router.get('/copilot-status', createCopilotStatusHandler());
+  router.post('/auth-copilot', createAuthCopilotHandler()); // Legacy - kept for compatibility
+  router.post('/start-copilot-auth', createStartCopilotAuthHandler());
+  router.post('/poll-copilot-auth', createPollCopilotAuthHandler());
 
   // Cursor CLI routes
   router.get('/cursor-status', createCursorStatusHandler());

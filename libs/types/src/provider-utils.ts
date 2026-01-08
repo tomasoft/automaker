@@ -14,6 +14,7 @@ import { CLAUDE_MODEL_MAP } from './model.js';
 export const PROVIDER_PREFIXES = {
   cursor: 'cursor-',
   'github-copilot': 'copilot-',
+  'local-llm': 'local-',
   // Add new provider prefixes here
 } as const;
 
@@ -56,7 +57,7 @@ export function isClaudeModel(model: string | undefined | null): boolean {
 /**
  * Check if a model string represents a GitHub Copilot model
  *
- * @param model - Model string to check (e.g., "gpt-4o", "copilot-gpt-4o")
+ * @param model - Model string to check (e.g., "gpt-4o", "copilot-gpt-4o", "claude-sonnet-4")
  * @returns true if the model is a GitHub Copilot model
  */
 export function isGitHubCopilotModel(model: string | undefined | null): boolean {
@@ -67,9 +68,62 @@ export function isGitHubCopilotModel(model: string | undefined | null): boolean 
     return true;
   }
 
-  // Check for common OpenAI/Copilot model names
-  const copilotModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo', 'o1-preview', 'o1-mini'];
-  return copilotModels.some(m => model === m || model.startsWith(m));
+  // Check for OpenAI models (available through Copilot)
+  const openAIModels = [
+    'gpt-4o',
+    'gpt-4.1',
+    'gpt-5',
+    'gpt-4-turbo',
+    'gpt-3.5-turbo',
+    'o1-preview',
+    'o1-mini',
+  ];
+  if (openAIModels.some((m) => model === m || model.startsWith(`${m}-`))) {
+    return true;
+  }
+
+  // Check for Claude models (available through Copilot) - use exact prefixes to avoid collision with Claude SDK
+  // These are Copilot-specific Claude model IDs, different from direct Claude API
+  const copilotClaudeModels = [
+    'claude-sonnet-4',
+    'claude-haiku-4.5',
+    'claude-opus-4.1',
+    'claude-opus-4.5',
+  ];
+  if (copilotClaudeModels.some((m) => model === m || model.startsWith(`${m}-`))) {
+    return true;
+  }
+
+  // Check for Google models (available through Copilot)
+  const googleModels = ['gemini-2.5-pro', 'gemini-3-flash', 'gemini-3-pro'];
+  if (googleModels.some((m) => model === m || model.startsWith(`${m}-`))) {
+    return true;
+  }
+
+  // Check for other Copilot models
+  const otherCopilotModels = ['grok-code-fast-1', 'raptor-mini'];
+  if (otherCopilotModels.some((m) => model === m || model.startsWith(`${m}-`))) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a model string represents a Local LLM model
+ *
+ * @param model - Model string to check (e.g., "local-qwen2.5-coder-32b", "qwen2.5-coder")
+ * @returns true if the model is a Local LLM model
+ */
+export function isLocalLLMModel(model: string | undefined | null): boolean {
+  if (!model || typeof model !== 'string') return false;
+
+  // Check for explicit local- prefix
+  if (model.startsWith(PROVIDER_PREFIXES['local-llm'])) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -79,6 +133,9 @@ export function isGitHubCopilotModel(model: string | undefined | null): boolean 
  * @returns The provider type, defaults to 'claude' for unknown models
  */
 export function getModelProvider(model: string | undefined | null): ModelProvider {
+  if (isLocalLLMModel(model)) {
+    return 'local-llm';
+  }
   if (isCursorModel(model)) {
     return 'cursor';
   }
@@ -121,6 +178,7 @@ export function stripProviderPrefix(model: string): string {
  * addProviderPrefix('cursor-composer-1', 'cursor') // 'cursor-composer-1' (no change)
  * addProviderPrefix('sonnet', 'claude') // 'sonnet' (Claude doesn't use prefix)
  * addProviderPrefix('gpt-4o', 'github-copilot') // 'copilot-gpt-4o'
+ * addProviderPrefix('qwen2.5-coder-32b', 'local-llm') // 'local-qwen2.5-coder-32b'
  */
 export function addProviderPrefix(model: string, provider: ModelProvider): string {
   if (!model || typeof model !== 'string') return model;
@@ -130,13 +188,19 @@ export function addProviderPrefix(model: string, provider: ModelProvider): strin
       return `${PROVIDER_PREFIXES.cursor}${model}`;
     }
   }
-  
+
   if (provider === 'github-copilot') {
     if (!model.startsWith(PROVIDER_PREFIXES['github-copilot'])) {
       return `${PROVIDER_PREFIXES['github-copilot']}${model}`;
     }
   }
-  
+
+  if (provider === 'local-llm') {
+    if (!model.startsWith(PROVIDER_PREFIXES['local-llm'])) {
+      return `${PROVIDER_PREFIXES['local-llm']}${model}`;
+    }
+  }
+
   // Claude models don't use prefixes
   return model;
 }
