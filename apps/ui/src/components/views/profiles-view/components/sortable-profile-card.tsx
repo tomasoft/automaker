@@ -1,11 +1,12 @@
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { GripVertical, Lock, Pencil, Trash2, Brain, Bot, Terminal } from 'lucide-react';
+import { GripVertical, Lock, Pencil, Trash2 } from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { AIProfile } from '@automaker/types';
-import { CURSOR_MODEL_MAP, profileHasThinking } from '@automaker/types';
+import { CURSOR_MODEL_MAP, profileHasThinking, getCodexModelLabel } from '@automaker/types';
 import { PROFILE_ICONS } from '../constants';
+import { AnthropicIcon, CursorIcon, OpenAIIcon } from '@/components/ui/provider-icon';
 
 interface SortableProfileCardProps {
   profile: AIProfile;
@@ -24,7 +25,13 @@ export function SortableProfileCard({ profile, onEdit, onDelete }: SortableProfi
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const IconComponent = profile.icon ? PROFILE_ICONS[profile.icon] : Brain;
+  const getDefaultIcon = () => {
+    if (profile.provider === 'cursor') return CursorIcon;
+    if (profile.provider === 'codex') return OpenAIIcon;
+    return AnthropicIcon;
+  };
+
+  const IconComponent = profile.icon ? PROFILE_ICONS[profile.icon] : getDefaultIcon();
 
   return (
     <div
@@ -72,11 +79,17 @@ export function SortableProfileCard({ profile, onEdit, onDelete }: SortableProfi
           {/* Provider badge */}
           <span className="text-xs px-2 py-0.5 rounded-full border border-border text-muted-foreground bg-muted/50 flex items-center gap-1">
             {profile.provider === 'cursor' ? (
-              <Terminal className="w-3 h-3" />
+              <CursorIcon className="w-3 h-3" />
+            ) : profile.provider === 'codex' ? (
+              <OpenAIIcon className="w-3 h-3" />
             ) : (
-              <Bot className="w-3 h-3" />
+              <AnthropicIcon className="w-3 h-3" />
             )}
-            {profile.provider === 'cursor' ? 'Cursor' : 'Claude'}
+            {profile.provider === 'cursor'
+              ? 'Cursor'
+              : profile.provider === 'codex'
+                ? 'Codex'
+                : 'Claude'}
           </span>
 
           {/* Model badge */}
@@ -85,7 +98,9 @@ export function SortableProfileCard({ profile, onEdit, onDelete }: SortableProfi
               ? CURSOR_MODEL_MAP[profile.cursorModel || 'auto']?.label ||
                 profile.cursorModel ||
                 'auto'
-              : profile.model || 'sonnet'}
+              : profile.provider === 'codex'
+                ? getCodexModelLabel(profile.codexModel || 'gpt-5.2-codex')
+                : profile.model || 'sonnet'}
           </span>
 
           {/* Thinking badge - works for both providers */}

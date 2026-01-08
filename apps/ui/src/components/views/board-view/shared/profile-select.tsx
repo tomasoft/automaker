@@ -8,7 +8,12 @@ import {
 import { Brain, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ModelAlias, ThinkingLevel, AIProfile, CursorModelId } from '@automaker/types';
-import { CURSOR_MODEL_MAP, profileHasThinking, PROVIDER_PREFIXES } from '@automaker/types';
+import {
+  CURSOR_MODEL_MAP,
+  profileHasThinking,
+  PROVIDER_PREFIXES,
+  getCodexModelLabel,
+} from '@automaker/types';
 import { PROFILE_ICONS } from './model-constants';
 
 /**
@@ -20,6 +25,9 @@ function getProfileModelDisplay(profile: AIProfile): string {
     const modelConfig = CURSOR_MODEL_MAP[cursorModel];
     return modelConfig?.label || cursorModel;
   }
+  if (profile.provider === 'codex') {
+    return getCodexModelLabel(profile.codexModel || 'gpt-5.2-codex');
+  }
   // Claude
   return profile.model || 'sonnet';
 }
@@ -30,6 +38,10 @@ function getProfileModelDisplay(profile: AIProfile): string {
 function getProfileThinkingDisplay(profile: AIProfile): string | null {
   if (profile.provider === 'cursor') {
     // For Cursor, thinking is embedded in the model
+    return profileHasThinking(profile) ? 'thinking' : null;
+  }
+  if (profile.provider === 'codex') {
+    // For Codex, thinking is embedded in the model
     return profileHasThinking(profile) ? 'thinking' : null;
   }
   // Claude

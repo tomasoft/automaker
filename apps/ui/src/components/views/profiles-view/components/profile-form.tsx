@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { HotkeyButton } from '@/components/ui/hotkey-button';
 import { Input } from '@/components/ui/input';
@@ -53,15 +53,33 @@ export function ProfileForm({
     icon: profile.icon || 'Brain',
   });
 
+  // Sync formData with profile prop when it changes
+  useEffect(() => {
+    setFormData({
+      name: profile.name || '',
+      description: profile.description || '',
+      provider: (profile.provider || 'claude') as ModelProvider,
+      // Claude-specific
+      model: profile.model || ('sonnet' as ModelAlias),
+      thinkingLevel: profile.thinkingLevel || ('none' as ThinkingLevel),
+      // Cursor-specific
+      cursorModel: profile.cursorModel || ('auto' as CursorModelId),
+      // Codex-specific - use a valid CodexModelId from CODEX_MODEL_MAP
+      codexModel: profile.codexModel || (CODEX_MODEL_MAP.gpt52Codex as CodexModelId),
+      icon: profile.icon || 'Brain',
+    });
+  }, [profile]);
+
   const supportsThinking = formData.provider === 'claude' && modelSupportsThinking(formData.model);
 
   const handleProviderChange = (provider: ModelProvider) => {
     setFormData({
       ...formData,
       provider,
-      // Reset to defaults when switching providers
+      // Only reset Claude fields when switching TO Claude; preserve otherwise
       model: provider === 'claude' ? 'sonnet' : formData.model,
       thinkingLevel: provider === 'claude' ? 'none' : formData.thinkingLevel,
+      // Reset cursor/codex models when switching to that provider
       cursorModel: provider === 'cursor' ? 'auto' : formData.cursorModel,
       codexModel:
         provider === 'codex' ? (CODEX_MODEL_MAP.gpt52Codex as CodexModelId) : formData.codexModel,
@@ -95,6 +113,15 @@ export function ProfileForm({
       return;
     }
 
+    // Ensure model is always set for Claude profiles
+    const validModels: ModelAlias[] = ['haiku', 'sonnet', 'opus'];
+    const finalModel =
+      formData.provider === 'claude'
+        ? validModels.includes(formData.model)
+          ? formData.model
+          : 'sonnet'
+        : undefined;
+
     const baseProfile = {
       name: formData.name.trim(),
       description: formData.description.trim(),
@@ -116,7 +143,7 @@ export function ProfileForm({
     } else {
       onSave({
         ...baseProfile,
-        model: formData.model,
+        model: finalModel as ModelAlias,
         thinkingLevel: supportsThinking ? formData.thinkingLevel : 'none',
       });
     }

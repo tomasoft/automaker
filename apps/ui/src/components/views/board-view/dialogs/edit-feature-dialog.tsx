@@ -256,11 +256,23 @@ export function EditFeatureDialog({
         thinkingLevel: 'none', // Cursor handles thinking internally
       });
     } else {
-      // Claude profile
+      // Claude profile - ensure model is always set from profile
+      const profileModel = profile.model;
+      if (!profileModel || !['haiku', 'sonnet', 'opus'].includes(profileModel)) {
+        console.warn(
+          `[ProfileSelect] Invalid or missing model "${profileModel}" for profile "${profile.name}", defaulting to sonnet`
+        );
+      }
       setEditingFeature({
         ...editingFeature,
-        model: profile.model || 'sonnet',
-        thinkingLevel: profile.thinkingLevel || 'none',
+        model:
+          profileModel && ['haiku', 'sonnet', 'opus'].includes(profileModel)
+            ? profileModel
+            : 'sonnet',
+        thinkingLevel:
+          profile.thinkingLevel && profile.thinkingLevel !== 'none'
+            ? profile.thinkingLevel
+            : 'none',
       });
     }
   };

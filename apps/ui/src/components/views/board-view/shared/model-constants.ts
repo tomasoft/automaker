@@ -2,6 +2,7 @@ import type { ModelAlias } from '@/store/app-store';
 import type { ModelProvider, ThinkingLevel, ReasoningEffort } from '@automaker/types';
 import { CURSOR_MODEL_MAP, CODEX_MODEL_MAP } from '@automaker/types';
 import { Brain, Zap, Scale, Cpu, Rocket, Sparkles } from 'lucide-react';
+import { AnthropicIcon, CursorIcon, OpenAIIcon } from '@/components/ui/provider-icon';
 
 export type ModelOption = {
   id: string; // Claude models use ModelAlias, Cursor models use "cursor-{id}"
@@ -142,4 +143,7 @@ export const PROFILE_ICONS: Record<string, React.ComponentType<{ className?: str
   Cpu,
   Rocket,
   Sparkles,
+  Anthropic: AnthropicIcon,
+  Cursor: CursorIcon,
+  Codex: OpenAIIcon,
 };
