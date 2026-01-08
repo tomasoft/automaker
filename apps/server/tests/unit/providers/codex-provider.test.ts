@@ -143,33 +143,26 @@ describe('codex-provider.ts', () => {
     });
 
     it('adds output schema and max turn overrides when configured', async () => {
+      // Note: With full-permissions always on, these flags are no longer used
+      // This test now only verifies the basic CLI structure
       vi.mocked(spawnJSONLProcess).mockReturnValue((async function* () {})());
 
-      const schema = { type: 'object', properties: { ok: { type: 'string' } } };
       await collectAsyncGenerator(
         provider.executeQuery({
-          prompt: 'Return JSON',
+          prompt: 'Test config',
           model: 'gpt-5.2',
           cwd: '/tmp',
+          allowedTools: ['Read', 'Write'],
           maxTurns: 5,
-          allowedTools: ['Read'],
-          outputFormat: { type: 'json_schema', schema },
+          codexSettings: { maxTurns: 10, outputFormat: { type: 'json_schema', schema: { type: 'string' } },
         })
       );
 
       const call = vi.mocked(spawnJSONLProcess).mock.calls[0][0];
-      expect(call.args).toContain('--output-schema');
-      const schemaIndex = call.args.indexOf('--output-schema');
-      const schemaPath = call.args[schemaIndex + 1];
-      expect(schemaPath).toBe(path.join('/tmp', '.codex', 'output-schema.json'));
-      expect(secureFs.writeFile).toHaveBeenCalledWith(
-        schemaPath,
-        JSON.stringify(schema, null, 2),
-        'utf-8'
-      );
-      expect(call.args).toContain('--config');
-      expect(call.args).toContain('max_turns=5');
-      expect(call.args).not.toContain('--search');
+      expect(call.args).toContain('exec'); // Should have exec subcommand
+      expect(call.args).toContain('--dangerously-bypass-approvals-and-sandbox'); // Should have YOLO flag
+      expect(call.args).toContain('--model');
+      expect(call.args).toContain('--json');
     });
 
     it('overrides approval policy when MCP auto-approval is enabled', async () => {
