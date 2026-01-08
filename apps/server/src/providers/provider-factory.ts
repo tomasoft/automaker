@@ -165,6 +165,7 @@ export class ProviderFactory {
 // Import providers for registration side-effects
 import { ClaudeProvider } from './claude-provider.js';
 import { CursorProvider } from './cursor-provider.js';
+import { GitHubCopilotProvider } from './github-copilot-provider.js';
 
 // Register Claude provider
 registerProvider('claude', {
@@ -183,4 +184,22 @@ registerProvider('cursor', {
   factory: () => new CursorProvider(),
   canHandleModel: (model: string) => isCursorModel(model),
   priority: 10, // Higher priority - check Cursor models first
+});
+
+// Register GitHub Copilot provider
+registerProvider('github-copilot', {
+  factory: () => new GitHubCopilotProvider(),
+  aliases: ['copilot', 'gh-copilot'],
+  canHandleModel: (model: string) => {
+    // Check for copilot- prefix
+    if (model.startsWith('copilot-')) return true;
+    
+    // Check for common OpenAI/Copilot model patterns
+    const copilotPatterns = [
+      'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 
+      'gpt-3.5-turbo', 'o1-preview', 'o1-mini'
+    ];
+    return copilotPatterns.some(pattern => model === pattern || model.startsWith(pattern));
+  },
+  priority: 5, // Medium priority - check after Cursor but before Claude
 });

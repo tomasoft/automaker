@@ -25,5 +25,9 @@ export { ClaudeProvider } from './claude-provider.js';
 export { CursorProvider, CursorErrorCode, CursorError } from './cursor-provider.js';
 export { CursorConfigManager } from './cursor-config-manager.js';
 
+// GitHub Copilot provider
+export { GitHubCopilotProvider } from './github-copilot-provider.js';
+export { CopilotAuthManager } from './copilot-auth.js';
+
 // Provider factory
 export { ProviderFactory } from './provider-factory.js';

@@ -95,7 +95,7 @@ export function getThinkingTokenBudget(level: ThinkingLevel | undefined): number
 }
 
 /** ModelProvider - AI model provider for credentials and API key management */
-export type ModelProvider = 'claude' | 'cursor';
+export type ModelProvider = 'claude' | 'cursor' | 'github-copilot';
 
 /**
  * PhaseModelEntry - Configuration for a single phase model

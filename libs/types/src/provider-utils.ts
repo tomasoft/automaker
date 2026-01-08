@@ -13,6 +13,7 @@ import { CLAUDE_MODEL_MAP } from './model.js';
 /** Provider prefix constants */
 export const PROVIDER_PREFIXES = {
   cursor: 'cursor-',
+  'github-copilot': 'copilot-',
   // Add new provider prefixes here
 } as const;
 
@@ -53,6 +54,25 @@ export function isClaudeModel(model: string | undefined | null): boolean {
 }
 
 /**
+ * Check if a model string represents a GitHub Copilot model
+ *
+ * @param model - Model string to check (e.g., "gpt-4o", "copilot-gpt-4o")
+ * @returns true if the model is a GitHub Copilot model
+ */
+export function isGitHubCopilotModel(model: string | undefined | null): boolean {
+  if (!model || typeof model !== 'string') return false;
+
+  // Check for explicit copilot- prefix
+  if (model.startsWith(PROVIDER_PREFIXES['github-copilot'])) {
+    return true;
+  }
+
+  // Check for common OpenAI/Copilot model names
+  const copilotModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo', 'o1-preview', 'o1-mini'];
+  return copilotModels.some(m => model === m || model.startsWith(m));
+}
+
+/**
  * Get the provider for a model string
  *
  * @param model - Model string to check
@@ -61,6 +81,9 @@ export function isClaudeModel(model: string | undefined | null): boolean {
 export function getModelProvider(model: string | undefined | null): ModelProvider {
   if (isCursorModel(model)) {
     return 'cursor';
+  }
+  if (isGitHubCopilotModel(model)) {
+    return 'github-copilot';
   }
   return 'claude';
 }
@@ -97,6 +120,7 @@ export function stripProviderPrefix(model: string): string {
  * addProviderPrefix('composer-1', 'cursor') // 'cursor-composer-1'
  * addProviderPrefix('cursor-composer-1', 'cursor') // 'cursor-composer-1' (no change)
  * addProviderPrefix('sonnet', 'claude') // 'sonnet' (Claude doesn't use prefix)
+ * addProviderPrefix('gpt-4o', 'github-copilot') // 'copilot-gpt-4o'
  */
 export function addProviderPrefix(model: string, provider: ModelProvider): string {
   if (!model || typeof model !== 'string') return model;
@@ -106,6 +130,13 @@ export function addProviderPrefix(model: string, provider: ModelProvider): strin
       return `${PROVIDER_PREFIXES.cursor}${model}`;
     }
   }
+  
+  if (provider === 'github-copilot') {
+    if (!model.startsWith(PROVIDER_PREFIXES['github-copilot'])) {
+      return `${PROVIDER_PREFIXES['github-copilot']}${model}`;
+    }
+  }
+  
   // Claude models don't use prefixes
   return model;
 }

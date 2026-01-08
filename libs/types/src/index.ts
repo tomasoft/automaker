@@ -150,6 +150,7 @@ export {
   PROVIDER_PREFIXES,
   isCursorModel,
   isClaudeModel,
+  isGitHubCopilotModel,
   getModelProvider,
   stripProviderPrefix,
   addProviderPrefix,
