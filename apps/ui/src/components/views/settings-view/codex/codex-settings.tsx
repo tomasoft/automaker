@@ -1,110 +1,37 @@
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { FileCode, ShieldCheck, Globe, ImageIcon } from 'lucide-react';
+import { FileCode, Globe, ImageIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import type { CodexApprovalPolicy, CodexSandboxMode } from '@automaker/types';
 import { OpenAIIcon } from '@/components/ui/provider-icon';
 
 interface CodexSettingsProps {
   autoLoadCodexAgents: boolean;
-  codexSandboxMode: CodexSandboxMode;
-  codexApprovalPolicy: CodexApprovalPolicy;
   codexEnableWebSearch: boolean;
   codexEnableImages: boolean;
   onAutoLoadCodexAgentsChange: (enabled: boolean) => void;
-  onCodexSandboxModeChange: (mode: CodexSandboxMode) => void;
-  onCodexApprovalPolicyChange: (policy: CodexApprovalPolicy) => void;
   onCodexEnableWebSearchChange: (enabled: boolean) => void;
   onCodexEnableImagesChange: (enabled: boolean) => void;
 }
 
 const CARD_TITLE = 'Codex CLI Settings';
-const CARD_SUBTITLE = 'Configure Codex instructions, capabilities, and execution safety defaults.';
+const CARD_SUBTITLE = 'Configure Codex instructions and capabilities.';
 const AGENTS_TITLE = 'Auto-load AGENTS.md Instructions';
 const AGENTS_DESCRIPTION = 'Automatically inject project instructions from';
 const AGENTS_PATH = '.codex/AGENTS.md';
 const AGENTS_SUFFIX = 'on each Codex run.';
 const WEB_SEARCH_TITLE = 'Enable Web Search';
-const WEB_SEARCH_DESCRIPTION =
-  'Allow Codex to search the web for current information using --search flag.';
+const WEB_SEARCH_DESCRIPTION = 'Allow Codex to search the web for current information.';
 const IMAGES_TITLE = 'Enable Image Support';
-const IMAGES_DESCRIPTION = 'Allow Codex to process images attached to prompts using -i flag.';
-const SANDBOX_TITLE = 'Sandbox Policy';
-const APPROVAL_TITLE = 'Approval Policy';
-const SANDBOX_SELECT_LABEL = 'Select sandbox policy';
-const APPROVAL_SELECT_LABEL = 'Select approval policy';
-
-const SANDBOX_OPTIONS: Array<{
-  value: CodexSandboxMode;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: 'read-only',
-    label: 'Read-only',
-    description: 'Only allow safe, non-mutating commands.',
-  },
-  {
-    value: 'workspace-write',
-    label: 'Workspace write',
-    description: 'Allow file edits inside the project workspace.',
-  },
-  {
-    value: 'danger-full-access',
-    label: 'Full access',
-    description: 'Allow unrestricted commands (use with care).',
-  },
-];
-
-const APPROVAL_OPTIONS: Array<{
-  value: CodexApprovalPolicy;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: 'untrusted',
-    label: 'Untrusted',
-    description: 'Ask for approval for most commands.',
-  },
-  {
-    value: 'on-failure',
-    label: 'On failure',
-    description: 'Ask only if a command fails in the sandbox.',
-  },
-  {
-    value: 'on-request',
-    label: 'On request',
-    description: 'Let the agent decide when to ask.',
-  },
-  {
-    value: 'never',
-    label: 'Never',
-    description: 'Never ask for approval (least restrictive).',
-  },
-];
+const IMAGES_DESCRIPTION = 'Allow Codex to process images attached to prompts.';
 
 export function CodexSettings({
   autoLoadCodexAgents,
-  codexSandboxMode,
-  codexApprovalPolicy,
   codexEnableWebSearch,
   codexEnableImages,
   onAutoLoadCodexAgentsChange,
-  onCodexSandboxModeChange,
-  onCodexApprovalPolicyChange,
   onCodexEnableWebSearchChange,
   onCodexEnableImagesChange,
 }: CodexSettingsProps) {
-  const sandboxOption = SANDBOX_OPTIONS.find((option) => option.value === codexSandboxMode);
-  const approvalOption = APPROVAL_OPTIONS.find((option) => option.value === codexApprovalPolicy);
-
   return (
     <div
       className={cn(
@@ -187,61 +114,6 @@ export function CodexSettings({
               {IMAGES_TITLE}
             </Label>
             <p className="text-xs text-muted-foreground/80 leading-relaxed">{IMAGES_DESCRIPTION}</p>
-          </div>
-        </div>
-
-        <div className="group flex items-start space-x-3 p-3 rounded-xl hover:bg-accent/30 transition-colors duration-200 -mx-3">
-          <div className="w-10 h-10 mt-0.5 rounded-xl flex items-center justify-center shrink-0 bg-brand-500/10">
-            <ShieldCheck className="w-5 h-5 text-brand-500" />
-          </div>
-          <div className="flex-1 space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label className="text-foreground font-medium">{SANDBOX_TITLE}</Label>
-                <p className="text-xs text-muted-foreground/80 leading-relaxed">
-                  {sandboxOption?.description}
-                </p>
-              </div>
-              <Select
-                value={codexSandboxMode}
-                onValueChange={(value) => onCodexSandboxModeChange(value as CodexSandboxMode)}
-              >
-                <SelectTrigger className="w-[180px] h-8" data-testid="codex-sandbox-select">
-                  <SelectValue aria-label={SANDBOX_SELECT_LABEL} />
-                </SelectTrigger>
-                <SelectContent>
-                  {SANDBOX_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <Label className="text-foreground font-medium">{APPROVAL_TITLE}</Label>
-                <p className="text-xs text-muted-foreground/80 leading-relaxed">
-                  {approvalOption?.description}
-                </p>
-              </div>
-              <Select
-                value={codexApprovalPolicy}
-                onValueChange={(value) => onCodexApprovalPolicyChange(value as CodexApprovalPolicy)}
-              >
-                <SelectTrigger className="w-[180px] h-8" data-testid="codex-approval-select">
-                  <SelectValue aria-label={APPROVAL_SELECT_LABEL} />
-                </SelectTrigger>
-                <SelectContent>
-                  {APPROVAL_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
         </div>
       </div>

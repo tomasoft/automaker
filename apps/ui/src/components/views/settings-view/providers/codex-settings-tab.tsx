@@ -181,13 +181,9 @@ export function CodexSettingsTab() {
 
       <CodexSettings
         autoLoadCodexAgents={codexAutoLoadAgents}
-        codexSandboxMode={codexSandboxMode}
-        codexApprovalPolicy={codexApprovalPolicy}
         codexEnableWebSearch={codexEnableWebSearch}
         codexEnableImages={codexEnableImages}
         onAutoLoadCodexAgentsChange={setCodexAutoLoadAgents}
-        onCodexSandboxModeChange={setCodexSandboxMode}
-        onCodexApprovalPolicyChange={setCodexApprovalPolicy}
         onCodexEnableWebSearchChange={setCodexEnableWebSearch}
         onCodexEnableImagesChange={setCodexEnableImages}
       />
