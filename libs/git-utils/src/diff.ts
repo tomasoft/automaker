@@ -272,7 +272,7 @@ export async function getGitRepositoryDiffs(
 
   const files = parseGitStatus(status);
 
-  // Filter out common build/dependency directories that should be ignored
+  // Filter out common build/dependency directories and files that should be ignored
   // This prevents massive diffs when .gitignore is missing or incomplete
   const ignoredPrefixes = [
     'node_modules/',
@@ -289,8 +289,22 @@ export async function getGitRepositoryDiffs(
     'venv/',
   ];
 
+  // Files to ignore (exact matches or at any path level)
+  const ignoredFiles = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'];
+
   const filteredFiles = files.filter((file) => {
-    return !ignoredPrefixes.some((prefix) => file.path.startsWith(prefix));
+    // Check if file path starts with any ignored prefix
+    if (ignoredPrefixes.some((prefix) => file.path.startsWith(prefix))) {
+      return false;
+    }
+
+    // Check if file name matches any ignored file (at any path level)
+    const fileName = file.path.split('/').pop() || file.path.split('\\').pop() || file.path;
+    if (ignoredFiles.includes(fileName)) {
+      return false;
+    }
+
+    return true;
   });
 
   // Generate synthetic diffs for untracked (new) files
