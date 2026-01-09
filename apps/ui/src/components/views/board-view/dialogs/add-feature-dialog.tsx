@@ -64,7 +64,12 @@ import {
   formatAncestorContextForPrompt,
   type AncestorContext,
 } from '@automaker/dependency-resolver';
-import { isCursorModel, PROVIDER_PREFIXES } from '@automaker/types';
+import {
+  isCursorModel,
+  PROVIDER_PREFIXES,
+  getModelProvider,
+  addProviderPrefix,
+} from '@automaker/types';
 
 const logger = createLogger('AddFeatureDialog');
 
@@ -156,8 +161,13 @@ export function AddFeatureDialog({
   const [selectedAncestorIds, setSelectedAncestorIds] = useState<Set<string>>(new Set());
 
   // Get planning mode defaults and worktrees setting from store
-  const { defaultPlanningMode, defaultRequirePlanApproval, defaultAIProfileId, useWorktrees } =
-    useAppStore();
+  const {
+    defaultPlanningMode,
+    defaultRequirePlanApproval,
+    defaultAIProfileId,
+    useWorktrees,
+    phaseModels,
+  } = useAppStore();
 
   // Enhancement model override
   const enhancementOverride = useModelOverride({ phase: 'enhancementModel' });
@@ -170,13 +180,29 @@ export function AddFeatureDialog({
         ? aiProfiles.find((p) => p.id === defaultAIProfileId)
         : null;
 
+      // Get default model from phase models (Model Defaults) - this is the primary source
+      const defaultPhaseModel = phaseModels.featureGenerationModel;
+
+      // Normalize the model to include provider prefix if needed
+      let normalizedModel: string;
+      if (defaultPhaseModel?.model) {
+        const modelString = defaultPhaseModel.model as string;
+        const provider = getModelProvider(modelString);
+        normalizedModel = addProviderPrefix(modelString, provider);
+      } else if (defaultProfile?.model) {
+        const provider = getModelProvider(defaultProfile.model);
+        normalizedModel = addProviderPrefix(defaultProfile.model, provider);
+      } else {
+        normalizedModel = 'opus'; // Claude models don't need prefix
+      }
+
       setNewFeature((prev) => ({
         ...prev,
         skipTests: defaultSkipTests,
         branchName: defaultBranch || '',
-        // Use default profile's model/thinkingLevel if set, else fallback to defaults
-        model: defaultProfile?.model ?? 'opus',
-        thinkingLevel: defaultProfile?.thinkingLevel ?? 'none',
+        // Priority: 1) Phase model defaults, 2) Default profile, 3) Fallback to 'opus'
+        model: normalizedModel,
+        thinkingLevel: defaultPhaseModel?.thinkingLevel ?? defaultProfile?.thinkingLevel ?? 'none',
       }));
       setUseCurrentBranch(true);
       setPlanningMode(defaultPlanningMode);
@@ -203,6 +229,7 @@ export function AddFeatureDialog({
     aiProfiles,
     parentFeature,
     allFeatures,
+    phaseModels,
   ]);
 
   const buildFeatureData = (): FeatureData | null => {
