@@ -172,7 +172,13 @@ export class LocalLLMToolExecutor {
       switch (name) {
         // File operations
         case 'create_file':
-          output = await this.createFile(args.path, args.content);
+          // Auto-stringify if content is an object (model sometimes passes JSON objects)
+          let content = args.content;
+          if (typeof content === 'object' && content !== null) {
+            content = JSON.stringify(content, null, 2);
+            logger.info(`Auto-stringified object content for ${args.path}`);
+          }
+          output = await this.createFile(args.path, content);
           break;
 
         case 'read_file':

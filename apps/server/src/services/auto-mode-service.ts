@@ -524,13 +524,192 @@ export class AutoModeService {
       // (SDK handles CLAUDE.md via settingSources), but keep other context files like CODE_QUALITY.md
       const contextFilesPrompt = filterClaudeMdFromContext(contextResult, autoLoadClaudeMd);
 
+      // Determine if we need to generate a spec first (separate from implementation)
+      const needsSpecGeneration =
+        !options?.continuationPrompt && feature.planningMode === 'spec' && !feature.spec; // Only generate if spec doesn't exist yet
+
       if (options?.continuationPrompt) {
         // Continuation prompt is used when recovering from a plan approval
         // The plan was already approved, so skip the planning phase
         prompt = options.continuationPrompt;
         logger.info(`Using continuation prompt for feature ${featureId}`);
+      } else if (needsSpecGeneration) {
+        // SPEC GENERATION PHASE: Use specGenerationModel from Model Defaults
+        logger.info(`[Planning Phase] Generating spec using specGenerationModel`);
+
+        // Get the phase model configuration from settings
+        const settings = await this.settingsService?.getGlobalSettings();
+        const phaseModelEntry =
+          settings?.phaseModels?.specGenerationModel || DEFAULT_PHASE_MODELS.specGenerationModel;
+        const { model: specModel, thinkingLevel: specThinkingLevel } =
+          resolvePhaseModel(phaseModelEntry);
+
+        logger.info(
+          `[Planning Phase] Using model '${specModel}' for spec generation (from Model Defaults)`
+        );
+
+        // Build spec generation prompt
+        const featurePrompt = this.buildFeaturePrompt(feature);
+        const planningPrefix = await this.getPlanningPromptPrefix(feature);
+        const specPrompt = planningPrefix + featurePrompt;
+
+        // Emit planning mode info
+        this.emitAutoModeEvent('planning_started', {
+          featureId: feature.id,
+          mode: feature.planningMode,
+          message: `Generating specification using ${specModel}`,
+        });
+
+        // Log the spec generation prompt
+        logger.info(`[Planning Phase] Spec generation prompt length: ${specPrompt.length} chars`);
+        logger.info(`[Planning Phase] Spec prompt preview: ${specPrompt.substring(0, 300)}...`);
+
+        // Generate spec using the spec generation model
+        const specProvider = ProviderFactory.getProviderForModel(specModel);
+
+        logger.info(`[Planning Phase] Starting spec generation stream...`);
+
+        let generatedSpec = '';
+        let chunkCount = 0;
+
+        try {
+          const specStream = specProvider.executeQuery({
+            prompt: specPrompt,
+            model: specModel,
+            systemPrompt: contextFilesPrompt || undefined,
+            thinkingLevel: specThinkingLevel || undefined,
+          });
+
+          for await (const msg of specStream) {
+            chunkCount++;
+            logger.debug(`[Planning Phase] Received chunk ${chunkCount}, type: ${msg.type}`);
+
+            if (msg.type === 'text') {
+              // Direct text message from provider
+              generatedSpec += msg.text || '';
+
+              // Stream spec generation to UI
+              this.emitAutoModeEvent('agent_output', {
+                featureId,
+                output: msg.text || '',
+                append: true,
+              });
+            } else if (msg.type === 'assistant' && msg.message?.content) {
+              // SDK-formatted message
+              for (const block of msg.message.content) {
+                if (block.type === 'text' && block.text) {
+                  generatedSpec += block.text;
+
+                  // Stream spec generation to UI
+                  this.emitAutoModeEvent('agent_output', {
+                    featureId,
+                    output: block.text,
+                    append: true,
+                  });
+                }
+              }
+            }
+          }
+
+          logger.info(
+            `[Planning Phase] Spec generation completed. Generated ${generatedSpec.length} chars in ${chunkCount} chunks`
+          );
+        } catch (error) {
+          logger.error(`[Planning Phase] Spec generation failed:`, error);
+          throw error;
+        }
+
+        // Validate that we generated a spec
+        if (!generatedSpec || generatedSpec.trim().length === 0) {
+          const error = 'Spec generation failed: no content generated';
+          logger.error(`[Planning Phase] ${error}`);
+          throw new Error(error);
+        }
+
+        // Strip [SPEC_GENERATED] marker and everything after it from the spec
+        // This prevents the "approved" text from leaking into the implementation prompt
+        let cleanSpec = generatedSpec;
+        const markerIndex = generatedSpec.indexOf('[SPEC_GENERATED]');
+        if (markerIndex > -1) {
+          cleanSpec = generatedSpec.substring(0, markerIndex).trim();
+          logger.info(
+            `[Planning Phase] Removed [SPEC_GENERATED] marker and approval text from spec`
+          );
+        }
+
+        // Save cleaned spec to feature
+        feature.spec = cleanSpec;
+        const featureDirForSave = getFeatureDir(projectPath, featureId);
+        const featurePath = path.join(featureDirForSave, 'feature.json');
+        await secureFs.writeFile(featurePath, JSON.stringify(feature, null, 2));
+
+        logger.info(`[Planning Phase] Spec saved to feature.json (${cleanSpec.length} chars)`);
+        logger.info(`[Planning Phase] Spec preview: ${cleanSpec.substring(0, 200)}...`);
+
+        // Now check if approval is required
+        if (feature.requirePlanApproval) {
+          // Wait for approval before continuing to implementation
+          logger.info(`[Planning Phase] Spec requires approval, waiting for user review...`);
+          await this.updateFeatureStatus(projectPath, featureId, 'waiting_approval');
+
+          // CRITICAL: Register pending approval BEFORE emitting event
+          const approvalPromise = this.waitForPlanApproval(featureId, projectPath);
+
+          logger.info(`[Planning Phase] Emitting plan_approval_required event`);
+
+          this.emitAutoModeEvent('plan_approval_required', {
+            featureId,
+            projectPath,
+            planContent: cleanSpec,
+            planningMode: feature.planningMode,
+          });
+
+          logger.info(
+            `[Planning Phase] Spec generation complete. Feature status: waiting_approval (plan). Waiting for user approval...`
+          );
+
+          // Wait for user approval
+          const approvalResult = await approvalPromise;
+
+          if (!approvalResult.approved) {
+            logger.info(`[Planning Phase] Plan was rejected by user`);
+            await this.updateFeatureStatus(projectPath, featureId, 'backlog');
+            return;
+          }
+
+          logger.info(`[Planning Phase] Plan approved! Continuing to implementation...`);
+
+          // If user provided feedback or edited the spec, update the feature
+          if (approvalResult.editedPlan && approvalResult.editedPlan !== cleanSpec) {
+            logger.info(`[Planning Phase] User edited the spec, updating feature...`);
+            feature.spec = approvalResult.editedPlan;
+            const featureDirForSave = getFeatureDir(projectPath, featureId);
+            const featurePath = path.join(featureDirForSave, 'feature.json');
+            await secureFs.writeFile(featurePath, JSON.stringify(feature, null, 2));
+          }
+
+          // Continue to implementation phase with the approved spec
+          logger.info(`[Implementation Phase] Starting implementation with ${feature.model}...`);
+
+          // Build implementation prompt (feature now includes the spec)
+          const featurePromptWithSpec = this.buildFeaturePrompt(feature);
+          prompt = featurePromptWithSpec;
+        } else {
+          logger.info(
+            `[Planning Phase] No approval required, continuing directly to implementation...`
+          );
+
+          // If no approval needed, continue to implementation with the feature's model
+          logger.info(
+            `[Implementation Phase] Continuing with implementation model: ${feature.model}`
+          );
+
+          // Build implementation prompt (feature now includes the spec)
+          const featurePromptWithSpec = this.buildFeaturePrompt(feature);
+          prompt = featurePromptWithSpec;
+        }
       } else {
-        // Normal flow: build prompt with planning phase
+        // Normal flow: build prompt with planning phase (for lite/full modes or skip)
         const featurePrompt = this.buildFeaturePrompt(feature);
         const planningPrefix = await this.getPlanningPromptPrefix(feature);
         prompt = planningPrefix + featurePrompt;
@@ -550,11 +729,11 @@ export class AutoModeService {
         typeof img === 'string' ? img : img.path
       );
 
-      // Get model from feature and determine provider
+      // Get model from feature and determine provider (used for implementation phase)
       const model = resolveModelString(feature.model, DEFAULT_MODELS.claude);
       const provider = ProviderFactory.getProviderNameForModel(model);
       logger.info(
-        `Executing feature ${featureId} with model: ${model}, provider: ${provider} in ${workDir}`
+        `Executing feature ${featureId} with implementation model: ${model}, provider: ${provider} in ${workDir}`
       );
 
       // Store model and provider in running feature for tracking
@@ -1891,6 +2070,9 @@ You can use the Read tool to view these images at any time during implementation
       prompt += `
 ## Instructions
 
+**IMPORTANT - Operating System**: You are running on ${process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux'}.
+${process.platform === 'win32' ? '- Windows uses different command syntax than Unix/Linux\n- PREFER using the provided tools (create_file, read_file, update_file, list_directory) over shell commands\n- If you must use shell commands, use Windows syntax (e.g., "mkdir" not "mkdir -p", "dir" not "ls")\n- The create_file tool automatically creates parent directories, making it better than shell commands' : ''}
+
 Implement this feature by:
 1. First, explore the codebase to understand the existing structure
 2. **IMPORTANT**: If creating test files:
@@ -1922,6 +2104,9 @@ This helps parse your summary correctly in the output logs.`;
       // Automated testing - implement and verify with Playwright
       prompt += `
 ## Instructions
+
+**IMPORTANT - Operating System**: You are running on ${process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux'}.
+${process.platform === 'win32' ? '- Windows uses different command syntax than Unix/Linux\n- PREFER using the provided tools (create_file, read_file, update_file, list_directory) over shell commands\n- If you must use shell commands, use Windows syntax (e.g., "mkdir" not "mkdir -p", "dir" not "ls")\n- The create_file tool automatically creates parent directories, making it better than shell commands' : ''}
 
 Implement this feature by:
 1. First, explore the codebase to understand the existing structure

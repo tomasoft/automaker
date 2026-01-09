@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
+import { useLocalLlmModels } from '@/hooks/use-local-llm-models';
 import type {
   ModelAlias,
   CursorModelId,
@@ -20,6 +21,7 @@ import {
   CLAUDE_MODELS,
   CURSOR_MODELS,
   COPILOT_MODELS,
+  LOCAL_LLM_MODELS,
   THINKING_LEVELS,
   THINKING_LEVEL_LABELS,
 } from '@/components/views/board-view/shared/model-constants';
@@ -65,8 +67,10 @@ export function PhaseModelSelector({
   align = 'end',
   disabled = false,
 }: PhaseModelSelectorProps) {
-  // Get enabled Copilot models from store
-  const { enabledCopilotModels } = useAppStore();
+  // Get enabled Copilot and Local LLM models from store
+  const { enabledCopilotModels, enabledLocalLlmModels } = useAppStore();
+  // Fetch actual Local LLM models dynamically
+  const { models: fetchedLocalLlmModels } = useLocalLlmModels();
   const [open, setOpen] = React.useState(false);
   const [expandedGroup, setExpandedGroup] = React.useState<string | null>(null);
   const [expandedClaudeModel, setExpandedClaudeModel] = React.useState<ModelAlias | null>(null);
@@ -152,6 +156,22 @@ export function PhaseModelSelector({
     );
     if (cursorModel) return { ...cursorModel, icon: Sparkles };
 
+    // Check GitHub Copilot models
+    const copilotModel = COPILOT_MODELS.find((m) => stripProviderPrefix(m.id) === selectedModel);
+    if (copilotModel) return { ...copilotModel, icon: Sparkles };
+
+    // Check dynamically fetched Local LLM models
+    const localLlmModel = fetchedLocalLlmModels.find((m) => m.id === selectedModel);
+    if (localLlmModel) {
+      return {
+        id: `local-${localLlmModel.id}`,
+        label: localLlmModel.label,
+        description: localLlmModel.description,
+        provider: 'local-llm' as const,
+        icon: Sparkles,
+      };
+    }
+
     // Check if selectedModel is part of a grouped model
     const group = getModelGroup(selectedModel as CursorModelId);
     if (group) {
@@ -166,7 +186,7 @@ export function PhaseModelSelector({
     }
 
     return null;
-  }, [selectedModel, selectedThinkingLevel, availableCursorModels]);
+  }, [selectedModel, selectedThinkingLevel, availableCursorModels, fetchedLocalLlmModels]);
 
   // Compute grouped vs standalone Cursor models
   const { groupedModels, standaloneCursorModels } = React.useMemo(() => {
@@ -202,11 +222,12 @@ export function PhaseModelSelector({
   }, [availableCursorModels, enabledCursorModels]);
 
   // Group models
-  const { favorites, claude, cursor, copilot } = React.useMemo(() => {
+  const { favorites, claude, cursor, copilot, localLlm } = React.useMemo(() => {
     const favs: typeof CLAUDE_MODELS = [];
     const cModels: typeof CLAUDE_MODELS = [];
     const curModels: typeof CURSOR_MODELS = [];
     const copilotModels: typeof COPILOT_MODELS = [];
+    const localLlmModels: typeof LOCAL_LLM_MODELS = [];
 
     // Process Claude Models
     CLAUDE_MODELS.forEach((model) => {
@@ -239,12 +260,99 @@ export function PhaseModelSelector({
       }
     });
 
-    return { favorites: favs, claude: cModels, cursor: curModels, copilot: copilotModels };
-  }, [favoriteModels, availableCursorModels, enabledCopilotModels]);
+    // Process Local LLM Models - use dynamically fetched models filtered by enabled
+    fetchedLocalLlmModels.forEach((model) => {
+      // The fetched models have IDs like "qwen/qwen3-coder-30b" (from LM Studio)
+      // Check if this model is enabled
+      if (enabledLocalLlmModels.includes(model.id)) {
+        // Create a model entry with "local-" prefix for consistency
+        const modelEntry = {
+          id: `local-${model.id}`, // Add prefix for favoriting system
+          label: model.label,
+          description: model.description,
+          provider: 'local-llm' as const,
+        };
+
+        if (favoriteModels.includes(modelEntry.id)) {
+          favs.push(modelEntry);
+        } else {
+          localLlmModels.push(modelEntry);
+        }
+      }
+    });
+
+    return {
+      favorites: favs,
+      claude: cModels,
+      cursor: curModels,
+      copilot: copilotModels,
+      localLlm: localLlmModels,
+    };
+  }, [
+    favoriteModels,
+    availableCursorModels,
+    enabledCopilotModels,
+    enabledLocalLlmModels,
+    fetchedLocalLlmModels,
+  ]);
 
   // Render GitHub Copilot model item (no thinking level needed)
   const renderCopilotModelItem = (model: (typeof COPILOT_MODELS)[0]) => {
     const modelValue = stripProviderPrefix(model.id);
+    const isSelected = selectedModel === modelValue;
+    const isFavorite = favoriteModels.includes(model.id);
+
+    return (
+      <CommandItem
+        key={model.id}
+        value={model.label}
+        onSelect={() => {
+          onChange({ model: modelValue as any });
+          setOpen(false);
+        }}
+        className="group flex items-center justify-between py-2"
+      >
+        <div className="flex items-center gap-3 overflow-hidden">
+          <Sparkles
+            className={cn(
+              'h-4 w-4 shrink-0',
+              isSelected ? 'text-primary' : 'text-muted-foreground'
+            )}
+          />
+          <div className="flex flex-col truncate">
+            <span className={cn('truncate font-medium', isSelected && 'text-primary')}>
+              {model.label}
+            </span>
+            {model.description && (
+              <span className="text-xs text-muted-foreground truncate">{model.description}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {isSelected && <Check className="h-4 w-4 text-primary shrink-0" />}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              'h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity',
+              isFavorite && 'opacity-100'
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFavoriteModel(model.id);
+            }}
+          >
+            <Star className={cn('h-3 w-3', isFavorite ? 'fill-amber-400 text-amber-400' : '')} />
+          </Button>
+        </div>
+      </CommandItem>
+    );
+  };
+
+  // Render Local LLM model item (no thinking level needed)
+  const renderLocalLlmModelItem = (model: any) => {
+    // model.id is like "local-qwen/qwen3-coder-30b", strip the prefix to get actual model ID
+    const modelValue = model.id.startsWith('local-') ? model.id.substring(6) : model.id;
     const isSelected = selectedModel === modelValue;
     const isFavorite = favoriteModels.includes(model.id);
 
@@ -677,6 +785,10 @@ export function PhaseModelSelector({
                     if (model.provider === 'github-copilot') {
                       return renderCopilotModelItem(model as any);
                     }
+                    // Local LLM model
+                    if (model.provider === 'local-llm') {
+                      return renderLocalLlmModelItem(model as any);
+                    }
                     // Claude model
                     return renderClaudeModelItem(model);
                   });
@@ -704,6 +816,12 @@ export function PhaseModelSelector({
           {copilot.length > 0 && (
             <CommandGroup heading="GitHub Copilot Models">
               {copilot.map((model) => renderCopilotModelItem(model))}
+            </CommandGroup>
+          )}
+
+          {localLlm.length > 0 && (
+            <CommandGroup heading="Local LLM Models">
+              {localLlm.map((model) => renderLocalLlmModelItem(model))}
             </CommandGroup>
           )}
         </CommandList>

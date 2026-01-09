@@ -105,6 +105,9 @@ export class LocalLLMAgentProvider extends BaseProvider {
 
       // Add system prompt if provided
       if (systemPrompt && typeof systemPrompt === 'string') {
+        // Check if LM Studio is responsive before starting
+        await this.checkHealth();
+
         messages.push({
           role: 'system',
           content: systemPrompt,
@@ -163,6 +166,15 @@ export class LocalLLMAgentProvider extends BaseProvider {
     let accumulatedText = '';
     let isTaskComplete = false;
 
+    // Track recent tool calls to detect loops
+    const recentToolCalls: string[] = [];
+    const maxRecentCalls = 5;
+
+    // Track exploration tool usage to prevent analysis paralysis
+    const explorationTools = ['get_project_structure', 'list_directory'];
+    let explorationCount = 0;
+    const maxExplorationCalls = 3; // Hard limit
+
     while (iteration < this.maxIterations && !isTaskComplete) {
       iteration++;
       logger.info(`[Iteration ${iteration}] Starting agentic loop iteration`);
@@ -211,6 +223,63 @@ export class LocalLLMAgentProvider extends BaseProvider {
         isTaskComplete = true;
       }
 
+      // Track exploration tool usage and enforce hard limit
+      const explorationCallsInThisIteration = toolCalls.filter((tc) =>
+        explorationTools.includes(tc.function.name)
+      );
+
+      if (explorationCallsInThisIteration.length > 0) {
+        explorationCount += explorationCallsInThisIteration.length;
+        logger.info(
+          `[Exploration Tracker] Total exploration calls: ${explorationCount}/${maxExplorationCalls}`
+        );
+
+        if (explorationCount >= maxExplorationCalls) {
+          logger.warn(
+            `[Exploration Limit] Hit maximum exploration calls (${maxExplorationCalls}). Forcing implementation mode.`
+          );
+          messages.push({
+            role: 'user',
+            content: `🛑 STOP EXPLORING - You've used ${explorationCount} exploration calls. This is enough!
+
+You MUST start creating files NOW. Do NOT call get_project_structure or list_directory again.
+
+Based on what you've already learned:
+1. Use create_file to create the source files directly
+2. Use create_file to create the test files
+3. Use execute_command to run npm install (if needed)
+4. Call task_complete when all files are created
+
+START IMPLEMENTING NOW - NO MORE EXPLORATION!`,
+          });
+        }
+      }
+
+      // Detect infinite loops (same tool called repeatedly)
+      // Use tool NAME only, ignore arguments for more robust detection
+      const currentCallSignature = toolCalls
+        .map((tc) => tc.function.name)
+        .sort()
+        .join(',');
+      recentToolCalls.push(currentCallSignature);
+      if (recentToolCalls.length > maxRecentCalls) {
+        recentToolCalls.shift();
+      }
+
+      // Warn if the last 3 calls use the same tools (stuck in a loop)
+      if (recentToolCalls.length >= 3) {
+        const last3 = recentToolCalls.slice(-3);
+        if (last3.every((call) => call === last3[0])) {
+          logger.warn(
+            `[Loop Detection] Model is repeating the same tool pattern (${last3[0]}). Breaking loop.`
+          );
+          messages.push({
+            role: 'user',
+            content: `⚠️ LOOP DETECTED: You've called the same tool(s) (${last3[0]}) 3 times in a row without making progress.\n\n🚫 STOP exploring and START implementing!\n\nInstead of calling tools repeatedly:\n- Use create_file to write the code files NOW\n- Skip exploration if you already know the project structure\n- Move forward with implementation\n- Call task_complete when all files are created`,
+          });
+        }
+      }
+
       // Execute tool calls
       logger.info(`[Iteration ${iteration}] Executing ${toolCalls.length} tool(s)`);
 
@@ -218,7 +287,26 @@ export class LocalLLMAgentProvider extends BaseProvider {
         logger.info(`  - ${toolCall.function.name}`);
       }
 
-      const toolResults = await toolExecutor.executeTools(toolCalls);
+      // If exploration limit exceeded, filter out additional exploration calls
+      let toolCallsToExecute = toolCalls;
+      const blockedCalls: typeof toolCalls = [];
+
+      if (explorationCount > maxExplorationCalls) {
+        const filteredCalls = toolCalls.filter(
+          (tc) => !explorationTools.includes(tc.function.name)
+        );
+        const blocked = toolCalls.filter((tc) => explorationTools.includes(tc.function.name));
+
+        if (blocked.length > 0) {
+          logger.warn(
+            `[Exploration Limit] Blocking ${blocked.length} exploration tool calls that exceed limit`
+          );
+          toolCallsToExecute = filteredCalls;
+          blockedCalls.push(...blocked);
+        }
+      }
+
+      const toolResults = await toolExecutor.executeTools(toolCallsToExecute);
 
       // Add tool results to messages with enhanced error context
       for (const result of toolResults) {
@@ -241,6 +329,17 @@ export class LocalLLMAgentProvider extends BaseProvider {
           type: 'info',
           message: `Tool ${toolCalls.find((tc) => tc.id === result.tool_call_id)?.function.name}: ${result.success ? 'Success' : 'Failed'}`,
         };
+      }
+
+      // Add blocked tool results (exploration calls that exceeded limit)
+      for (const blockedCall of blockedCalls) {
+        messages.push({
+          role: 'tool',
+          content: `🚫 BLOCKED: ${blockedCall.function.name} call was blocked because you've exceeded the exploration limit (${maxExplorationCalls} calls). You MUST create files now using create_file. DO NOT explore anymore.`,
+          tool_call_id: blockedCall.id,
+        });
+
+        logger.warn(`[Exploration Limit] Blocked ${blockedCall.function.name} call`);
       }
 
       // If task is complete, do one final call to get closing message
@@ -283,21 +382,81 @@ export class LocalLLMAgentProvider extends BaseProvider {
   private getToolErrorSuggestion(toolName: string | undefined, errorMessage: string): string {
     if (!toolName) return 'Try a different approach or skip this step.';
 
+    // Windows command syntax errors
+    if (errorMessage.includes('The syntax of the command is incorrect')) {
+      return `Command syntax error on Windows. IMPORTANT: 
+- Use create_file tool instead of mkdir to create directories
+- Avoid Unix commands like "mkdir -p" - use Windows syntax or create_file tool
+- For nested directories, use create_file with the full path
+Example: Instead of "mkdir -p src/utils", use create_file tool with path="src/utils/.gitkeep"`;
+    }
+
+    if (errorMessage.includes('The system cannot find the path specified')) {
+      return `Path not found. The parent directory may not exist. Use create_file tool to create the full directory structure automatically, or create parent directories first.`;
+    }
+
+    // File/directory not found
     if (errorMessage.includes('ENOENT') || errorMessage.includes('no such file or directory')) {
       if (toolName === 'list_directory' || toolName === 'read_file') {
         return 'The directory/file does not exist. Try using list_directory on the parent directory first, or create the directory structure using create_file.';
       }
+      if (toolName === 'execute_command') {
+        return 'Command failed because a path does not exist. Create necessary directories using create_file tool first.';
+      }
     }
 
+    // Permission denied
     if (errorMessage.includes('EACCES') || errorMessage.includes('permission denied')) {
       return 'Permission denied. This path may be outside the project root or protected.';
     }
 
-    if (errorMessage.includes('Security violation')) {
-      return 'This path is outside the allowed project directory. Use relative paths within the project.';
+    // Security violations
+    if (
+      errorMessage.includes('Security violation') ||
+      errorMessage.includes('Command not allowed')
+    ) {
+      return 'This operation is not allowed for security reasons. Use the provided tools (create_file, read_file, update_file, list_directory) instead of shell commands when possible.';
+    }
+
+    // Type errors for create_file
+    if (toolName === 'create_file' && errorMessage.includes('ERR_INVALID_ARG_TYPE')) {
+      return 'The "content" parameter must be a STRING, not an object. For JSON files, stringify the object first:\nExample: {"path": "package.json", "content": "{\\"name\\": \\"my-project\\", \\"version\\": \\"1.0.0\\"}"}';
     }
 
     return 'Consider an alternative approach to accomplish this task.';
+  }
+
+  /**
+   * Check if LM Studio is responsive
+   */
+  private async checkHealth(): Promise<void> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      const response = await fetch(`${this.endpoint}/models`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`LM Studio returned status ${response.status}`);
+      }
+
+      logger.info('[LocalLLMAgentProvider] LM Studio health check passed');
+    } catch (error) {
+      const errorMsg =
+        error instanceof Error && error.name === 'AbortError'
+          ? 'LM Studio health check timed out. The server may not be running or is unresponsive.'
+          : `LM Studio is not responding: ${error instanceof Error ? error.message : String(error)}`;
+
+      logger.error(`[LocalLLMAgentProvider] ${errorMsg}`);
+      throw new Error(
+        `${errorMsg}\n\nPlease ensure:\n1. LM Studio is running\n2. A model is loaded\n3. The server is accessible at ${this.endpoint}`
+      );
+    }
   }
 
   /**
