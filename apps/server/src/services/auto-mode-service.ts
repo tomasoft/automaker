@@ -2075,14 +2075,17 @@ ${process.platform === 'win32' ? '- Windows uses different command syntax than U
 
 Implement this feature by:
 1. First, explore the codebase to understand the existing structure
-2. **IMPORTANT**: If creating test files:
+2. **IMPORTANT - .gitignore**: If the project is new or doesn't have a .gitignore:
+   - Create a .gitignore file with at minimum: node_modules/, dist/, build/, .env
+   - This prevents node_modules from being tracked by git
+3. **IMPORTANT**: If creating test files or installing dependencies:
    - First check if package.json exists and has test dependencies (Vitest, Jest, etc.)
    - If not, create or update package.json with appropriate test framework
    - Use \`execute_command\` to run \`npm install\` to install dependencies
    - Create tsconfig.json if needed for TypeScript projects
-3. Plan your implementation approach
-4. Write the necessary code changes
-5. Ensure the code follows existing patterns and conventions
+4. Plan your implementation approach
+5. Write the necessary code changes
+6. Ensure the code follows existing patterns and conventions
 
 When done, wrap your final summary in <summary> tags like this:
 
@@ -2110,13 +2113,16 @@ ${process.platform === 'win32' ? '- Windows uses different command syntax than U
 
 Implement this feature by:
 1. First, explore the codebase to understand the existing structure
-2. **IMPORTANT**: If the project doesn't have package.json or test dependencies:
+2. **IMPORTANT - .gitignore**: If the project is new or doesn't have a .gitignore:
+   - Create a .gitignore file with at minimum: node_modules/, dist/, build/, .env
+   - This prevents node_modules from being tracked by git
+3. **IMPORTANT**: If the project doesn't have package.json or test dependencies:
    - Create or update package.json with appropriate test framework (Vitest, Jest, Playwright, etc.)
    - Use \`execute_command\` to run \`npm install\` to install dependencies
    - Create tsconfig.json if needed for TypeScript projects
-3. Plan your implementation approach
-4. Write the necessary code changes
-5. Ensure the code follows existing patterns and conventions
+4. Plan your implementation approach
+5. Write the necessary code changes
+6. Ensure the code follows existing patterns and conventions
 
 ## Verification with Playwright (REQUIRED)
 

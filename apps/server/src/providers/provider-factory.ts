@@ -84,11 +84,21 @@ export class ProviderFactory {
   ): BaseProvider {
     const providerName = this.getProviderNameForModel(modelId);
 
-    // If it's a local-llm model and we're in agentic mode, use the agent provider
-    if (providerName === 'local-llm' && options?.agenticMode) {
-      return new LocalLLMAgentProvider({
-        projectRoot: options.projectRoot || process.cwd(),
-      });
+    // If we're in agentic mode, use the agent provider for supported providers
+    if (options?.agenticMode) {
+      // Use agent provider for local-llm models
+      if (providerName === 'local-llm') {
+        return new LocalLLMAgentProvider({
+          projectRoot: options.projectRoot || process.cwd(),
+        });
+      }
+
+      // Use agent provider for github-copilot models
+      if (providerName === 'github-copilot') {
+        return new GitHubCopilotAgentProvider({
+          projectRoot: options.projectRoot || process.cwd(),
+        });
+      }
     }
 
     const provider = this.getProviderByName(providerName);
@@ -178,6 +188,7 @@ export class ProviderFactory {
 import { ClaudeProvider } from './claude-provider.js';
 import { CursorProvider } from './cursor-provider.js';
 import { GitHubCopilotProvider } from './github-copilot-provider.js';
+import { GitHubCopilotAgentProvider } from './github-copilot-agent-provider.js';
 import { LocalLLMProvider } from './local-llm-provider.js';
 import { LocalLLMAgentProvider } from './local-llm-agent-provider.js';
 
@@ -200,7 +211,7 @@ registerProvider('cursor', {
   priority: 10, // Higher priority - check Cursor models first
 });
 
-// Register GitHub Copilot provider
+// Register GitHub Copilot provider (text-only, for enhance/clarify)
 registerProvider('github-copilot', {
   factory: () => new GitHubCopilotProvider(),
   aliases: ['copilot', 'gh-copilot'],
@@ -222,6 +233,11 @@ registerProvider('github-copilot', {
   },
   priority: 5, // Medium priority - check after Cursor but before Claude
 });
+
+// Register GitHub Copilot Agent provider (autonomous agents)
+// NOTE: This is not registered as a separate provider in the registry,
+// but is accessed via getProviderForModel with agenticMode=true
+// This keeps the routing logic clean and avoids duplicate model registrations
 
 // Register Local LLM provider
 registerProvider('local-llm', {

@@ -272,12 +272,33 @@ export async function getGitRepositoryDiffs(
 
   const files = parseGitStatus(status);
 
+  // Filter out common build/dependency directories that should be ignored
+  // This prevents massive diffs when .gitignore is missing or incomplete
+  const ignoredPrefixes = [
+    'node_modules/',
+    'dist/',
+    'build/',
+    '.next/',
+    'target/',
+    'vendor/',
+    'out/',
+    '.cache/',
+    'coverage/',
+    '__pycache__/',
+    '.venv/',
+    'venv/',
+  ];
+
+  const filteredFiles = files.filter((file) => {
+    return !ignoredPrefixes.some((prefix) => file.path.startsWith(prefix));
+  });
+
   // Generate synthetic diffs for untracked (new) files
-  const combinedDiff = await appendUntrackedFileDiffs(repoPath, diff, files);
+  const combinedDiff = await appendUntrackedFileDiffs(repoPath, diff, filteredFiles);
 
   return {
     diff: combinedDiff,
-    files,
-    hasChanges: files.length > 0,
+    files: filteredFiles,
+    hasChanges: filteredFiles.length > 0,
   };
 }

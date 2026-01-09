@@ -23,7 +23,7 @@ import type {
 } from './types.js';
 import { stripProviderPrefix } from '@automaker/types';
 import { ALL_TOOLS, type ToolDefinition } from './local-llm-tools.js';
-import { LocalLLMToolExecutor, type ToolCall, type ToolResult } from './local-llm-tool-executor.js';
+import { ToolExecutor, type ToolCall, type ToolResult } from './tool-executor.js';
 
 const logger = createLogger('LocalLLMAgentProvider');
 
@@ -136,7 +136,7 @@ export class LocalLLMAgentProvider extends BaseProvider {
       const bareModel = stripProviderPrefix(model);
 
       // Initialize tool executor
-      const toolExecutor = new LocalLLMToolExecutor(this.projectRoot);
+      const toolExecutor = new ToolExecutor(this.projectRoot, 'LocalLLMAgentProvider');
 
       // Start agentic loop
       yield* this.agenticLoop(bareModel, messages, toolExecutor);
@@ -159,7 +159,7 @@ export class LocalLLMAgentProvider extends BaseProvider {
   private async *agenticLoop(
     model: string,
     initialMessages: ResponseMessage[],
-    toolExecutor: LocalLLMToolExecutor
+    toolExecutor: ToolExecutor
   ): AsyncGenerator<ProviderMessage> {
     let messages = [...initialMessages];
     let iteration = 0;

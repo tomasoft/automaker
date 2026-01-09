@@ -1,17 +1,19 @@
 /**
- * Tool executor for Local LLM agent
+ * Shared tool executor for agent providers
  *
- * Handles safe execution of tool calls requested by the model
+ * Handles safe execution of tool calls requested by AI models
  */
 
 import { promises as fs } from 'fs';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { createLogger } from '@automaker/utils';
+import { createLogger, type Logger } from '@automaker/utils';
 
 const execAsync = promisify(exec);
-const logger = createLogger('LocalLLMToolExecutor');
+
+// Re-export Logger type for convenience
+export type { Logger };
 
 export interface ToolCall {
   id: string;
@@ -32,15 +34,17 @@ export interface ToolResult {
 /**
  * Execute a tool call in the context of a project directory
  */
-export class LocalLLMToolExecutor {
+export class ToolExecutor {
   private projectRoot: string;
   private allowedCommands: Set<string>;
   private dangerousPatterns: RegExp[];
   private protectedPaths: string[];
+  private logger: Logger;
 
-  constructor(projectRoot: string) {
+  constructor(projectRoot: string, loggerName: string = 'ToolExecutor') {
     // Normalize project root to absolute path with resolved symlinks
     this.projectRoot = path.resolve(projectRoot);
+    this.logger = createLogger(loggerName);
 
     // Whitelist of allowed command prefixes for safety
     this.allowedCommands = new Set([
@@ -86,7 +90,7 @@ export class LocalLLMToolExecutor {
       '.env.local',
     ];
 
-    logger.info(`LocalLLMToolExecutor initialized with project root: ${this.projectRoot}`);
+    this.logger.info(`Tool executor initialized with project root: ${this.projectRoot}`);
   }
 
   /**
@@ -102,7 +106,7 @@ export class LocalLLMToolExecutor {
     for (const pattern of this.dangerousPatterns) {
       if (pattern.test(relPath)) {
         const error = `SECURITY VIOLATION: Dangerous pattern detected in path: ${relPath}`;
-        logger.error(error);
+        this.logger.error(error);
         throw new Error(error);
       }
     }
@@ -127,7 +131,7 @@ export class LocalLLMToolExecutor {
     // 4. CRITICAL: Ensure the real path is still within project root
     if (!realPath.startsWith(this.projectRoot)) {
       const error = `SECURITY VIOLATION: Path escapes project root!\n  Requested: ${relPath}\n  Resolved: ${realPath}\n  Project Root: ${this.projectRoot}`;
-      logger.error(error);
+      this.logger.error(error);
       throw new Error('Access denied: path outside project root');
     }
 
@@ -135,7 +139,7 @@ export class LocalLLMToolExecutor {
     const relativePath = path.relative(this.projectRoot, realPath);
     if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
       const error = `SECURITY VIOLATION: Relative path escapes project root: ${relativePath}`;
-      logger.error(error);
+      this.logger.error(error);
       throw new Error('Access denied: path outside project root');
     }
 
@@ -145,13 +149,13 @@ export class LocalLLMToolExecutor {
       for (const protectedPath of this.protectedPaths) {
         if (normalizedPath === protectedPath || normalizedPath.startsWith(protectedPath + '/')) {
           const error = `SECURITY VIOLATION: Attempt to delete protected path: ${normalizedPath}`;
-          logger.error(error);
+          this.logger.error(error);
           throw new Error(`Cannot delete protected path: ${protectedPath}`);
         }
       }
     }
 
-    logger.debug(`Path validated [${operation}]: ${relPath} -> ${realPath}`);
+    this.logger.debug(`Path validated [${operation}]: ${relPath} -> ${realPath}`);
     return realPath;
   }
 
@@ -162,8 +166,8 @@ export class LocalLLMToolExecutor {
     const { id, function: func } = toolCall;
     const { name, arguments: argsStr } = func;
 
-    logger.info(`Executing tool: ${name}`);
-    logger.debug(`Arguments: ${argsStr}`);
+    this.logger.info(`Executing tool: ${name}`);
+    this.logger.debug(`Arguments: ${argsStr}`);
 
     try {
       const args = JSON.parse(argsStr);
@@ -176,7 +180,7 @@ export class LocalLLMToolExecutor {
           let content = args.content;
           if (typeof content === 'object' && content !== null) {
             content = JSON.stringify(content, null, 2);
-            logger.info(`Auto-stringified object content for ${args.path}`);
+            this.logger.info(`Auto-stringified object content for ${args.path}`);
           }
           output = await this.createFile(args.path, content);
           break;
@@ -233,7 +237,7 @@ export class LocalLLMToolExecutor {
           throw new Error(`Unknown tool: ${name}`);
       }
 
-      logger.info(`Tool ${name} executed successfully`);
+      this.logger.info(`Tool ${name} executed successfully`);
       return {
         tool_call_id: id,
         output,
@@ -241,7 +245,7 @@ export class LocalLLMToolExecutor {
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      logger.error(`Tool ${name} execution failed:`, error);
+      this.logger.error(`Tool ${name} execution failed:`, error);
 
       return {
         tool_call_id: id,
@@ -283,7 +287,7 @@ export class LocalLLMToolExecutor {
     await fs.writeFile(fullPath, content, 'utf-8');
 
     const stats = await fs.stat(fullPath);
-    logger.info(`✅ File created: ${relPath} (${stats.size} bytes)`);
+    this.logger.info(`✅ File created: ${relPath} (${stats.size} bytes)`);
     return `File created: ${relPath} (${stats.size} bytes)`;
   }
 
@@ -292,7 +296,7 @@ export class LocalLLMToolExecutor {
     const fullPath = await this.validatePath(relPath, 'read');
 
     const content = await fs.readFile(fullPath, 'utf-8');
-    logger.debug(`📖 File read: ${relPath} (${content.length} chars)`);
+    this.logger.debug(`📖 File read: ${relPath} (${content.length} chars)`);
     return content;
   }
 
@@ -315,7 +319,7 @@ export class LocalLLMToolExecutor {
     const updatedContent = currentContent.replace(oldContent, newContent);
     await fs.writeFile(fullPath, updatedContent, 'utf-8');
 
-    logger.info(`✏️ File updated: ${relPath}`);
+    this.logger.info(`✏️ File updated: ${relPath}`);
     return `File updated: ${relPath}`;
   }
 
@@ -324,11 +328,11 @@ export class LocalLLMToolExecutor {
     const fullPath = await this.validatePath(relPath, 'delete');
 
     // Extra confirmation log before deletion
-    logger.warn(`⚠️  DELETING FILE: ${relPath}`);
+    this.logger.warn(`⚠️  DELETING FILE: ${relPath}`);
 
     await fs.unlink(fullPath);
 
-    logger.info(`🗑️  File deleted: ${relPath}`);
+    this.logger.info(`🗑️  File deleted: ${relPath}`);
     return `File deleted: ${relPath}`;
   }
 
@@ -342,7 +346,7 @@ export class LocalLLMToolExecutor {
       return `${type} ${entry.name}`;
     });
 
-    logger.debug(`📂 Listed directory: ${relPath} (${entries.length} entries)`);
+    this.logger.debug(`📂 Listed directory: ${relPath} (${entries.length} entries)`);
     return list.join('\n');
   }
 
@@ -351,7 +355,7 @@ export class LocalLLMToolExecutor {
   // ============================================================================
 
   private async executeCommand(command: string, reason: string): Promise<string> {
-    logger.info(`Executing command: ${command} (reason: ${reason})`);
+    this.logger.info(`Executing command: ${command} (reason: ${reason})`);
 
     // Security check: validate command is in whitelist
     const commandPrefix = command.split(' ')[0];
