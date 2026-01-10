@@ -401,7 +401,27 @@ export function GitDiffPanel({
     }
   }, [isExpanded, loadDiffs]);
 
-  const parsedDiffs = useMemo(() => parseDiff(diffContent), [diffContent]);
+  // Filter out ignored files and directories from parsed diffs as a safety measure
+  const ignoredFileNames = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'];
+  const ignoredDirPrefixes = ['.automaker/', '.worktrees/', 'node_modules/'];
+  const parsedDiffs = useMemo(() => {
+    const allDiffs = parseDiff(diffContent);
+    return allDiffs.filter((fileDiff) => {
+      const fileName =
+        fileDiff.filePath.split('/').pop() ||
+        fileDiff.filePath.split('\\').pop() ||
+        fileDiff.filePath;
+      // Check if file name is in ignored list
+      if (ignoredFileNames.includes(fileName)) {
+        return false;
+      }
+      // Check if file path starts with any ignored directory prefix
+      if (ignoredDirPrefixes.some((prefix) => fileDiff.filePath.startsWith(prefix))) {
+        return false;
+      }
+      return true;
+    });
+  }, [diffContent]);
 
   const toggleFile = (filePath: string) => {
     setExpandedFiles((prev) => {

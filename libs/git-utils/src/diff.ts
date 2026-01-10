@@ -129,6 +129,77 @@ ${addedLines}`;
 }
 
 /**
+ * Filter diff text to remove entries for ignored files and directories
+ */
+function filterDiffText(
+  diff: string,
+  ignoredFiles: string[],
+  ignoredPrefixes: string[] = []
+): string {
+  if (!diff || (ignoredFiles.length === 0 && ignoredPrefixes.length === 0)) {
+    return diff;
+  }
+
+  const lines = diff.split('\n');
+  const filteredLines: string[] = [];
+  let inIgnoredFile = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Check if this is a diff header for a file
+    if (line.startsWith('diff --git')) {
+      // Extract file path from "diff --git a/path b/path" or "diff --git "a/path" "b/path""
+      // Handle both quoted and unquoted paths
+      const match = line.match(/diff --git (?:a\/|"a\/)(.+?)(?:"| b\/|$)/);
+      if (match) {
+        const filePath = match[1].replace(/^"|"$/g, ''); // Remove quotes if present
+        const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || filePath;
+
+        // Check if this file should be ignored (exact match)
+        const isIgnoredFile = ignoredFiles.includes(fileName);
+
+        // Check if this file path starts with any ignored prefix
+        const isIgnoredPrefix = ignoredPrefixes.some((prefix) => filePath.startsWith(prefix));
+
+        if (isIgnoredFile || isIgnoredPrefix) {
+          inIgnoredFile = true;
+          continue; // Skip this line and all subsequent lines until next diff header
+        } else {
+          inIgnoredFile = false;
+        }
+      }
+    }
+
+    // If we're in an ignored file, skip all lines until the next diff header
+    if (inIgnoredFile) {
+      // Check if we've reached the next diff header (end of current file's diff)
+      if (line.startsWith('diff --git')) {
+        // This is the start of the next file's diff, reset state and check again
+        const match = line.match(/diff --git (?:a\/|"a\/)(.+?)(?:"| b\/|$)/);
+        if (match) {
+          const filePath = match[1].replace(/^"|"$/g, ''); // Remove quotes if present
+          const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || filePath;
+          const isIgnoredFile = ignoredFiles.includes(fileName);
+          const isIgnoredPrefix = ignoredPrefixes.some((prefix) => filePath.startsWith(prefix));
+          if (!isIgnoredFile && !isIgnoredPrefix) {
+            inIgnoredFile = false;
+            filteredLines.push(line); // Include the new diff header
+          }
+        }
+      }
+      // Skip all other lines for ignored files
+      continue;
+    }
+
+    // Include this line if we're not in an ignored file
+    filteredLines.push(line);
+  }
+
+  return filteredLines.join('\n');
+}
+
+/**
  * Generate synthetic diffs for all untracked files and combine with existing diff
  */
 export async function appendUntrackedFileDiffs(
@@ -287,6 +358,8 @@ export async function getGitRepositoryDiffs(
     '__pycache__/',
     '.venv/',
     'venv/',
+    '.automaker/',
+    '.worktrees/',
   ];
 
   // Files to ignore (exact matches or at any path level)
@@ -307,8 +380,12 @@ export async function getGitRepositoryDiffs(
     return true;
   });
 
+  // Filter the diff text to remove entries for ignored files and directories
+  // This handles cases where ignored files are already tracked by git
+  const filteredDiff = filterDiffText(diff, ignoredFiles, ignoredPrefixes);
+
   // Generate synthetic diffs for untracked (new) files
-  const combinedDiff = await appendUntrackedFileDiffs(repoPath, diff, filteredFiles);
+  const combinedDiff = await appendUntrackedFileDiffs(repoPath, filteredDiff, filteredFiles);
 
   return {
     diff: combinedDiff,
