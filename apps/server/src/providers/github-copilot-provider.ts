@@ -55,9 +55,9 @@ export class GitHubCopilotProvider extends BaseProvider {
   private authManager: CopilotAuthManager;
   private cachedModels: string[] | null = null;
 
-  constructor(config: { githubToken?: string } = {}) {
-    super(config);
-    this.authManager = new CopilotAuthManager(config.githubToken);
+  constructor(config?: { githubToken?: string }) {
+    super(config || {});
+    this.authManager = new CopilotAuthManager(config?.githubToken);
   }
 
   getName(): string {
@@ -337,21 +337,29 @@ export class GitHubCopilotProvider extends BaseProvider {
         return [];
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as
+        | {
+            data?: Array<{ id?: string; model?: string; name?: string }>;
+          }
+        | Array<{ id?: string; model?: string; name?: string }>;
       logger.info('Fetched available models from Copilot API:', data);
 
       // Extract model IDs from the response
       // The API response format varies, but typically has a 'data' array with model objects
-      if (Array.isArray(data?.data)) {
-        this.cachedModels = data.data.map((m: any) => m.id || m.model || m.name).filter(Boolean);
+      if (Array.isArray((data as any)?.data)) {
+        this.cachedModels = (data as any).data
+          .map((m: any) => m.id || m.model || m.name)
+          .filter(Boolean);
       } else if (Array.isArray(data)) {
-        this.cachedModels = data.map((m: any) => m.id || m.model || m.name).filter(Boolean);
+        this.cachedModels = (data as any[])
+          .map((m: any) => m.id || m.model || m.name)
+          .filter(Boolean);
       } else {
         this.cachedModels = [];
       }
 
-      logger.info(`Available Copilot models: ${this.cachedModels.join(', ')}`);
-      return this.cachedModels;
+      logger.info(`Available Copilot models: ${this.cachedModels?.join(', ') || 'none'}`);
+      return this.cachedModels || [];
     } catch (error) {
       logger.error('Error fetching available models:', error);
       return [];

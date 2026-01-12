@@ -278,6 +278,75 @@ export function getProfileModelString(profile: AIProfile): string {
 }
 
 /**
+ * WikiPageCache - Cached wiki page content for offline support
+ *
+ * Stores fetched wiki pages with metadata for offline fallback and staleness detection.
+ */
+export interface WikiPageCache {
+  /** Wiki page path (e.g., "Coding/Features-Architecture") */
+  path: string;
+  /** Page title */
+  title: string;
+  /** Markdown content of the page */
+  content: string;
+  /** ISO timestamp when page was last fetched */
+  lastFetched: string;
+  /** ETag for HTTP 304 cache validation */
+  etag?: string;
+}
+
+/**
+ * AzureDevOpsConfig - Azure DevOps organization and wiki configuration
+ *
+ * Stores the authenticated organization, project, and wiki details.
+ * OAuth tokens are managed separately in session storage.
+ */
+export interface AzureDevOpsConfig {
+  /** Azure DevOps organization name */
+  organization: string;
+  /** Project name within the organization */
+  project: string;
+  /** Wiki identifier (name or ID) */
+  wikiId: string;
+  /** Authenticated user principal name or email */
+  authenticatedUser?: string;
+  /** Webhook subscription ID for real-time updates */
+  webhookId?: string;
+  /** Webhook callback URL registered with Azure DevOps */
+  webhookUrl?: string;
+  /** ISO timestamp of last wiki index refresh */
+  lastIndexed?: string;
+}
+
+/**
+ * SkillDefinition - Parsed SKILL.md file with metadata
+ *
+ * Represents a skill available to agents for contextual knowledge injection.
+ */
+export interface SkillDefinition {
+  /** Unique skill identifier (directory name) */
+  id: string;
+  /** Skill name from YAML frontmatter */
+  name: string;
+  /** Description of when to use this skill */
+  description: string;
+  /** Skill scope: global or project-specific */
+  scope: 'global' | 'project';
+  /** Tags for additional matching context */
+  tags?: string[];
+  /** License information */
+  license?: string;
+  /** Full markdown content (excluding frontmatter) */
+  content: string;
+  /** Absolute path to the SKILL.md file */
+  filePath: string;
+  /** Whether this skill is enabled for auto-selection */
+  enabled: boolean;
+  /** ISO timestamp of last usage (for analytics) */
+  lastUsed?: string;
+}
+
+/**
  * MCPToolInfo - Information about a tool provided by an MCP server
  *
  * Contains the tool's name, description, and whether it's enabled for use.
@@ -486,6 +555,18 @@ export interface GlobalSettings {
   // Prompt Customization
   /** Custom prompts for Auto Mode, Agent Runner, Backlog Planning, and Enhancements */
   promptCustomization?: PromptCustomization;
+
+  // Azure DevOps Integration
+  /** Azure DevOps organization and wiki configuration */
+  azureDevOps?: AzureDevOpsConfig;
+
+  // Skills System Configuration
+  /** Enable automatic skill loading based on task relevance */
+  skillsAutoLoad: boolean;
+  /** Maximum number of skills to auto-select per task */
+  maxAutoSelectedSkills: number;
+  /** Minimum similarity threshold (0.0-1.0) for skill auto-selection */
+  skillSimilarityThreshold: number;
 }
 
 /**
@@ -585,6 +666,10 @@ export interface ProjectSettings {
   // Claude Agent SDK Settings
   /** Auto-load CLAUDE.md files using SDK's settingSources option (project override) */
   autoLoadClaudeMd?: boolean;
+
+  // Skills System Configuration (project-specific overrides)
+  /** Skills explicitly disabled at project level (by skill ID) */
+  disabledSkills?: string[];
 }
 
 /**
@@ -675,6 +760,9 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   enableSandboxMode: false,
   skipSandboxWarning: false,
   mcpServers: [],
+  skillsAutoLoad: true,
+  maxAutoSelectedSkills: 3,
+  skillSimilarityThreshold: 0.3,
 };
 
 /** Default credentials (empty strings - user must provide API keys) */

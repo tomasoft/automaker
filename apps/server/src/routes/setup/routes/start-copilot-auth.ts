@@ -52,7 +52,7 @@ export function createStartCopilotAuthHandler() {
         throw new Error(`Failed to request device code: ${response.statusText}`);
       }
 
-      const deviceCode: DeviceCodeResponse = await response.json();
+      const deviceCode = (await response.json()) as DeviceCodeResponse;
 
       // Store for polling endpoint to complete
       pendingAuths.set(deviceCode.device_code, {

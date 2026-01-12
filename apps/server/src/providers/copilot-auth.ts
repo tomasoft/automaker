@@ -24,9 +24,11 @@ interface DeviceCodeResponse {
 }
 
 interface AccessTokenResponse {
-  access_token: string;
-  token_type: string;
-  scope: string;
+  access_token?: string;
+  token_type?: string;
+  scope?: string;
+  error?: string;
+  error_description?: string;
 }
 
 interface CopilotTokenResponse {
@@ -165,7 +167,7 @@ export class CopilotAuthManager {
       throw new Error(`Failed to request device code: ${response.statusText}`);
     }
 
-    return response.json();
+    return response.json() as Promise<DeviceCodeResponse>;
   }
 
   /**
@@ -193,7 +195,7 @@ export class CopilotAuthManager {
           }),
         });
 
-        const data = await response.json();
+        const data = (await response.json()) as AccessTokenResponse;
 
         if (data.error === 'authorization_pending') {
           // Still waiting for user to authorize
@@ -234,7 +236,7 @@ export class CopilotAuthManager {
       );
     }
 
-    return response.json();
+    return response.json() as Promise<CopilotTokenResponse>;
   }
 
   /**
@@ -293,7 +295,7 @@ export class CopilotAuthManager {
         };
       }
 
-      const userData = await userResponse.json();
+      const userData = (await userResponse.json()) as { login?: string };
       const username = userData.login;
       logger.info(`[CopilotAuth] Authenticated as: ${username}`);
 

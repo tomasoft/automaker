@@ -260,7 +260,7 @@ export class AgentService {
       // Build SDK options using centralized configuration
       // Use thinking level from request, or fall back to session's stored thinking level
       const effectiveThinkingLevel = thinkingLevel ?? session.thinkingLevel;
-      const sdkOptions = createChatOptions({
+      const sdkOptions = await createChatOptions({
         cwd: effectiveWorkDir,
         model: model,
         sessionModel: session.model,
@@ -273,9 +273,9 @@ export class AgentService {
       });
 
       // Extract model, maxTurns, and allowedTools from SDK options
-      const effectiveModel = sdkOptions.model!;
-      const maxTurns = sdkOptions.maxTurns;
-      const allowedTools = sdkOptions.allowedTools as string[] | undefined;
+      const effectiveModel = sdkOptions.options.model!;
+      const maxTurns = sdkOptions.options.maxTurns;
+      const allowedTools = sdkOptions.options.allowedTools as string[] | undefined;
 
       // Get provider for this model
       const provider = ProviderFactory.getProviderForModel(effectiveModel);
@@ -285,13 +285,13 @@ export class AgentService {
         prompt: '', // Will be set below based on images
         model: effectiveModel,
         cwd: effectiveWorkDir,
-        systemPrompt: sdkOptions.systemPrompt,
+        systemPrompt: sdkOptions.options.systemPrompt,
         maxTurns: maxTurns,
         allowedTools: allowedTools,
         abortController: session.abortController!,
         conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
-        settingSources: sdkOptions.settingSources,
-        sandbox: sdkOptions.sandbox, // Pass sandbox configuration
+        settingSources: sdkOptions.options.settingSources,
+        sandbox: sdkOptions.options.sandbox, // Pass sandbox configuration
         sdkSessionId: session.sdkSessionId, // Pass SDK session ID for resuming
         mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined, // Pass MCP servers configuration
       };

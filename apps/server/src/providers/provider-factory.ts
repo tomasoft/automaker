@@ -167,9 +167,11 @@ export class ProviderFactory {
   /**
    * Get all available models from all providers
    */
-  static getAllAvailableModels(): ModelDefinition[] {
+  static async getAllAvailableModels(): Promise<ModelDefinition[]> {
     const providers = this.getAllProviders();
-    return providers.flatMap((p) => p.getAvailableModels());
+    const modelsPromises = providers.map((p) => p.getAvailableModels());
+    const modelsArrays = await Promise.all(modelsPromises);
+    return modelsArrays.flat();
   }
 
   /**

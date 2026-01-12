@@ -38,7 +38,7 @@ export function createGetLocalLLMModelsHandler() {
         throw new Error(`Server returned ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as { data?: LocalLLMModel[] };
 
       if (!data.data || !Array.isArray(data.data)) {
         logger.warn('Unexpected response format from models endpoint:', data);

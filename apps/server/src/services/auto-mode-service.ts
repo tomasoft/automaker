@@ -2440,7 +2440,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
     // Load MCP permission settings (global setting only)
 
     // Build SDK options using centralized configuration for feature implementation
-    const sdkOptions = createAutoModeOptions({
+    const sdkOptions = await createAutoModeOptions({
       cwd: workDir,
       model: model,
       abortController,
@@ -2451,9 +2451,9 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
     });
 
     // Extract model, maxTurns, and allowedTools from SDK options
-    const finalModel = sdkOptions.model!;
-    const maxTurns = sdkOptions.maxTurns;
-    const allowedTools = sdkOptions.allowedTools as string[] | undefined;
+    const finalModel = sdkOptions.options.model!;
+    const maxTurns = sdkOptions.options.maxTurns;
+    const allowedTools = sdkOptions.options.allowedTools as string[] | undefined;
 
     logger.info(
       `runAgent called for feature ${featureId} with model: ${finalModel}, planningMode: ${planningMode}, requiresApproval: ${requiresApproval}`
@@ -2489,9 +2489,9 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
       cwd: workDir,
       allowedTools: allowedTools,
       abortController,
-      systemPrompt: sdkOptions.systemPrompt,
-      settingSources: sdkOptions.settingSources,
-      sandbox: sdkOptions.sandbox, // Pass sandbox configuration
+      systemPrompt: sdkOptions.options.systemPrompt,
+      settingSources: sdkOptions.options.settingSources,
+      sandbox: sdkOptions.options.sandbox, // Pass sandbox configuration
       mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined, // Pass MCP servers configuration
       thinkingLevel: options?.thinkingLevel, // Pass thinking level for extended thinking
     };
@@ -3312,7 +3312,8 @@ Implement all the changes described in the plan above.`;
             // Handle approval/auto-approval and task execution
             let approvedPlanContent = planContent;
             const requiresApproval =
-              planningMode === 'full' || (planningMode === 'spec' && requirePlanApproval);
+              planningMode === 'full' ||
+              (planningMode === 'spec' && options?.requirePlanApproval === true);
 
             if (requiresApproval) {
               logger.info(`Spec generated for feature ${featureId}, waiting for approval`);
@@ -3331,12 +3332,12 @@ Implement all the changes described in the plan above.`;
 
               if (approvalResult.approved) {
                 logger.info(`Plan approved for feature ${featureId}`);
-                approvedPlanContent = approvalResult.editedContent || planContent;
+                approvedPlanContent = approvalResult.editedPlan || planContent;
 
                 this.emitAutoModeEvent('plan_approved', {
                   featureId,
                   projectPath,
-                  hasEdits: !!approvalResult.editedContent,
+                  hasEdits: !!approvalResult.editedPlan,
                 });
               } else {
                 throw new Error('Plan approval cancelled');
@@ -3382,9 +3383,9 @@ Implement all the changes described in the plan above.`;
 
                 const taskPrompt = this.buildTaskPrompt(
                   task,
-                  approvedPlanContent,
+                  parsedTasks,
                   taskIndex,
-                  parsedTasks.length
+                  approvedPlanContent
                 );
 
                 const taskStream = provider.executeQuery({

@@ -56,7 +56,7 @@ export function createPollCopilotAuthHandler() {
         }),
       });
 
-      const data: AccessTokenResponse = await response.json();
+      const data = (await response.json()) as AccessTokenResponse;
 
       if (data.error === 'authorization_pending') {
         // Still waiting

@@ -2118,6 +2118,57 @@ export class HttpApiClient implements ElectronAPI {
     ): Promise<{ success: boolean; error?: string }> =>
       this.post('/api/pipeline/steps/reorder', { projectPath, stepIds }),
   };
+
+  // Azure DevOps Wiki API
+  azureDevOpsWiki = {
+    listWikis: async (): Promise<{
+      success: boolean;
+      wikis?: Array<{ id: string; name: string; type: string; url: string }>;
+      error?: string;
+    }> => {
+      const serverUrl = await this.getServerUrl();
+      const response = await fetch(`${serverUrl}/api/azure-devops-wiki/wikis`);
+      return response.json();
+    },
+
+    listPages: async (data: {
+      organization: string;
+      project: string;
+      wikiId: string;
+      path?: string;
+    }): Promise<{
+      success: boolean;
+      pages?: Array<{ id: string; path: string; name: string }>;
+      error?: string;
+    }> => {
+      const serverUrl = await this.getServerUrl();
+      const response = await fetch(`${serverUrl}/api/azure-devops-wiki/pages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return response.json();
+    },
+
+    getPage: async (data: {
+      organization: string;
+      project: string;
+      wikiId: string;
+      path: string;
+    }): Promise<{
+      success: boolean;
+      page?: { content: string; path: string; metadata: Record<string, unknown> };
+      error?: string;
+    }> => {
+      const serverUrl = await this.getServerUrl();
+      const response = await fetch(`${serverUrl}/api/azure-devops-wiki/page`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return response.json();
+    },
+  };
 }
 
 // Singleton instance

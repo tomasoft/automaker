@@ -7,11 +7,14 @@ export type SettingsViewId =
   | 'mcp-servers'
   | 'prompts'
   | 'model-defaults'
+  | 'paths'
   | 'appearance'
   | 'terminal'
   | 'keyboard'
   | 'audio'
   | 'defaults'
+  | 'wiki-sources'
+  | 'skills'
   | 'danger';
 
 interface UseSettingsViewOptions {

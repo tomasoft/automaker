@@ -108,14 +108,21 @@ export function CopilotSettingsTab() {
               </div>
             )}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.open('https://github.com/settings/copilot', '_blank', 'noopener')}
-          >
-            <ExternalLink className="w-3.5 h-3.5 mr-2" />
-            Manage Subscription
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={handleRunSetup} variant="outline" size="sm">
+              Re-authenticate
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                window.open('https://github.com/settings/copilot', '_blank', 'noopener')
+              }
+            >
+              <ExternalLink className="w-3.5 h-3.5 mr-2" />
+              Manage Subscription
+            </Button>
+          </div>
         </div>
       )}
 
@@ -173,25 +180,6 @@ export function CopilotSettingsTab() {
           onModelToggle={handleModelToggle}
           isSaving={isSaving}
         />
-      )}
-
-      {/* Re-authenticate */}
-      {(status?.authenticated || status?.hasApiKey) && (
-        <div className="rounded-2xl overflow-hidden border border-border/50 bg-card/50 backdrop-blur-xl">
-          <div className="p-6 border-b border-border/50">
-            <h3 className="text-lg font-semibold text-foreground tracking-tight mb-1">
-              Manage Authentication
-            </h3>
-            <p className="text-sm text-muted-foreground/80">
-              Re-authenticate or change your GitHub account
-            </p>
-          </div>
-          <div className="p-6">
-            <Button onClick={handleRunSetup} variant="outline" className="w-full">
-              Re-authenticate
-            </Button>
-          </div>
-        </div>
       )}
     </div>
   );

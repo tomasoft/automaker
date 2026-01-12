@@ -27,9 +27,14 @@ import {
   CLAUDE_MODEL_MAP,
   type McpServerConfig,
   type ThinkingLevel,
+  type GlobalSettings,
+  type ProjectSettings,
   getThinkingTokenBudget,
 } from '@automaker/types';
 import { isPathAllowed, PathNotAllowedError, getAllowedRootDirectory } from '@automaker/platform';
+import { SkillsLoaderService } from '../services/skills-loader.js';
+import { WikiService } from '../services/wiki-service.js';
+import type { LoadedSkill } from '../services/skills-loader.js';
 
 /**
  * Validate that a working directory is allowed by ALLOWED_ROOT_DIRECTORY.
@@ -395,6 +400,86 @@ export interface SystemPromptConfig {
 }
 
 /**
+ * Skills loading result for SDK integration
+ */
+export interface SkillsOptionsResult {
+  /** Enhanced system prompt with skills appended */
+  systemPrompt: string;
+  /** Loaded skills metadata for event emission */
+  loadedSkills: LoadedSkill[];
+  /** Wiki pages used during skill resolution */
+  wikiPagesUsed: Array<{ path: string; title: string; isCached: boolean; isStale: boolean }>;
+  /** Warnings from skill loading process */
+  warnings: string[];
+}
+
+/**
+ * Build skills configuration for SDK options.
+ * Auto-loads and scores SKILL.md files based on user message similarity,
+ * resolves wiki placeholders, and formats for prompt injection.
+ *
+ * @param config - The SDK options config
+ * @param baseSystemPrompt - The base system prompt to enhance
+ * @returns Enhanced system prompt with skills and metadata for event emission
+ */
+async function buildSkillsOptions(
+  config: CreateSdkOptionsConfig,
+  baseSystemPrompt: string
+): Promise<SkillsOptionsResult | null> {
+  // Skip skills if disabled or missing required config
+  if (
+    !config.enableSkills ||
+    !config.userMessage ||
+    !config.globalSettings ||
+    !config.cwd ||
+    !config.dataDir
+  ) {
+    return null;
+  }
+
+  try {
+    const skillsLoader = new SkillsLoaderService(
+      config.globalSettings,
+      config.projectSettings,
+      config.cwd,
+      config.dataDir,
+      config.wikiService
+    );
+
+    const result = await skillsLoader.loadSkills(config.userMessage, {
+      maxSkills: config.globalSettings.maxAutoSelectedSkills ?? 3,
+      similarityThreshold: config.globalSettings.skillSimilarityThreshold ?? 0.3,
+      disabledSkills: config.projectSettings?.disabledSkills,
+    });
+
+    if (result.skills.length === 0) {
+      logger.debug('No skills matched user message');
+      return null;
+    }
+
+    // Format skills for prompt injection
+    const skillsPrompt = skillsLoader.formatSkillsForPrompt(result.skills);
+
+    // Append skills to base system prompt
+    const enhancedSystemPrompt = `${baseSystemPrompt}\n\n${skillsPrompt}`;
+
+    logger.info(
+      `Loaded ${result.skills.length} skills: ${result.skills.map((s) => s.name).join(', ')}`
+    );
+
+    return {
+      systemPrompt: enhancedSystemPrompt,
+      loadedSkills: result.skills,
+      wikiPagesUsed: result.wikiPagesUsed,
+      warnings: result.warnings,
+    };
+  } catch (error) {
+    logger.error('Error loading skills:', error);
+    return null;
+  }
+}
+
+/**
  * Options configuration for creating SDK options
  */
 export interface CreateSdkOptionsConfig {
@@ -436,6 +521,24 @@ export interface CreateSdkOptionsConfig {
 
   /** Extended thinking level for Claude models */
   thinkingLevel?: ThinkingLevel;
+
+  /** User message for skills auto-selection (required when enableSkills is true) */
+  userMessage?: string;
+
+  /** Enable auto-loading of skills based on message similarity */
+  enableSkills?: boolean;
+
+  /** Global settings for skills configuration */
+  globalSettings?: GlobalSettings;
+
+  /** Project settings for skills configuration */
+  projectSettings?: ProjectSettings;
+
+  /** Data directory for skills cache and audit logging */
+  dataDir?: string;
+
+  /** Wiki service instance for placeholder resolution */
+  wikiService?: WikiService;
 }
 
 // Re-export MCP types from @automaker/types for convenience
@@ -556,8 +659,13 @@ export function createSuggestionsOptions(config: CreateSdkOptionsConfig): Option
  * - Model priority: explicit model > session model > chat default
  * - Sandbox mode controlled by enableSandboxMode setting (auto-disabled for cloud storage)
  * - When autoLoadClaudeMd is true, uses preset mode and settingSources for CLAUDE.md loading
+ * - When enableSkills is true, auto-loads relevant SKILL.md files based on user message
+ *
+ * @returns Object with SDK options and optional skills metadata
  */
-export function createChatOptions(config: CreateSdkOptionsConfig): Options {
+export async function createChatOptions(
+  config: CreateSdkOptionsConfig
+): Promise<{ options: Options; skillsResult?: SkillsOptionsResult }> {
   // Validate working directory before creating options
   validateWorkingDirectory(config.cwd);
 
@@ -576,7 +684,16 @@ export function createChatOptions(config: CreateSdkOptionsConfig): Options {
   // Check sandbox compatibility (auto-disables for cloud storage paths)
   const sandboxCheck = checkSandboxCompatibility(config.cwd, config.enableSandboxMode);
 
-  return {
+  // Determine the base system prompt (either from config or empty)
+  const baseSystemPrompt = config.systemPrompt || '';
+
+  // Build skills options if enabled
+  const skillsResult = await buildSkillsOptions(config, baseSystemPrompt);
+
+  // Use enhanced system prompt if skills loaded, otherwise use base
+  const finalSystemPrompt = skillsResult ? skillsResult.systemPrompt : baseSystemPrompt;
+
+  const options: Options = {
     ...getBaseOptions(),
     model: getModelForUseCase('chat', effectiveModel),
     maxTurns: MAX_TURNS.standard,
@@ -592,10 +709,13 @@ export function createChatOptions(config: CreateSdkOptionsConfig): Options {
       },
     }),
     ...claudeMdOptions,
+    ...(finalSystemPrompt && { systemPrompt: finalSystemPrompt }), // Apply final system prompt
     ...thinkingOptions,
     ...(config.abortController && { abortController: config.abortController }),
     ...mcpOptions.mcpServerOptions,
   };
+
+  return { options, skillsResult: skillsResult || undefined };
 }
 
 /**
@@ -607,8 +727,13 @@ export function createChatOptions(config: CreateSdkOptionsConfig): Options {
  * - Uses default model (can be overridden)
  * - Sandbox mode controlled by enableSandboxMode setting (auto-disabled for cloud storage)
  * - When autoLoadClaudeMd is true, uses preset mode and settingSources for CLAUDE.md loading
+ * - When enableSkills is true, auto-loads relevant SKILL.md files based on user message
+ *
+ * @returns Object with SDK options and optional skills metadata
  */
-export function createAutoModeOptions(config: CreateSdkOptionsConfig): Options {
+export async function createAutoModeOptions(
+  config: CreateSdkOptionsConfig
+): Promise<{ options: Options; skillsResult?: SkillsOptionsResult }> {
   // Validate working directory before creating options
   validateWorkingDirectory(config.cwd);
 
@@ -624,7 +749,16 @@ export function createAutoModeOptions(config: CreateSdkOptionsConfig): Options {
   // Check sandbox compatibility (auto-disables for cloud storage paths)
   const sandboxCheck = checkSandboxCompatibility(config.cwd, config.enableSandboxMode);
 
-  return {
+  // Determine the base system prompt (either from config or empty)
+  const baseSystemPrompt = config.systemPrompt || '';
+
+  // Build skills options if enabled
+  const skillsResult = await buildSkillsOptions(config, baseSystemPrompt);
+
+  // Use enhanced system prompt if skills loaded, otherwise use base
+  const finalSystemPrompt = skillsResult ? skillsResult.systemPrompt : baseSystemPrompt;
+
+  const options: Options = {
     ...getBaseOptions(),
     model: getModelForUseCase('auto', config.model),
     maxTurns: MAX_TURNS.maximum,
@@ -640,10 +774,13 @@ export function createAutoModeOptions(config: CreateSdkOptionsConfig): Options {
       },
     }),
     ...claudeMdOptions,
+    ...(finalSystemPrompt && { systemPrompt: finalSystemPrompt }), // Apply final system prompt
     ...thinkingOptions,
     ...(config.abortController && { abortController: config.abortController }),
     ...mcpOptions.mcpServerOptions,
   };
+
+  return { options, skillsResult: skillsResult || undefined };
 }
 
 /**

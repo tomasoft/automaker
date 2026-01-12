@@ -205,7 +205,7 @@ export class IdeationService {
       const modelId = resolveModelString(options?.model ?? 'sonnet');
 
       // Create SDK options
-      const sdkOptions = createChatOptions({
+      const sdkOptions = await createChatOptions({
         cwd: projectPath,
         model: modelId,
         systemPrompt,
@@ -218,7 +218,7 @@ export class IdeationService {
         prompt: message,
         model: modelId,
         cwd: projectPath,
-        systemPrompt: sdkOptions.systemPrompt,
+        systemPrompt: sdkOptions.options.systemPrompt,
         maxTurns: 1, // Single turn for ideation
         abortController: activeSession.abortController!,
         conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
@@ -652,7 +652,7 @@ export class IdeationService {
       const modelId = resolveModelString('sonnet');
 
       // Create SDK options
-      const sdkOptions = createChatOptions({
+      const sdkOptions = await createChatOptions({
         cwd: projectPath,
         model: modelId,
         systemPrompt,
@@ -665,7 +665,7 @@ export class IdeationService {
         prompt: prompt.prompt,
         model: modelId,
         cwd: projectPath,
-        systemPrompt: sdkOptions.systemPrompt,
+        systemPrompt: sdkOptions.options.systemPrompt,
         maxTurns: 1,
         // Disable all tools - we just want text generation, not codebase analysis
         allowedTools: [],

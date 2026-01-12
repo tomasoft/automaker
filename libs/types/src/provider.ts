@@ -11,6 +11,7 @@ export interface ProviderConfig {
   apiKey?: string;
   cliPath?: string;
   env?: Record<string, string>;
+  [key: string]: unknown; // Allow provider-specific config
 }
 
 /**
@@ -135,11 +136,15 @@ export interface InstallationStatus {
    * - npm: Installed via npm
    * - brew: Installed via Homebrew
    * - sdk: Using SDK library
+   * - api: Direct API access (e.g., GitHub Copilot, local LLM server)
+   * - local: Local server (e.g., Ollama, LM Studio)
    */
-  method?: 'cli' | 'wsl' | 'npm' | 'brew' | 'sdk';
+  method?: 'cli' | 'wsl' | 'npm' | 'brew' | 'sdk' | 'api' | 'local';
   hasApiKey?: boolean;
   authenticated?: boolean;
   error?: string;
+  models?: ModelDefinition[]; // Available models if provider supports dynamic model listing
+  [key: string]: unknown; // Allow provider-specific data
 }
 
 /**

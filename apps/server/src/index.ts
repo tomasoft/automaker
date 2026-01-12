@@ -65,6 +65,9 @@ import { createIdeationRoutes } from './routes/ideation/index.js';
 import { IdeationService } from './services/ideation-service.js';
 import { createCopilotRoutes } from './routes/copilot/index.js';
 import createLocalLLMRoutes from './routes/local-llm/index.js';
+import azureAuthRoutes from './routes/azure-devops-auth/index.js';
+import { createAzureDevOpsWikiRoutes } from './routes/azure-devops-wiki/index.js';
+import { createWebhookRoutes } from './routes/webhooks.js';
 
 // Load environment variables
 dotenv.config();
@@ -193,12 +196,16 @@ app.use('/api', requireJsonContentType);
 // Mount API routes - health and auth are unauthenticated
 app.use('/api/health', createHealthRoutes());
 app.use('/api/auth', createAuthRoutes());
+app.use('/api/azure-auth', azureAuthRoutes);
 
 // Apply authentication to all other routes
 app.use('/api', authMiddleware);
 
 // Protected health endpoint with detailed info
 app.get('/api/health/detailed', createDetailedHandler());
+
+// Azure DevOps wiki routes (requires authentication)
+app.use('/api/azure-devops-wiki', createAzureDevOpsWikiRoutes());
 
 app.use('/api/fs', createFsRoutes(events));
 app.use('/api/agent', createAgentRoutes(agentService, events));
@@ -226,6 +233,7 @@ app.use('/api/pipeline', createPipelineRoutes(pipelineService));
 app.use('/api/ideation', createIdeationRoutes(events, ideationService, featureLoader));
 app.use('/api/copilot', createCopilotRoutes());
 app.use('/api/local-llm', createLocalLLMRoutes);
+app.use('/api/webhooks', createWebhookRoutes(settingsService));
 
 // Create HTTP server
 const server = createServer(app);

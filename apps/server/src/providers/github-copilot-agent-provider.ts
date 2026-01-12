@@ -78,10 +78,10 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
   private projectRoot: string;
   private cachedModels: string[] | null = null;
 
-  constructor(config: { githubToken?: string; projectRoot?: string } = {}) {
-    super(config);
-    this.authManager = new CopilotAuthManager(config.githubToken);
-    this.projectRoot = config.projectRoot || process.cwd();
+  constructor(config?: { githubToken?: string; projectRoot?: string }) {
+    super(config || {});
+    this.authManager = new CopilotAuthManager(config?.githubToken);
+    this.projectRoot = config?.projectRoot || process.cwd();
     this.maxIterations = 20; // Maximum number of tool-calling iterations
     logger.info(`GitHubCopilotAgentProvider initialized`);
   }
@@ -321,9 +321,9 @@ Instead of calling tools repeatedly:
 
         // Yield tool execution update
         yield {
-          type: 'info',
-          message: `Tool ${toolCalls.find((tc) => tc.id === result.tool_call_id)?.function.name}: ${result.success ? 'Success' : 'Failed'}`,
-        };
+          type: 'result',
+          result: `Tool ${toolCalls.find((tc) => tc.id === result.tool_call_id)?.function.name}: ${result.success ? 'Success' : 'Failed'}`,
+        } as ProviderMessage;
       }
 
       // Add blocked tool results (exploration calls that exceeded limit)
@@ -374,7 +374,7 @@ Instead of calling tools repeatedly:
 
       yield {
         type: 'result',
-        subtype: 'partial',
+        subtype: 'success',
         result: normalizedResult,
       };
     }
@@ -652,7 +652,9 @@ Example: Instead of "mkdir -p src/utils", use create_file tool with path="src/ut
       return modelIds.map((modelId) => ({
         id: `copilot-${modelId}`,
         name: this.formatModelName(modelId),
+        modelString: `copilot-${modelId}`,
         provider: 'github-copilot-agent',
+        description: `GitHub Copilot ${this.formatModelName(modelId)}`,
         supportsTools: true, // All Copilot models support tools for agents
       }));
     } catch (error) {
@@ -685,8 +687,8 @@ Example: Instead of "mkdir -p src/utils", use create_file tool with path="src/ut
         throw new Error(`Failed to fetch models: ${response.statusText}`);
       }
 
-      const data = await response.json();
-      const models = data.data?.map((model: any) => model.id) || [];
+      const data = (await response.json()) as { data?: Array<{ id: string }> };
+      const models = data.data?.map((model) => model.id) || [];
 
       this.cachedModels = models;
       return models;

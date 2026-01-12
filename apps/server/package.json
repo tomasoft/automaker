@@ -33,10 +33,13 @@
     "@automaker/types": "1.0.0",
     "@automaker/utils": "1.0.0",
     "@modelcontextprotocol/sdk": "^1.25.2",
+    "@types/js-yaml": "^4.0.9",
+    "azure-devops-node-api": "^15.1.2",
     "cookie-parser": "1.4.7",
     "cors": "2.8.5",
     "dotenv": "17.2.3",
     "express": "5.2.1",
+    "js-yaml": "^4.1.1",
     "morgan": "1.10.1",
     "node-pty": "1.1.0-beta41",
     "ws": "8.18.3"

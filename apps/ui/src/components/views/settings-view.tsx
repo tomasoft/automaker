@@ -19,6 +19,9 @@ import { DangerZoneSection } from './settings-view/danger-zone/danger-zone-secti
 import { ProviderTabs } from './settings-view/providers';
 import { MCPServersSection } from './settings-view/mcp-servers';
 import { PromptCustomizationSection } from './settings-view/prompts';
+import { WikiSourcesSection } from './settings-view/wiki-sources/wiki-sources-section';
+import { SkillsSection } from './settings-view/skills/skills-section';
+import { PathsSection } from './settings-view/paths/paths-section';
 import type { Project as SettingsProject, Theme } from './settings-view/shared/types';
 import type { Project as ElectronProject } from '@/lib/electron';
 
@@ -106,6 +109,12 @@ export function SettingsView() {
         );
       case 'model-defaults':
         return <ModelDefaultsSection />;
+      case 'paths':
+        return <PathsSection />;
+      case 'wiki-sources':
+        return <WikiSourcesSection />;
+      case 'skills':
+        return <SkillsSection />;
       case 'appearance':
         return (
           <AppearanceSection

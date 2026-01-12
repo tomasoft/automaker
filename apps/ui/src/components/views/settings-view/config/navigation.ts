@@ -11,6 +11,9 @@ import {
   Workflow,
   Plug,
   MessageSquareText,
+  BookOpen,
+  FileCode,
+  FolderCog,
 } from 'lucide-react';
 import type { SettingsViewId } from '../hooks/use-settings-view';
 
@@ -27,6 +30,9 @@ export const NAV_ITEMS: NavigationItem[] = [
   { id: 'mcp-servers', label: 'MCP Servers', icon: Plug },
   { id: 'prompts', label: 'Prompt Customization', icon: MessageSquareText },
   { id: 'model-defaults', label: 'Model Defaults', icon: Workflow },
+  { id: 'paths', label: 'Paths', icon: FolderCog },
+  { id: 'wiki-sources', label: 'DevOps Resources', icon: BookOpen },
+  { id: 'skills', label: 'Skills', icon: FileCode },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
   { id: 'keyboard', label: 'Keyboard Shortcuts', icon: Settings2 },

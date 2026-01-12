@@ -48,6 +48,7 @@ export interface Feature {
     generatedAt?: string;
     approvedAt?: string;
     reviewedByUser: boolean;
+    tasks?: Array<{ id: string; description: string; status?: string }>;
     tasksCompleted?: number;
     tasksTotal?: number;
   };

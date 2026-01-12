@@ -28,6 +28,9 @@ import {
   ChevronDown,
   GitBranch,
   X,
+  FileText,
+  Trash2,
+  ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getElectronAPI } from '@/lib/electron';
@@ -348,7 +351,11 @@ export function EditFeatureDialog({
             <TabsTrigger value="options" data-testid="edit-tab-options">
               <SlidersHorizontal className="w-4 h-4 mr-2" />
               Options
-            </TabsTrigger>
+            </TabsTrigger>{' '}
+            <TabsTrigger value="resources" data-testid="tab-resources">
+              <FileText className="w-4 h-4 mr-2" />
+              Resources
+            </TabsTrigger>{' '}
           </TabsList>
 
           {/* Prompt Tab */}
@@ -591,6 +598,70 @@ export function EditFeatureDialog({
               onSkipTestsChange={(skipTests) => setEditingFeature({ ...editingFeature, skipTests })}
               testIdPrefix="edit"
             />
+          </TabsContent>
+
+          {/* Resources Tab */}
+          <TabsContent value="resources" className="space-y-4 overflow-y-auto cursor-default">
+            <div className="space-y-2">
+              <Label>Attached Wiki Pages</Label>
+              <p className="text-sm text-muted-foreground">
+                These wiki pages will be available to the agent as context when executing this
+                feature.
+              </p>
+              {editingFeature.textFilePaths && editingFeature.textFilePaths.length > 0 ? (
+                <div className="space-y-2 mt-3">
+                  {editingFeature.textFilePaths.map((file) => (
+                    <div
+                      key={file.id}
+                      className="flex items-center justify-between p-3 border rounded-md bg-muted/50"
+                    >
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{file.filename}</p>
+                          <p className="text-xs text-muted-foreground truncate">{file.path}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {file.path.startsWith('https://dev.azure.com/') && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => window.open(file.path, '_blank')}
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            setEditingFeature({
+                              ...editingFeature,
+                              textFilePaths: editingFeature.textFilePaths?.filter(
+                                (f) => f.id !== file.id
+                              ),
+                            });
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-sm text-muted-foreground border rounded-md">
+                  <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p>No wiki pages attached</p>
+                  <p className="text-xs mt-1">
+                    Go to Settings → DevOps Resources to browse and attach wiki pages
+                  </p>
+                </div>
+              )}
+            </div>
           </TabsContent>
         </Tabs>
         <DialogFooter className="sm:!justify-between">

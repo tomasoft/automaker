@@ -65,3 +65,15 @@ export {
   type ContextFilesResult,
   type LoadContextFilesOptions,
 } from './context-loader.js';
+
+// Audit logging
+export {
+  AuditLogger,
+  getAuditLogger,
+  logSkillEvent,
+  logWikiEvent,
+  logAzureOAuthEvent,
+  type AuditEntry,
+  type AuditAction,
+  type AuditQueryFilters,
+} from './audit-logger.js';

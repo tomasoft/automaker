@@ -15,10 +15,13 @@ const logger = createLogger('GhStatus');
 
 function getExecEnv() {
   const extendedPath = getExtendedPath();
-  const env = {
-    ...process.env,
+  const env: Record<string, string> = {
     PATH: extendedPath,
   };
+
+  if (process.env.TZ) {
+    env.TZ = process.env.TZ;
+  }
 
   // If we have a stored GitHub token from Copilot auth, use it for gh CLI
   const githubToken = getApiKey('github_token');

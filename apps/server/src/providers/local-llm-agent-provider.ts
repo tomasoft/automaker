@@ -326,9 +326,9 @@ START IMPLEMENTING NOW - NO MORE EXPLORATION!`,
 
         // Yield tool execution update
         yield {
-          type: 'info',
-          message: `Tool ${toolCalls.find((tc) => tc.id === result.tool_call_id)?.function.name}: ${result.success ? 'Success' : 'Failed'}`,
-        };
+          type: 'result',
+          result: `Tool ${toolCalls.find((tc) => tc.id === result.tool_call_id)?.function.name}: ${result.success ? 'Success' : 'Failed'}`,
+        } as ProviderMessage;
       }
 
       // Add blocked tool results (exploration calls that exceeded limit)
@@ -370,8 +370,8 @@ START IMPLEMENTING NOW - NO MORE EXPLORATION!`,
     if (iteration >= this.maxIterations) {
       logger.warn(`Reached maximum iterations (${this.maxIterations})`);
       yield {
-        type: 'warning',
-        message: `Reached maximum iterations limit (${this.maxIterations}). Task may be incomplete.`,
+        type: 'error',
+        error: `Reached maximum iterations limit (${this.maxIterations}). Task may be incomplete.`,
       };
     }
   }
@@ -707,7 +707,7 @@ Example: Instead of "mkdir -p src/utils", use create_file tool with path="src/ut
         };
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as { data?: any[] };
       const models = data.data || [];
       logger.info(`Local LLM API detected, ${models.length} models available.`);
 
@@ -742,5 +742,22 @@ Example: Instead of "mkdir -p src/utils", use create_file tool with path="src/ut
   getAvailableModels(): ModelDefinition[] {
     // Return empty array - models are fetched dynamically via detectInstallation
     return [];
+  }
+
+  /**
+   * Extract text content from content blocks
+   */
+  private extractTextFromContent(
+    content: Array<{ type: string; text?: string; source?: object }>
+  ): string {
+    return content
+      .map((block) => {
+        if (block.type === 'text' && block.text) {
+          return block.text;
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\\n');
   }
 }

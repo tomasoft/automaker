@@ -285,19 +285,19 @@ export class LocalLLMProvider extends BaseProvider {
       if (!response.ok) {
         return {
           installed: false,
-          method: 'local',
+          method: 'api',
           hasApiKey: false,
           authenticated: false,
           error: `Server returned ${response.status}. Is LM Studio running?`,
         };
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as { data?: any[] };
       const hasModels = data.data && Array.isArray(data.data) && data.data.length > 0;
 
       return {
         installed: true,
-        method: 'local',
+        method: 'api',
         hasApiKey: true,
         authenticated: true,
         error: hasModels ? undefined : 'No models loaded. Load a model in LM Studio.',
@@ -305,7 +305,7 @@ export class LocalLLMProvider extends BaseProvider {
     } catch (error) {
       return {
         installed: false,
-        method: 'local',
+        method: 'api',
         hasApiKey: false,
         authenticated: false,
         error: `Cannot connect to ${this.endpoint}. Is LM Studio running and the server started?`,
