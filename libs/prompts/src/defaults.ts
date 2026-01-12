@@ -94,10 +94,34 @@ Generate a specification with an actionable task breakdown. WAIT for approval be
    - File: Primary file affected (helps with context)
    - Order by dependencies (foundational tasks first)
 
+   **EXAMPLES** (MUST follow this exact format):
+   \`\`\`tasks
+   - [ ] T001: Create user model with validation | File: src/models/user.ts
+   - [ ] T002: Add API endpoint for user creation | File: src/routes/users.ts
+   - [ ] T003: Write unit tests for user model | File: tests/models/user.test.ts
+   \`\`\`
+
 6. **Verification**: How to confirm feature works
 
-After generating the spec, output on its own line:
-"[SPEC_GENERATED] Please review the specification above. Reply with 'approved' to proceed or provide feedback for revisions."
+---
+
+**CRITICAL: After generating the specification, you MUST:**
+
+1. Output EXACTLY this marker on its own line:
+   [SPEC_GENERATED] Please review the specification above. Reply with 'approved' to proceed or provide feedback for revisions.
+
+2. STOP and WAIT for approval - DO NOT use any tools
+3. DO NOT create files or make changes until approved
+4. DO NOT proceed with implementation automatically
+
+The marker [SPEC_GENERATED] is REQUIRED - without it, the system cannot parse your specification.
+
+After you output [SPEC_GENERATED], the system will:
+- Parse your tasks from the specification
+- Show the plan to the user for review
+- Execute each task individually once approved
+
+---
 
 DO NOT proceed with implementation until you receive explicit approval.
 
@@ -166,8 +190,25 @@ Generate a comprehensive specification with phased task breakdown. WAIT for appr
    |------|------------|
    | description | approach |
 
-After generating the spec, output on its own line:
-"[SPEC_GENERATED] Please review the comprehensive specification above. Reply with 'approved' to proceed or provide feedback for revisions."
+---
+
+**CRITICAL: After generating the specification, you MUST:**
+
+1. Output EXACTLY this marker on its own line:
+   [SPEC_GENERATED] Please review the comprehensive specification above. Reply with 'approved' to proceed or provide feedback for revisions.
+
+2. STOP and WAIT for approval - DO NOT use any tools
+3. DO NOT create files or make changes until approved
+4. DO NOT proceed with implementation automatically
+
+The marker [SPEC_GENERATED] is REQUIRED - without it, the system cannot parse your specification.
+
+After you output [SPEC_GENERATED], the system will:
+- Parse your tasks from the specification
+- Show the plan to the user for review
+- Execute each task individually once approved
+
+---
 
 DO NOT proceed with implementation until you receive explicit approval.
 

@@ -225,10 +225,13 @@ export class LocalLLMProvider extends BaseProvider {
 
                 // Check for finish
                 if (choice.finish_reason === 'stop' || choice.finish_reason === 'end_turn') {
+                  // Normalize task format before returning (for spec generation)
+                  const normalizedResult = this.normalizeTaskFormat(accumulatedText);
+
                   yield {
                     type: 'result',
                     subtype: 'success',
-                    result: accumulatedText,
+                    result: normalizedResult,
                   };
                 }
               }
@@ -241,10 +244,13 @@ export class LocalLLMProvider extends BaseProvider {
 
       // If we didn't get an explicit finish, yield final result
       if (accumulatedText) {
+        // Normalize task format before returning (for spec generation)
+        const normalizedResult = this.normalizeTaskFormat(accumulatedText);
+
         yield {
           type: 'result',
           subtype: 'success',
-          result: accumulatedText,
+          result: normalizedResult,
         };
       }
     } finally {
@@ -351,5 +357,213 @@ export class LocalLLMProvider extends BaseProvider {
         tier: 'standard',
       },
     ];
+  }
+
+  /**
+   * Normalize task formatting in spec content to canonical format
+   * Handles various task formats from different models and converts them to:
+   * - [ ] T001: Description | File: path/to/file
+   */
+  private normalizeTaskFormat(content: string): string {
+    // Check if content contains a tasks block or task-like content
+    const hasTasksBlock = content.includes('```tasks') || /implementation.*task/i.test(content);
+    if (!hasTasksBlock) {
+      return content; // No task normalization needed
+    }
+
+    logger.info('[Task Normalization] Detecting and normalizing task formats');
+
+    // Extract tasks block if it exists
+    const tasksBlockMatch = content.match(/(```tasks\s*[\s\S]*?```)/);
+    if (!tasksBlockMatch) {
+      // Look for tasks outside a code block
+      return this.normalizeInlineTasks(content);
+    }
+
+    const tasksBlock = tasksBlockMatch[1];
+    const beforeBlock = content.substring(0, content.indexOf(tasksBlock));
+    const afterBlock = content.substring(content.indexOf(tasksBlock) + tasksBlock.length);
+
+    // Extract content inside the tasks block
+    const tasksContent = tasksBlock.match(/```tasks\s*([\s\S]*?)```/)?.[1] || '';
+    const lines = tasksContent.split('\n');
+    const normalizedLines: string[] = [];
+    let taskCounter = 1;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Preserve phase headers
+      if (trimmed.startsWith('##')) {
+        normalizedLines.push(line);
+        continue;
+      }
+
+      // Skip empty lines
+      if (!trimmed) {
+        normalizedLines.push(line);
+        continue;
+      }
+
+      // Try to parse various task formats
+      const normalized = this.normalizeTaskLine(trimmed, taskCounter);
+      if (normalized) {
+        normalizedLines.push(normalized);
+        taskCounter++;
+      } else {
+        // Keep line as-is if we can't parse it
+        normalizedLines.push(line);
+      }
+    }
+
+    const normalizedBlock = '```tasks\\n' + normalizedLines.join('\\n') + '\\n```';
+    const normalizedContent = beforeBlock + normalizedBlock + afterBlock;
+
+    logger.info(`[Task Normalization] Normalized ${taskCounter - 1} tasks`);
+    return normalizedContent;
+  }
+
+  /**
+   * Normalize inline tasks (outside code blocks)
+   */
+  private normalizeInlineTasks(content: string): string {
+    const lines = content.split('\n');
+    const normalizedLines: string[] = [];
+    let taskCounter = 1;
+    let inTaskSection = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Detect task section start
+      if (/implementation.*task|task.*list|tasks:/i.test(trimmed)) {
+        inTaskSection = true;
+        normalizedLines.push(line);
+        continue;
+      }
+
+      // If in task section, try to normalize
+      if (inTaskSection && (trimmed.startsWith('-') || /^\d+\./.test(trimmed))) {
+        const normalized = this.normalizeTaskLine(trimmed, taskCounter);
+        if (normalized) {
+          normalizedLines.push(normalized);
+          taskCounter++;
+          continue;
+        }
+      }
+
+      // Stop task section if we hit empty line or new section
+      if (inTaskSection && (!trimmed || trimmed.startsWith('#'))) {
+        inTaskSection = false;
+      }
+
+      normalizedLines.push(line);
+    }
+
+    return normalizedLines.join('\n');
+  }
+
+  /**
+   * Normalize a single task line to canonical format
+   * Returns null if line doesn't look like a task
+   */
+  private normalizeTaskLine(line: string, suggestedId: number): string | null {
+    // Already in correct format: - [ ] T001: Description | File: path
+    if (/^- \[ \] T\d{3}:/.test(line)) {
+      return line;
+    }
+
+    let description = '';
+    let file = '';
+    let taskId = `T${suggestedId.toString().padStart(3, '0')}`;
+
+    // Pattern 1: - [ ] T001: Description (missing file)
+    const pattern1 = line.match(/^- \[ \] (T\d{3}):\s*(.+)$/);
+    if (pattern1) {
+      taskId = pattern1[1];
+      description = pattern1[2].trim();
+      return `- [ ] ${taskId}: ${description}`;
+    }
+
+    // Pattern 2: - [ ] Description (missing T-ID)
+    const pattern2 = line.match(/^- \[ \] (.+)$/);
+    if (pattern2) {
+      description = pattern2[1].trim();
+      // Try to extract file from description
+      const fileMatch = description.match(/\|\s*File:\s*(.+)$/);
+      if (fileMatch) {
+        file = fileMatch[1].trim();
+        description = description.substring(0, description.indexOf('|')).trim();
+      }
+      return file
+        ? `- [ ] ${taskId}: ${description} | File: ${file}`
+        : `- [ ] ${taskId}: ${description}`;
+    }
+
+    // Pattern 3: - [x] Description (checked)
+    const pattern3 = line.match(/^- \[x\] (.+)$/i);
+    if (pattern3) {
+      description = pattern3[1].trim();
+      // Try to extract file from description
+      const fileMatch = description.match(/\|\s*File:\s*(.+)$/);
+      if (fileMatch) {
+        file = fileMatch[1].trim();
+        description = description.substring(0, description.indexOf('|')).trim();
+      }
+      return file
+        ? `- [ ] ${taskId}: ${description} | File: ${file}`
+        : `- [ ] ${taskId}: ${description}`;
+    }
+
+    // Pattern 4: - Task 001: Description or - T001: Description (missing checkbox)
+    const pattern4 = line.match(/^-\s*(?:Task\s*)?(T?\d{1,3}):\s*(.+)$/i);
+    if (pattern4) {
+      const idPart = pattern4[1].toUpperCase();
+      taskId = idPart.startsWith('T') ? idPart.padStart(4, 'T00') : `T${idPart.padStart(3, '0')}`;
+      description = pattern4[2].trim();
+      const fileMatch = description.match(/\|\s*File:\s*(.+)$/);
+      if (fileMatch) {
+        file = fileMatch[1].trim();
+        description = description.substring(0, description.indexOf('|')).trim();
+      }
+      return file
+        ? `- [ ] ${taskId}: ${description} | File: ${file}`
+        : `- [ ] ${taskId}: ${description}`;
+    }
+
+    // Pattern 5: 1. Description or 1) Description (numbered list)
+    const pattern5 = line.match(/^(\d+)[.)\s]\s*(.+)$/);
+    if (pattern5) {
+      description = pattern5[2].trim();
+      const fileMatch = description.match(/\|\s*File:\s*(.+)$/);
+      if (fileMatch) {
+        file = fileMatch[1].trim();
+        description = description.substring(0, description.indexOf('|')).trim();
+      }
+      return file
+        ? `- [ ] ${taskId}: ${description} | File: ${file}`
+        : `- [ ] ${taskId}: ${description}`;
+    }
+
+    // Pattern 6: - Description (plain bullet, no checkbox)
+    if (line.startsWith('-') && !line.startsWith('- [ ]') && !line.startsWith('- [x]')) {
+      description = line.substring(1).trim();
+      // Only convert if it looks like a task (has verb or common task keywords)
+      const taskKeywords =
+        /^(create|add|update|modify|delete|implement|write|build|setup|configure|install)/i;
+      if (taskKeywords.test(description)) {
+        const fileMatch = description.match(/\|\s*File:\s*(.+)$/);
+        if (fileMatch) {
+          file = fileMatch[1].trim();
+          description = description.substring(0, description.indexOf('|')).trim();
+        }
+        return file
+          ? `- [ ] ${taskId}: ${description} | File: ${file}`
+          : `- [ ] ${taskId}: ${description}`;
+      }
+    }
+
+    // Not a recognizable task format
+    return null;
   }
 }

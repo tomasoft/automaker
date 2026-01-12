@@ -44,6 +44,9 @@ export function AgentOutputModal({
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode | null>(null);
   const [projectPath, setProjectPath] = useState<string>('');
+  const [showTaskWarning, setShowTaskWarning] = useState(false);
+  const [canRegeneratePlan, setCanRegeneratePlan] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   // Extract summary from output
   const summary = useMemo(() => extractSummary(output), [output]);
@@ -204,11 +207,57 @@ export function AgentOutputModal({
             newContent = event.hasEdits
               ? `\n✅ Plan approved (with edits) - continuing to implementation...\n`
               : `\n✅ Plan approved - continuing to implementation...\n`;
+
+            // Check if tasks were detected after plan approval
+            setTimeout(async () => {
+              const api = getElectronAPI();
+              if (!api?.features) return;
+
+              try {
+                const result = await api.features.get(projectPathRef.current, featureId);
+                if (result.success && result.feature?.planSpec) {
+                  const planSpec = result.feature.planSpec as any;
+                  const taskCount = planSpec.tasks?.length || 0;
+                  const planningMode = result.feature.planningMode;
+
+                  // Show warning if spec/full mode but no tasks detected
+                  if ((planningMode === 'spec' || planningMode === 'full') && taskCount === 0) {
+                    setShowTaskWarning(true);
+                    setCanRegeneratePlan(true);
+                  }
+                }
+              } catch (error) {
+                console.error('Failed to check tasks:', error);
+              }
+            }, 500);
           }
           break;
         case 'plan_auto_approved':
           // Show when plan is auto-approved
           newContent = `\n✅ Plan auto-approved - continuing to implementation...\n`;
+
+          // Check if tasks were detected after plan approval
+          setTimeout(async () => {
+            const api = getElectronAPI();
+            if (!api?.features) return;
+
+            try {
+              const result = await api.features.get(projectPathRef.current, featureId);
+              if (result.success && result.feature?.planSpec) {
+                const planSpec = result.feature.planSpec as any;
+                const taskCount = planSpec.tasks?.length || 0;
+                const planningMode = result.feature.planningMode;
+
+                // Show warning if spec/full mode but no tasks detected
+                if ((planningMode === 'spec' || planningMode === 'full') && taskCount === 0) {
+                  setShowTaskWarning(true);
+                  setCanRegeneratePlan(true);
+                }
+              }
+            } catch (error) {
+              console.error('Failed to check tasks:', error);
+            }
+          }, 500);
           break;
         case 'plan_revision_requested': {
           // Show when user requests plan revision
@@ -281,6 +330,31 @@ export function AgentOutputModal({
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
     autoScrollRef.current = isAtBottom;
+  };
+
+  // Handle regenerate plan request
+  const handleRegeneratePlan = async () => {
+    const api = getElectronAPI();
+    if (!api?.features || !api?.autoMode || !projectPath) return;
+
+    setIsRegenerating(true);
+    setShowTaskWarning(false);
+
+    try {
+      // Re-approve the plan to trigger regeneration
+      const result = await api.features.get(projectPath, featureId);
+      if (result.success && result.feature) {
+        // This will trigger the plan generation again
+        await api.autoMode.approvePlan(projectPath, featureId, false);
+
+        setOutput((prev) => prev + '\n🔄 Regenerating plan...\n');
+      }
+    } catch (error) {
+      console.error('Failed to regenerate plan:', error);
+      setOutput((prev) => prev + `\n❌ Failed to regenerate plan: ${error}\n`);
+    } finally {
+      setIsRegenerating(false);
+    }
   };
 
   // Handle number key presses while modal is open
@@ -382,6 +456,37 @@ export function AgentOutputModal({
           projectPath={projectPath}
           className="flex-shrink-0 mx-1"
         />
+
+        {/* Warning banner when tasks aren't detected */}
+        {showTaskWarning && (
+          <div className="flex-shrink-0 mx-1 mb-2 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+            <div className="flex items-start gap-3">
+              <div className="text-yellow-500 mt-0.5">⚠️</div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-yellow-200">Tasks not detected in plan</p>
+                <p className="text-xs text-yellow-300/80 mt-1">
+                  The execution plan was generated but tasks could not be parsed. Execution will
+                  continue without task tracking.
+                </p>
+              </div>
+              {canRegeneratePlan && !isRegenerating && (
+                <button
+                  onClick={handleRegeneratePlan}
+                  className="px-3 py-1.5 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-200 text-xs font-medium rounded-md transition-colors"
+                  disabled={isRegenerating}
+                >
+                  Regenerate Plan
+                </button>
+              )}
+              {isRegenerating && (
+                <div className="flex items-center gap-2 text-xs text-yellow-300">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Regenerating...
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {effectiveViewMode === 'changes' ? (
           <div className="flex-1 min-h-[400px] max-h-[60vh] overflow-y-auto scrollbar-visible">

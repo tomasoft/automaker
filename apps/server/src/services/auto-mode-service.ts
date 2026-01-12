@@ -86,25 +86,68 @@ interface PlanSpec {
 function parseTasksFromSpec(specContent: string): ParsedTask[] {
   const tasks: ParsedTask[] = [];
 
+  logger.info('[Task Parser] Starting task parsing from spec');
+
   // Extract content within ```tasks ... ``` block
   const tasksBlockMatch = specContent.match(/```tasks\s*([\s\S]*?)```/);
   if (!tasksBlockMatch) {
-    // Try fallback: look for task lines anywhere in content
-    const taskLines = specContent.match(/- \[ \] T\d{3}:.*$/gm);
-    if (!taskLines) {
+    logger.warn('[Task Parser] No tasks code block found, trying fallback patterns');
+
+    // Fallback 1: Strict pattern - look for task lines anywhere in content
+    let taskLines = specContent.match(/- \[ \] T\d{3}:.*$/gm);
+    if (taskLines && taskLines.length > 0) {
+      logger.info(`[Task Parser] Fallback 1 matched: Found ${taskLines.length} strict task lines`);
+      let currentPhase: string | undefined;
+      for (const line of taskLines) {
+        const parsed = parseTaskLine(line, currentPhase);
+        if (parsed) {
+          tasks.push(parsed);
+        }
+      }
+      logger.info(`[Task Parser] Successfully parsed ${tasks.length} tasks using Fallback 1`);
       return tasks;
     }
-    // Parse fallback task lines
-    let currentPhase: string | undefined;
-    for (const line of taskLines) {
-      const parsed = parseTaskLine(line, currentPhase);
-      if (parsed) {
-        tasks.push(parsed);
+
+    // Fallback 2: Lenient pattern - tasks with checkboxes but flexible ID
+    taskLines = specContent.match(/- \[ \] (?:T\d+|Task \d+|\d+)[:.].*$/gim);
+    if (taskLines && taskLines.length > 0) {
+      logger.info(`[Task Parser] Fallback 2 matched: Found ${taskLines.length} lenient task lines`);
+      let currentPhase: string | undefined;
+      let counter = 1;
+      for (const line of taskLines) {
+        const parsed = parseLenientTaskLine(line, counter, currentPhase);
+        if (parsed) {
+          tasks.push(parsed);
+          counter++;
+        }
       }
+      logger.info(`[Task Parser] Successfully parsed ${tasks.length} tasks using Fallback 2`);
+      return tasks;
     }
+
+    // Fallback 3: Numbered list pattern (1., 2., etc.)
+    taskLines = specContent.match(/^\d+[.)]\s+.+$/gm);
+    if (taskLines && taskLines.length > 0) {
+      logger.info(
+        `[Task Parser] Fallback 3 matched: Found ${taskLines.length} numbered list items`
+      );
+      let counter = 1;
+      for (const line of taskLines) {
+        const parsed = parseNumberedTaskLine(line, counter);
+        if (parsed) {
+          tasks.push(parsed);
+          counter++;
+        }
+      }
+      logger.info(`[Task Parser] Successfully parsed ${tasks.length} tasks using Fallback 3`);
+      return tasks;
+    }
+
+    logger.error('[Task Parser] No tasks found with any pattern');
     return tasks;
   }
 
+  logger.info('[Task Parser] Found tasks code block');
   const tasksContent = tasksBlockMatch[1];
   const lines = tasksContent.split('\n');
 
@@ -117,6 +160,12 @@ function parseTasksFromSpec(specContent: string): ParsedTask[] {
     const phaseMatch = trimmedLine.match(/^##\s*(.+)$/);
     if (phaseMatch) {
       currentPhase = phaseMatch[1].trim();
+      logger.debug(`[Task Parser] Found phase: ${currentPhase}`);
+      continue;
+    }
+
+    // Skip empty lines
+    if (!trimmedLine) {
       continue;
     }
 
@@ -129,11 +178,12 @@ function parseTasksFromSpec(specContent: string): ParsedTask[] {
     }
   }
 
+  logger.info(`[Task Parser] Successfully parsed ${tasks.length} tasks from code block`);
   return tasks;
 }
 
 /**
- * Parse a single task line
+ * Parse a single task line (strict format)
  * Format: - [ ] T###: Description | File: path/to/file
  */
 function parseTaskLine(line: string, currentPhase?: string): ParsedTask | null {
@@ -158,6 +208,76 @@ function parseTaskLine(line: string, currentPhase?: string): ParsedTask | null {
     description: taskMatch[2].trim(),
     filePath: taskMatch[3]?.trim(),
     phase: currentPhase,
+    status: 'pending',
+  };
+}
+
+/**
+ * Parse lenient task format (auto-assign IDs)
+ * Format: - [ ] Task 001: Description or - [ ] Description
+ */
+function parseLenientTaskLine(
+  line: string,
+  suggestedId: number,
+  currentPhase?: string
+): ParsedTask | null {
+  // Pattern 1: - [ ] T###: or Task ###:
+  const pattern1 = line.match(/- \[ \] (?:T|Task\s*)(\d+)[:.]?\s*([^|]+)(?:\|\s*File:\s*(.+))?$/i);
+  if (pattern1) {
+    const taskId = `T${pattern1[1].padStart(3, '0')}`;
+    return {
+      id: taskId,
+      description: pattern1[2].trim(),
+      filePath: pattern1[3]?.trim(),
+      phase: currentPhase,
+      status: 'pending',
+    };
+  }
+
+  // Pattern 2: - [ ] ###: or ###.
+  const pattern2 = line.match(/- \[ \] (\d+)[:.]?\s*([^|]+)(?:\|\s*File:\s*(.+))?$/);
+  if (pattern2) {
+    const taskId = `T${pattern2[1].padStart(3, '0')}`;
+    return {
+      id: taskId,
+      description: pattern2[2].trim(),
+      filePath: pattern2[3]?.trim(),
+      phase: currentPhase,
+      status: 'pending',
+    };
+  }
+
+  // Pattern 3: - [ ] Description (no ID, auto-assign)
+  const pattern3 = line.match(/- \[ \] ([^|]+)(?:\|\s*File:\s*(.+))?$/);
+  if (pattern3) {
+    const taskId = `T${suggestedId.toString().padStart(3, '0')}`;
+    return {
+      id: taskId,
+      description: pattern3[1].trim(),
+      filePath: pattern3[2]?.trim(),
+      phase: currentPhase,
+      status: 'pending',
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Parse numbered list task format
+ * Format: 1. Description or 1) Description
+ */
+function parseNumberedTaskLine(line: string, suggestedId: number): ParsedTask | null {
+  const match = line.match(/^\d+[.)]\s+([^|]+)(?:\|\s*File:\s*(.+))?$/);
+  if (!match) {
+    return null;
+  }
+
+  const taskId = `T${suggestedId.toString().padStart(3, '0')}`;
+  return {
+    id: taskId,
+    description: match[1].trim(),
+    filePath: match[2]?.trim(),
     status: 'pending',
   };
 }
@@ -565,7 +685,15 @@ export class AutoModeService {
         logger.info(`[Planning Phase] Spec prompt preview: ${specPrompt.substring(0, 300)}...`);
 
         // Generate spec using the spec generation model
-        const specProvider = ProviderFactory.getProviderForModel(specModel);
+        // For custom agents (Copilot, Local LLM), force agent mode for codebase access
+        const isCustomAgent =
+          specModel.startsWith('copilot-') || specModel.startsWith('local-llm-');
+        const specProvider = isCustomAgent
+          ? ProviderFactory.getProviderForModel(specModel, {
+              agenticMode: true,
+              projectRoot: workDir,
+            })
+          : ProviderFactory.getProviderForModel(specModel);
 
         logger.info(`[Planning Phase] Starting spec generation stream...`);
 
@@ -578,23 +706,14 @@ export class AutoModeService {
             model: specModel,
             systemPrompt: contextFilesPrompt || undefined,
             thinkingLevel: specThinkingLevel || undefined,
+            cwd: workDir,
           });
 
           for await (const msg of specStream) {
             chunkCount++;
             logger.debug(`[Planning Phase] Received chunk ${chunkCount}, type: ${msg.type}`);
 
-            if (msg.type === 'text') {
-              // Direct text message from provider
-              generatedSpec += msg.text || '';
-
-              // Stream spec generation to UI
-              this.emitAutoModeEvent('agent_output', {
-                featureId,
-                output: msg.text || '',
-                append: true,
-              });
-            } else if (msg.type === 'assistant' && msg.message?.content) {
+            if (msg.type === 'assistant' && msg.message?.content) {
               // SDK-formatted message
               for (const block of msg.message.content) {
                 if (block.type === 'text' && block.text) {
@@ -637,8 +756,37 @@ export class AutoModeService {
           );
         }
 
-        // Save cleaned spec to feature
+        // Parse tasks from the spec
+        logger.info(
+          `[SPEC DETECTION] Parsing tasks from generated spec (${cleanSpec.length} chars)`
+        );
+        const parsedTasks = parseTasksFromSpec(cleanSpec);
+        logger.info(`[TASK PARSING] Found ${parsedTasks.length} tasks in spec`);
+
+        if (parsedTasks.length > 0) {
+          logger.info(
+            `[TASK PARSING] Tasks parsed:`,
+            parsedTasks.map((t) => `${t.id}: ${t.description}`)
+          );
+        }
+
+        // Save cleaned spec and tasks to feature
         feature.spec = cleanSpec;
+        feature.tasks = parsedTasks.length > 0 ? parsedTasks : undefined;
+
+        // Also save to planSpec for UI compatibility
+        if (!feature.planSpec) {
+          feature.planSpec = {
+            status: 'generated',
+            version: 1,
+            reviewedByUser: false,
+          };
+        }
+        feature.planSpec.content = cleanSpec;
+        feature.planSpec.tasks = parsedTasks.length > 0 ? parsedTasks : undefined;
+        feature.planSpec.tasksTotal = parsedTasks.length;
+        feature.planSpec.tasksCompleted = 0;
+
         const featureDirForSave = getFeatureDir(projectPath, featureId);
         const featurePath = path.join(featureDirForSave, 'feature.json');
         await secureFs.writeFile(featurePath, JSON.stringify(feature, null, 2));
@@ -683,6 +831,25 @@ export class AutoModeService {
           if (approvalResult.editedPlan && approvalResult.editedPlan !== cleanSpec) {
             logger.info(`[Planning Phase] User edited the spec, updating feature...`);
             feature.spec = approvalResult.editedPlan;
+
+            // Re-parse tasks from edited spec
+            const reparsedTasks = parseTasksFromSpec(approvalResult.editedPlan);
+            feature.tasks = reparsedTasks.length > 0 ? reparsedTasks : undefined;
+            logger.info(`[TASK PARSING] Re-parsed ${reparsedTasks.length} tasks from edited spec`);
+
+            // Update planSpec as well
+            if (!feature.planSpec) {
+              feature.planSpec = {
+                status: 'generated',
+                version: 1,
+                reviewedByUser: true,
+              };
+            }
+            feature.planSpec.content = approvalResult.editedPlan;
+            feature.planSpec.tasks = reparsedTasks.length > 0 ? reparsedTasks : undefined;
+            feature.planSpec.tasksTotal = reparsedTasks.length;
+            feature.planSpec.tasksCompleted = 0;
+
             const featureDirForSave = getFeatureDir(projectPath, featureId);
             const featurePath = path.join(featureDirForSave, 'feature.json');
             await secureFs.writeFile(featurePath, JSON.stringify(feature, null, 2));
@@ -742,6 +909,8 @@ export class AutoModeService {
 
       // Run the agent with the feature's model and images
       // Context files are passed as system prompt for higher priority
+      // NOTE: runAgent will automatically detect and execute tasks individually
+      // if feature.planSpec.tasks exists (multi-agent execution)
       await this.runAgent(
         workDir,
         featureId,
@@ -2337,6 +2506,168 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
       : '';
     let specDetected = false;
 
+    // Check if tasks already exist from separate spec generation
+    // (e.g., when using custom Copilot/Local LLM agents with separate spec phase)
+    let preExistingTasks: ParsedTask[] = [];
+    let preExistingPlanContent = '';
+    try {
+      const featurePath = path.join(
+        finalProjectPath,
+        '.automaker',
+        'features',
+        featureId,
+        'feature.json'
+      );
+      const featureData = await secureFs.readFile(featurePath, 'utf-8');
+      const loadedFeature = JSON.parse(featureData as string);
+
+      // Check both feature.tasks and feature.planSpec.tasks
+      if (
+        loadedFeature.tasks &&
+        Array.isArray(loadedFeature.tasks) &&
+        loadedFeature.tasks.length > 0
+      ) {
+        preExistingTasks = loadedFeature.tasks;
+        preExistingPlanContent = loadedFeature.spec || '';
+        logger.info(
+          `[runAgent] Loaded ${preExistingTasks.length} pre-existing tasks from feature.tasks for ${featureId}`
+        );
+        logger.info(
+          `[runAgent] Pre-existing tasks: ${preExistingTasks.map((t: ParsedTask) => t.id).join(', ')}`
+        );
+      } else if (
+        loadedFeature.planSpec?.tasks &&
+        Array.isArray(loadedFeature.planSpec.tasks) &&
+        loadedFeature.planSpec.tasks.length > 0
+      ) {
+        preExistingTasks = loadedFeature.planSpec.tasks;
+        preExistingPlanContent = loadedFeature.spec || loadedFeature.planSpec.content || '';
+        logger.info(
+          `[runAgent] Loaded ${preExistingTasks.length} pre-existing tasks from planSpec.tasks for ${featureId}`
+        );
+        logger.info(
+          `[runAgent] Pre-existing tasks: ${preExistingTasks.map((t: ParsedTask) => t.id).join(', ')}`
+        );
+      } else {
+        logger.info(
+          `[runAgent] No pre-existing tasks found for feature ${featureId} (checked feature.tasks and planSpec.tasks)`
+        );
+      }
+    } catch (error) {
+      // Feature file not found or doesn't have planSpec - this is okay, continue normally
+      logger.warn(`[runAgent] Error loading feature for pre-existing tasks:`, error);
+    }
+
+    // If we have pre-existing tasks, skip to multi-agent execution immediately
+    if (preExistingTasks.length > 0 && planningMode === 'spec') {
+      logger.info(
+        `[runAgent] Skipping stream processing - executing ${preExistingTasks.length} pre-existing tasks directly`
+      );
+
+      // Execute multi-agent task execution with pre-existing tasks
+      for (let taskIndex = 0; taskIndex < preExistingTasks.length; taskIndex++) {
+        const task = preExistingTasks[taskIndex];
+
+        // Check for abort
+        if (abortController.signal.aborted) {
+          throw new Error('Feature execution aborted');
+        }
+
+        // Update task status to in_progress
+        task.status = 'in_progress';
+        await this.updateFeaturePlanSpec(finalProjectPath, featureId, {
+          currentTaskId: task.id,
+          tasks: preExistingTasks,
+          tasksCompleted: taskIndex,
+        });
+
+        // Emit task started
+        logger.info(`Starting task ${task.id}: ${task.description}`);
+        this.emitAutoModeEvent('auto_mode_task_started', {
+          featureId,
+          projectPath: finalProjectPath,
+          taskId: task.id,
+          taskDescription: task.description,
+          taskIndex,
+          tasksTotal: preExistingTasks.length,
+        });
+
+        // Build focused prompt for this specific task
+        const taskPrompt = this.buildTaskPrompt(
+          task,
+          preExistingTasks,
+          taskIndex,
+          preExistingPlanContent,
+          undefined
+        );
+
+        // Execute task with dedicated agent
+        const taskStream = provider.executeQuery({
+          prompt: taskPrompt,
+          model: finalModel,
+          maxTurns: Math.min(maxTurns || 100, 50), // Limit turns per task
+          cwd: workDir,
+          allowedTools: allowedTools,
+          abortController,
+          mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
+        });
+
+        let taskOutput = '';
+
+        for await (const msg of taskStream) {
+          if (msg.type === 'assistant' && msg.message?.content) {
+            for (const block of msg.message.content) {
+              if (block.type === 'text' && block.text) {
+                taskOutput += block.text;
+                responseText += block.text;
+
+                // Emit agent output for UI
+                this.emitAutoModeEvent('agent_output', {
+                  featureId,
+                  output: block.text,
+                  append: true,
+                });
+              }
+            }
+          } else if (msg.type === 'result') {
+            // Task completed
+            logger.info(`Task ${task.id} completed`);
+          } else if (msg.type === 'error') {
+            throw new Error(`Task ${task.id} failed: ${msg.error}`);
+          }
+        }
+
+        // Update task status
+        task.status = 'completed';
+        await this.updateFeaturePlanSpec(finalProjectPath, featureId, {
+          tasks: preExistingTasks,
+          tasksCompleted: taskIndex + 1,
+        });
+
+        // Emit task completed
+        this.emitAutoModeEvent('auto_mode_task_completed', {
+          featureId,
+          projectPath: finalProjectPath,
+          taskId: task.id,
+          taskDescription: task.description,
+          taskIndex,
+          tasksTotal: preExistingTasks.length,
+          output: taskOutput,
+        });
+
+        logger.info(`Completed task ${taskIndex + 1}/${preExistingTasks.length}: ${task.id}`);
+      }
+
+      // Write final output
+      const featureDirForOutput = getFeatureDir(finalProjectPath, featureId);
+      const outputPath = path.join(featureDirForOutput, 'agent-output.md');
+      await secureFs.mkdir(path.dirname(outputPath), { recursive: true });
+      await secureFs.writeFile(outputPath, responseText);
+
+      logger.info(`[runAgent] All ${preExistingTasks.length} tasks completed successfully`);
+      return; // Exit early - tasks already executed
+    }
+
     // Agent output goes to .automaker directory
     // Note: We use projectPath here, not workDir, because workDir might be a worktree path
     const featureDirForOutput = getFeatureDir(projectPath, featureId);
@@ -2465,6 +2796,13 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                 !specDetected &&
                 responseText.includes('[SPEC_GENERATED]')
               ) {
+                logger.info(
+                  `[SPEC DETECTION] Spec marker found in response text for feature ${featureId}`
+                );
+                logger.info(`[SPEC DETECTION] Response text length: ${responseText.length}`);
+                logger.info(
+                  `[SPEC DETECTION] Response preview: ${responseText.substring(0, 500)}...`
+                );
                 specDetected = true;
 
                 // Extract plan content (everything before the marker)
@@ -2476,9 +2814,21 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                 let parsedTasks = parseTasksFromSpec(planContent);
                 const tasksTotal = parsedTasks.length;
 
-                logger.info(`Parsed ${tasksTotal} tasks from spec for feature ${featureId}`);
+                logger.info(
+                  `[TASK PARSING] Parsed ${tasksTotal} tasks from spec for feature ${featureId}`
+                );
                 if (parsedTasks.length > 0) {
-                  logger.info(`Tasks: ${parsedTasks.map((t) => t.id).join(', ')}`);
+                  logger.info(`[TASK PARSING] Tasks: ${parsedTasks.map((t) => t.id).join(', ')}`);
+                  logger.info(
+                    `[TASK PARSING] Task details: ${JSON.stringify(parsedTasks.map((t) => ({ id: t.id, desc: t.description })))}`
+                  );
+                } else {
+                  logger.warn(
+                    `[TASK PARSING] No tasks parsed! Plan content length: ${planContent.length}`
+                  );
+                  logger.warn(
+                    `[TASK PARSING] Plan content preview: ${planContent.substring(0, 1000)}`
+                  );
                 }
 
                 // Update planSpec status to 'generated' and save content with parsed tasks
@@ -2904,6 +3254,183 @@ Implement all the changes described in the plan above.`;
           // Handle error messages
           throw new Error(msg.error || 'Unknown error');
         } else if (msg.type === 'result' && msg.subtype === 'success') {
+          // Check for spec marker in result (for agent providers that return complete results)
+          if (
+            planningModeRequiresApproval &&
+            !specDetected &&
+            msg.result &&
+            msg.result.includes('[SPEC_GENERATED]')
+          ) {
+            logger.info(
+              `[SPEC DETECTION] Spec marker found in result message for feature ${featureId}`
+            );
+            logger.info(`[SPEC DETECTION] Result length: ${msg.result.length}`);
+
+            // Add result to responseText if not already there
+            if (!responseText.includes(msg.result.substring(0, 100))) {
+              responseText += msg.result;
+            }
+
+            // Now trigger spec detection processing
+            specDetected = true;
+
+            // Extract plan content (everything before the marker)
+            const markerIndex = responseText.indexOf('[SPEC_GENERATED]');
+            const planContent = responseText.substring(0, markerIndex).trim();
+
+            // Parse tasks from the generated spec
+            let parsedTasks = parseTasksFromSpec(planContent);
+            const tasksTotal = parsedTasks.length;
+
+            logger.info(
+              `[TASK PARSING] Parsed ${tasksTotal} tasks from spec for feature ${featureId}`
+            );
+            if (parsedTasks.length > 0) {
+              logger.info(`[TASK PARSING] Tasks: ${parsedTasks.map((t) => t.id).join(', ')}`);
+              logger.info(
+                `[TASK PARSING] Task details: ${JSON.stringify(parsedTasks.map((t) => ({ id: t.id, desc: t.description })))}`
+              );
+            } else {
+              logger.warn(
+                `[TASK PARSING] No tasks parsed! Plan content length: ${planContent.length}`
+              );
+              logger.warn(`[TASK PARSING] Plan content preview: ${planContent.substring(0, 1000)}`);
+            }
+
+            // Update planSpec status to 'generated' and save content with parsed tasks
+            await this.updateFeaturePlanSpec(projectPath, featureId, {
+              status: 'generated',
+              content: planContent,
+              version: 1,
+              generatedAt: new Date().toISOString(),
+              reviewedByUser: false,
+              tasks: parsedTasks,
+              tasksTotal,
+              tasksCompleted: 0,
+            });
+
+            // Handle approval/auto-approval and task execution
+            let approvedPlanContent = planContent;
+            const requiresApproval =
+              planningMode === 'full' || (planningMode === 'spec' && requirePlanApproval);
+
+            if (requiresApproval) {
+              logger.info(`Spec generated for feature ${featureId}, waiting for approval`);
+
+              const approvalPromise = this.waitForPlanApproval(featureId, projectPath);
+
+              this.emitAutoModeEvent('plan_approval_required', {
+                featureId,
+                projectPath,
+                planContent,
+                planningMode,
+                planVersion: 1,
+              });
+
+              const approvalResult = await approvalPromise;
+
+              if (approvalResult.approved) {
+                logger.info(`Plan approved for feature ${featureId}`);
+                approvedPlanContent = approvalResult.editedContent || planContent;
+
+                this.emitAutoModeEvent('plan_approved', {
+                  featureId,
+                  projectPath,
+                  hasEdits: !!approvalResult.editedContent,
+                });
+              } else {
+                throw new Error('Plan approval cancelled');
+              }
+            } else {
+              logger.info(`Spec generated for feature ${featureId}, auto-approving`);
+
+              this.emitAutoModeEvent('plan_auto_approved', {
+                featureId,
+                projectPath,
+                planContent,
+                planningMode,
+              });
+            }
+
+            // Update to approved status
+            await this.updateFeaturePlanSpec(projectPath, featureId, {
+              status: 'approved',
+              approvedAt: new Date().toISOString(),
+              reviewedByUser: requiresApproval,
+            });
+
+            // Execute tasks if any were parsed
+            if (parsedTasks.length > 0) {
+              logger.info(`[MULTI-AGENT] Starting task execution: ${parsedTasks.length} tasks`);
+
+              for (let taskIndex = 0; taskIndex < parsedTasks.length; taskIndex++) {
+                const task = parsedTasks[taskIndex];
+
+                logger.info(`[TASK ${task.id}] Starting: ${task.description}`);
+                this.emitAutoModeEvent('auto_mode_task_started', {
+                  featureId,
+                  projectPath,
+                  taskId: task.id,
+                  taskDescription: task.description,
+                  taskIndex,
+                  tasksTotal: parsedTasks.length,
+                });
+
+                await this.updateFeaturePlanSpec(projectPath, featureId, {
+                  currentTaskId: task.id,
+                });
+
+                const taskPrompt = this.buildTaskPrompt(
+                  task,
+                  approvedPlanContent,
+                  taskIndex,
+                  parsedTasks.length
+                );
+
+                const taskStream = provider.executeQuery({
+                  prompt: taskPrompt,
+                  model: finalModel,
+                  maxTurns: 10,
+                  cwd: workDir,
+                });
+
+                let taskOutput = '';
+                for await (const taskMsg of taskStream) {
+                  if (taskMsg.type === 'assistant' && taskMsg.message?.content) {
+                    for (const block of taskMsg.message.content) {
+                      if (block.type === 'text') {
+                        taskOutput += block.text || '';
+                        responseText += block.text || '';
+                        this.emitAutoModeEvent('auto_mode_progress', {
+                          featureId,
+                          content: block.text,
+                        });
+                      }
+                    }
+                  }
+                }
+
+                logger.info(`[TASK ${task.id}] Complete`);
+                this.emitAutoModeEvent('auto_mode_task_complete', {
+                  featureId,
+                  projectPath,
+                  taskId: task.id,
+                  tasksCompleted: taskIndex + 1,
+                  tasksTotal: parsedTasks.length,
+                });
+
+                await this.updateFeaturePlanSpec(projectPath, featureId, {
+                  tasksCompleted: taskIndex + 1,
+                });
+              }
+
+              logger.info(`[MULTI-AGENT] All tasks completed`);
+            }
+
+            // Break out of stream loop
+            break streamLoop;
+          }
+
           // Don't replace responseText - the accumulated content is the full history
           // The msg.result is just a summary which would lose all tool use details
           // Just ensure final write happens
