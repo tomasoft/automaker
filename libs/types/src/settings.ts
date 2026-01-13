@@ -147,6 +147,215 @@ export interface PhaseModelConfig {
 export type PhaseModelKey = keyof PhaseModelConfig;
 
 /**
+ * RepositoryConfiguration - Target repository for impact analysis
+ *
+ * Defines the external codebase that features will modify.
+ * Enables impact analysis, documentation linking, and gotcha detection.
+ */
+export interface RepositoryConfiguration {
+  /** Repository type */
+  type: 'azure-devops' | 'github';
+  /** Azure DevOps organization or GitHub owner */
+  organization: string;
+  /** Project name */
+  project: string;
+  /** Repository name */
+  repository: string;
+  /** Default branch (e.g., 'main', 'develop') */
+  defaultBranch: string;
+  /** Whether initial deep analysis has been completed */
+  analyzed: boolean;
+  /** Timestamp of last analysis */
+  analyzedAt?: string;
+  /** Detected architecture type */
+  architecture?: 'monolith' | 'microservices' | 'modular-monolith';
+  /** Detected service boundaries (microservices only) */
+  services?: ServiceBoundary[];
+  /** Last commit SHA from source branch (for staleness detection) */
+  sourceBranchSHA?: string;
+  /** Last time repository was indexed */
+  lastIndexed?: string;
+}
+
+/**
+ * ServiceBoundary - Detected microservice or module boundary
+ *
+ * Identified during codebase analysis by finding package.json/csproj/pom.xml files.
+ */
+export interface ServiceBoundary {
+  /** Unique service identifier */
+  id: string;
+  /** Service name (derived from folder or manifest) */
+  name: string;
+  /** Root path within repository */
+  rootPath: string;
+  /** Detected technology (e.g., '.NET', 'TypeScript', 'Java') */
+  technology?: string;
+  /** Linked documentation from wiki */
+  documentation?: DocumentationLink[];
+  /** Service metrics */
+  metrics?: {
+    fileCount: number;
+    modelCount: number;
+    eventCount: number;
+    apiCount: number;
+  };
+}
+
+/**
+ * DocumentationLink - Link between code component and wiki documentation
+ *
+ * Created during initial analysis or manually by users.
+ */
+export interface DocumentationLink {
+  /** Documentation type */
+  type: 'wiki' | 'sharepoint' | 'url';
+  /** Document ID or URL */
+  id: string;
+  /** Document title */
+  title: string;
+  /** Match confidence (0-100) */
+  confidence: number;
+  /** Whether auto-linked or manually added */
+  autoLinked: boolean;
+}
+
+/**
+ * FileTreeNode - Single file/folder in repository index
+ *
+ * Lightweight representation for fast lookups and autocomplete.
+ */
+export interface FileTreeNode {
+  /** Full path from repository root */
+  path: string;
+  /** File size in bytes (undefined for folders) */
+  size?: number;
+  /** Last modified timestamp */
+  lastModified?: string;
+  /** Whether this is a directory */
+  isDirectory: boolean;
+}
+
+/**
+ * ComponentNode - Analyzed code component in dependency graph
+ *
+ * Represents a significant code entity (Model, Controller, Service, Event, etc.).
+ */
+export interface ComponentNode {
+  /** Unique component identifier */
+  id: string;
+  /** Component type */
+  type: 'Model' | 'Controller' | 'Service' | 'Event' | 'Migration' | 'API' | 'Other';
+  /** Component name */
+  name: string;
+  /** File path */
+  path: string;
+  /** Parent service ID (for microservices) */
+  serviceId?: string;
+  /** Linked documentation */
+  documentation?: DocumentationLink[];
+  /** Custom metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * DependencyEdge - Relationship between components in dependency graph
+ *
+ * Represents imports, usages, publishes, consumes relationships.
+ */
+export interface DependencyEdge {
+  /** Source component ID */
+  from: string;
+  /** Target component ID */
+  to: string;
+  /** Relationship type */
+  relationship: 'imports' | 'uses' | 'extends' | 'publishes' | 'consumes';
+  /** Whether this crosses service boundaries */
+  crossBoundary: boolean;
+}
+
+/**
+ * RepositoryGraph - Complete dependency graph of analyzed repository
+ *
+ * Built during deep analysis, stored in project settings.
+ */
+export interface RepositoryGraph {
+  /** All components (Models, Controllers, Services, Events, etc.) */
+  nodes: ComponentNode[];
+  /** All relationships between components */
+  edges: DependencyEdge[];
+  /** Documentation links discovered during analysis */
+  documentationLinks: DocumentationLink[];
+  /** Graph statistics */
+  stats?: {
+    totalNodes: number;
+    totalEdges: number;
+    crossBoundaryEdges: number;
+    servicesCount: number;
+  };
+}
+
+/**
+ * ImpactRule - Configurable rule for gotcha detection
+ *
+ * Defines conditions that trigger warnings during impact analysis.
+ */
+export interface ImpactRule {
+  /** Unique rule identifier */
+  id: string;
+  /** Rule name */
+  name: string;
+  /** User-friendly description */
+  description: string;
+  /** Whether rule is active */
+  enabled: boolean;
+  /** File path regex pattern that triggers this rule */
+  triggerPattern: string;
+  /** Conditions that must be met (AND logic) */
+  conditions?: RuleCondition[];
+  /** File patterns to search for (e.g., migration files) */
+  relatedPatterns?: string[];
+  /** Action to take when rule triggered */
+  action: 'warn' | 'block' | 'suggest-wiki' | 'auto-attach-wiki';
+  /** Severity level */
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  /** Wiki pages to suggest when rule triggered */
+  suggestedWikiPages?: string[];
+  /** Whether this is a built-in rule */
+  isBuiltIn: boolean;
+}
+
+/**
+ * RuleCondition - Single condition in impact rule logic
+ *
+ * Evaluated during gotcha detection.
+ */
+export interface RuleCondition {
+  /** Condition type */
+  type: 'file-exists' | 'file-missing' | 'feature-tagged' | 'service-boundary';
+  /** Pattern or value to check */
+  value: string;
+  /** Whether to negate the condition */
+  negate: boolean;
+}
+
+/**
+ * ImpactAnalysisSettings - Configuration for impact analysis engine
+ *
+ * Controls depth, auto-attachment, and file extraction patterns.
+ */
+export interface ImpactAnalysisSettings {
+  /** Dependency graph traversal depth (1-3) */
+  dependencyDepth: number;
+  /** Whether to auto-attach high-confidence wiki pages */
+  autoAttachWiki: boolean;
+  /** File extraction regex patterns */
+  fileExtractionPatterns: string[];
+  /** Active impact rules */
+  rules: ImpactRule[];
+}
+
+/**
  * WindowBounds - Electron window position and size for persistence
  *
  * Stored in global settings to restore window state across sessions.
@@ -567,6 +776,10 @@ export interface GlobalSettings {
   maxAutoSelectedSkills: number;
   /** Minimum similarity threshold (0.0-1.0) for skill auto-selection */
   skillSimilarityThreshold: number;
+
+  // Impact Analysis Configuration
+  /** Impact analysis settings for repository analysis and gotcha detection */
+  impactAnalysis?: ImpactAnalysisSettings;
 }
 
 /**
@@ -670,6 +883,16 @@ export interface ProjectSettings {
   // Skills System Configuration (project-specific overrides)
   /** Skills explicitly disabled at project level (by skill ID) */
   disabledSkills?: string[];
+
+  // Repository Configuration for Impact Analysis
+  /** Target repository for impact analysis and documentation linking */
+  targetRepository?: RepositoryConfiguration;
+  /** Repository file tree index (cached for performance) */
+  repositoryFileTree?: FileTreeNode[];
+  /** Dependency graph of analyzed repository */
+  repositoryGraph?: RepositoryGraph;
+  /** Project-specific impact analysis rules (overrides global) */
+  impactAnalysisRules?: ImpactRule[];
 }
 
 /**
@@ -725,6 +948,79 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
   closeTerminal: 'Alt+W',
 };
 
+/** Default impact analysis rules for gotcha detection */
+export const DEFAULT_IMPACT_RULES: ImpactRule[] = [
+  {
+    id: 'ef-model-migration',
+    name: 'EF Core Model Migration Required',
+    description: 'When modifying Entity Framework models, ensure a corresponding migration exists',
+    enabled: true,
+    triggerPattern: '.*[\\/\\\\]Models[\\/\\\\].*\\.cs$',
+    relatedPatterns: ['.*[\\/\\\\]Migrations[\\/\\\\].*\\.cs$'],
+    action: 'warn',
+    severity: 'critical',
+    isBuiltIn: true,
+    conditions: [
+      {
+        type: 'file-missing',
+        value: '.*[\\/\\\\]Migrations[\\/\\\\].*\\.cs$',
+        negate: false,
+      },
+    ],
+  },
+  {
+    id: 'event-schema-subscribers',
+    name: 'Event Schema Change - Check Subscribers',
+    description: 'When modifying event schemas, verify all subscribers are updated',
+    enabled: true,
+    triggerPattern: '.*[\\/\\\\](Events|Messages)[\\/\\\\].*\\.(cs|ts|tsx)$',
+    action: 'warn',
+    severity: 'high',
+    isBuiltIn: true,
+  },
+  {
+    id: 'api-endpoint-openapi',
+    name: 'API Endpoint - Update OpenAPI Spec',
+    description: 'When modifying API controllers, update the OpenAPI/Swagger specification',
+    enabled: true,
+    triggerPattern: '.*[\\/\\\\]Controllers[\\/\\\\].*\\.(cs|ts|tsx)$',
+    relatedPatterns: ['.*openapi\\.json$', '.*swagger\\.json$', '.*\\.swagger\\.ts$'],
+    action: 'suggest-wiki',
+    severity: 'medium',
+    isBuiltIn: true,
+  },
+  {
+    id: 'shared-model-cross-service',
+    name: 'Shared Model Cross-Service Impact',
+    description: 'Changes to shared models may affect multiple services',
+    enabled: true,
+    triggerPattern: '.*[\\/\\\\](Shared|Common|Contracts)[\\/\\\\].*\\.(cs|ts|tsx)$',
+    action: 'warn',
+    severity: 'high',
+    isBuiltIn: true,
+  },
+];
+
+/** Default file extraction patterns for impact analysis */
+export const DEFAULT_FILE_EXTRACTION_PATTERNS: string[] = [
+  // Backtick-wrapped file paths
+  '`([^`]+\\.(ts|tsx|js|jsx|cs|java|py|rb|go|rs))`',
+  // "modify/create/update X" patterns
+  '(?:modify|create|update|delete|add)\\s+([a-zA-Z0-9/_.-]+\\.(ts|tsx|js|jsx|cs|java|py))',
+  // "in file X" or "to file X" patterns
+  '(?:in|to)\\s+(?:file\\s+)?([a-zA-Z0-9/_.-]+\\.(ts|tsx|js|jsx|cs|java|py))',
+  // File paths with common extensions
+  '([a-zA-Z0-9/_.-]+\\.(ts|tsx|js|jsx|cs|java|py|rb|go|rs))',
+];
+
+/** Default impact analysis settings */
+export const DEFAULT_IMPACT_ANALYSIS_SETTINGS: ImpactAnalysisSettings = {
+  dependencyDepth: 2,
+  autoAttachWiki: true,
+  fileExtractionPatterns: DEFAULT_FILE_EXTRACTION_PATTERNS,
+  rules: DEFAULT_IMPACT_RULES,
+};
+
 /** Default global settings used when no settings file exists */
 export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   version: SETTINGS_VERSION,
@@ -763,6 +1059,7 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   skillsAutoLoad: true,
   maxAutoSelectedSkills: 3,
   skillSimilarityThreshold: 0.3,
+  impactAnalysis: DEFAULT_IMPACT_ANALYSIS_SETTINGS,
 };
 
 /** Default credentials (empty strings - user must provide API keys) */

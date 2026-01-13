@@ -38,6 +38,7 @@ import type {
 import type { Message, SessionListItem } from '@/types/electron';
 import type { Feature, ClaudeUsageResponse } from '@/store/app-store';
 import type { WorktreeAPI, GitAPI, ModelDefinition, ProviderStatus } from '@/types/electron';
+import type { ProjectSettings } from '@automaker/types';
 import { getGlobalFileBrowser } from '@/contexts/file-browser-context';
 
 const logger = createLogger('HttpClient');
@@ -1767,31 +1768,7 @@ export class HttpApiClient implements ElectronAPI {
       projectPath: string
     ): Promise<{
       success: boolean;
-      settings?: {
-        version: number;
-        theme?: string;
-        useWorktrees?: boolean;
-        currentWorktree?: { path: string | null; branch: string };
-        worktrees?: Array<{
-          path: string;
-          branch: string;
-          isMain: boolean;
-          hasChanges?: boolean;
-          changedFilesCount?: number;
-        }>;
-        boardBackground?: {
-          imagePath: string | null;
-          imageVersion?: number;
-          cardOpacity: number;
-          columnOpacity: number;
-          columnBorderEnabled: boolean;
-          cardGlassmorphism: boolean;
-          cardBorderEnabled: boolean;
-          cardBorderOpacity: number;
-          hideScrollbar: boolean;
-        };
-        lastSelectedSessionId?: string;
-      };
+      settings?: ProjectSettings;
       error?: string;
     }> => this.post('/api/settings/project', { projectPath }),
 

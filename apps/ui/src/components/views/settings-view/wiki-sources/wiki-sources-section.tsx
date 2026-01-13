@@ -25,6 +25,7 @@ import {
 import { toast } from 'sonner';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import { WikiBrowser } from './components/wiki-browser';
+import { RepositoryConfigSection } from '../repository-config/repository-config-section';
 
 export function WikiSourcesSection() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -526,6 +527,18 @@ export function WikiSourcesSection() {
           </CardContent>
         </Card>
       )}
+
+      {/* Repository Configuration Section */}
+      <div className="mt-12">
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold tracking-tight">Repository Impact Analysis</h2>
+          <p className="text-muted-foreground mt-2">
+            Configure your target codebase for comprehensive impact analysis, gotcha detection, and
+            documentation auto-linking.
+          </p>
+        </div>
+        <RepositoryConfigSection />
+      </div>
     </div>
   );
 }

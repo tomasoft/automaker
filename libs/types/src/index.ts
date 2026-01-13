@@ -20,7 +20,17 @@ export type {
 } from './provider.js';
 
 // Feature types
-export type { Feature, FeatureImagePath, FeatureTextFilePath, FeatureStatus } from './feature.js';
+export type {
+  Feature,
+  FeatureImagePath,
+  FeatureTextFilePath,
+  FeatureStatus,
+  AffectedFile,
+  DirectImpact,
+  CrossBoundaryRisk,
+  DetectedGotcha,
+  ImpactAnalysisResult,
+} from './feature.js';
 
 // Session types
 export type {
@@ -89,6 +99,16 @@ export type {
   BoardBackgroundSettings,
   WorktreeInfo,
   ProjectSettings,
+  RepositoryConfiguration,
+  ServiceBoundary,
+  DocumentationLink,
+  FileTreeNode,
+  ComponentNode,
+  DependencyEdge,
+  RepositoryGraph,
+  ImpactRule,
+  RuleCondition,
+  ImpactAnalysisSettings,
 } from './settings.js';
 export {
   DEFAULT_KEYBOARD_SHORTCUTS,

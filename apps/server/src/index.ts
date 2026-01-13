@@ -68,6 +68,7 @@ import createLocalLLMRoutes from './routes/local-llm/index.js';
 import azureAuthRoutes from './routes/azure-devops-auth/index.js';
 import { createAzureDevOpsWikiRoutes } from './routes/azure-devops-wiki/index.js';
 import { createWebhookRoutes } from './routes/webhooks.js';
+import { createRepositoryRoutes } from './routes/repository/index.js';
 
 // Load environment variables
 dotenv.config();
@@ -207,10 +208,13 @@ app.get('/api/health/detailed', createDetailedHandler());
 // Azure DevOps wiki routes (requires authentication)
 app.use('/api/azure-devops-wiki', createAzureDevOpsWikiRoutes());
 
+// Repository analysis routes (requires authentication)
+app.use('/api/repository', createRepositoryRoutes());
+
 app.use('/api/fs', createFsRoutes(events));
 app.use('/api/agent', createAgentRoutes(agentService, events));
 app.use('/api/sessions', createSessionsRoutes(agentService));
-app.use('/api/features', createFeaturesRoutes(featureLoader));
+app.use('/api/features', createFeaturesRoutes(featureLoader, settingsService));
 app.use('/api/auto-mode', createAutoModeRoutes(autoModeService));
 app.use('/api/enhance-prompt', createEnhancePromptRoutes(settingsService));
 app.use('/api/worktree', createWorktreeRoutes());

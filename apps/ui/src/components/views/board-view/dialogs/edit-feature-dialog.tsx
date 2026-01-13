@@ -61,6 +61,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { DependencyTreeDialog } from './dependency-tree-dialog';
 import { isCursorModel, PROVIDER_PREFIXES } from '@automaker/types';
+import { ImpactAnalysisPanel } from './components/impact-analysis-panel';
 
 const logger = createLogger('EditFeatureDialog');
 
@@ -601,7 +602,8 @@ export function EditFeatureDialog({
           </TabsContent>
 
           {/* Resources Tab */}
-          <TabsContent value="resources" className="space-y-4 overflow-y-auto cursor-default">
+          <TabsContent value="resources" className="space-y-6 overflow-y-auto cursor-default">
+            {/* Wiki Pages Section */}
             <div className="space-y-2">
               <Label>Attached Wiki Pages</Label>
               <p className="text-sm text-muted-foreground">
@@ -661,6 +663,14 @@ export function EditFeatureDialog({
                   </p>
                 </div>
               )}
+            </div>
+
+            {/* Impact Analysis Section */}
+            <div className="pt-4 border-t">
+              <ImpactAnalysisPanel
+                feature={editingFeature}
+                projectPath={editingFeature.projectPath || ''}
+              />
             </div>
           </TabsContent>
         </Tabs>

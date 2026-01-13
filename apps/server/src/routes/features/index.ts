@@ -13,8 +13,13 @@ import { createBulkUpdateHandler } from './routes/bulk-update.js';
 import { createDeleteHandler } from './routes/delete.js';
 import { createAgentOutputHandler, createRawOutputHandler } from './routes/agent-output.js';
 import { createGenerateTitleHandler } from './routes/generate-title.js';
+import { createAnalyzeFeatureImpactRoute } from './routes/analyze-impact.js';
+import type { SettingsService } from '../../services/settings-service.js';
 
-export function createFeaturesRoutes(featureLoader: FeatureLoader): Router {
+export function createFeaturesRoutes(
+  featureLoader: FeatureLoader,
+  settingsService?: SettingsService
+): Router {
   const router = Router();
 
   router.post('/list', validatePathParams('projectPath'), createListHandler(featureLoader));
@@ -30,6 +35,11 @@ export function createFeaturesRoutes(featureLoader: FeatureLoader): Router {
   router.post('/agent-output', createAgentOutputHandler(featureLoader));
   router.post('/raw-output', createRawOutputHandler(featureLoader));
   router.post('/generate-title', createGenerateTitleHandler());
+
+  // Impact analysis route (requires settingsService)
+  if (settingsService) {
+    router.post('/analyze-impact', createAnalyzeFeatureImpactRoute(settingsService));
+  }
 
   return router;
 }

@@ -15,6 +15,7 @@ interface AzureToken {
   refreshToken: string;
   expiresAt: number;
   userId?: string; // User principal name or email
+  authType?: 'oauth' | 'pat'; // Authentication type
 }
 
 interface DeviceCodeResponse {
@@ -59,17 +60,43 @@ export class AzureDevOpsAuthManager {
   ].join(' ');
 
   private cachedToken: AzureToken | null = null;
+  private personalAccessToken: string | null = null;
 
-  constructor(cachedToken?: AzureToken) {
+  constructor(cachedToken?: AzureToken, pat?: string) {
     if (cachedToken) {
       this.cachedToken = cachedToken;
+    }
+    if (pat) {
+      this.personalAccessToken = pat;
     }
   }
 
   /**
-   * Get a valid Azure DevOps access token (from cache or by refreshing)
+   * Set Personal Access Token for authentication
+   */
+  setPAT(pat: string): void {
+    this.personalAccessToken = pat;
+    // Clear OAuth token if switching to PAT
+    this.cachedToken = null;
+  }
+
+  /**
+   * Clear Personal Access Token
+   */
+  clearPAT(): void {
+    this.personalAccessToken = null;
+  }
+
+  /**
+   * Get a valid Azure DevOps access token (from cache, PAT, or by refreshing)
    */
   async getToken(): Promise<string> {
+    // If using PAT, return it directly (PATs don't expire in traditional sense)
+    if (this.personalAccessToken) {
+      logger.debug('[AzureDevOpsAuth] Using Personal Access Token');
+      return this.personalAccessToken;
+    }
+
     // Check if we have a valid cached token (with 5 min buffer)
     if (this.cachedToken && this.cachedToken.expiresAt > Date.now() + 300000) {
       logger.debug('[AzureDevOpsAuth] Using cached access token');

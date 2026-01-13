@@ -233,7 +233,7 @@ CRITICAL INSTRUCTIONS:
   logger.info(responseText);
   logger.info('========== END RESPONSE TEXT ==========');
 
-  await parseAndCreateFeatures(projectPath, responseText, events);
+  await parseAndCreateFeatures(projectPath, responseText, events, settingsService);
 
   logger.debug('========== generateFeaturesFromSpec() completed ==========');
 }
