@@ -31,6 +31,7 @@ import {
 const logger = createLogger('AutoMode');
 import { resolveModelString, resolvePhaseModel, DEFAULT_MODELS } from '@automaker/model-resolver';
 import { resolveDependencies, areDependenciesSatisfied } from '@automaker/dependency-resolver';
+import { getGitRepositoryDiffs } from '@automaker/git-utils';
 import { getFeatureDir, getAutomakerDir, getFeaturesDir } from '@automaker/platform';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -46,6 +47,8 @@ import { FeatureLoader } from './feature-loader.js';
 import type { SettingsService } from './settings-service.js';
 import { SkillsLoaderService } from './skills-loader.js';
 import { WikiService } from './wiki-service.js';
+import { DEFAULT_PROMPTS } from '@automaker/prompts';
+import { azureAuthSessions } from '../routes/azure-devops-auth/routes/poll-azure-auth.js';
 import { pipelineService, PipelineService } from './pipeline-service.js';
 import { analyzeFeatureImpact } from './impact-analysis-service.js';
 import {
@@ -340,6 +343,7 @@ export class AutoModeService {
   private pendingApprovals = new Map<string, PendingApproval>();
   private settingsService: SettingsService | null = null;
   private dataDir: string;
+  private wikiService: WikiService;
   // Track consecutive failures to detect quota/API issues
   private consecutiveFailures: { timestamp: number; error: string }[] = [];
   private pausedDueToFailures = false;
@@ -348,6 +352,7 @@ export class AutoModeService {
     this.events = events;
     this.dataDir = dataDir;
     this.settingsService = settingsService ?? null;
+    this.wikiService = new WikiService(dataDir);
   }
 
   /**
@@ -961,15 +966,12 @@ export class AutoModeService {
         const projectSettings = await this.settingsService?.getProjectSettings(projectPath);
 
         if (globalSettings) {
-          // Create WikiService for resolving wiki placeholders in skills
-          const wikiService = new WikiService(this.dataDir);
-
           const skillsLoader = new SkillsLoaderService(
             globalSettings,
             projectSettings,
             projectPath,
             this.dataDir,
-            wikiService
+            this.wikiService
           );
 
           const skillsResult = await skillsLoader.loadSkills(feature.description, {
@@ -1043,6 +1045,9 @@ export class AutoModeService {
           autoLoadClaudeMd
         );
       }
+
+      // Automatically update wiki documentation if attached
+      await this.updateWikiDocumentation(projectPath, featureId, workDir, feature);
 
       // Determine final status based on testing mode:
       // - skipTests=false (automated testing): go directly to 'verified' (no manual verify needed)
@@ -2124,6 +2129,127 @@ Format your response as a structured markdown document.`;
       return JSON.parse(data);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Automatically update wiki documentation for a feature
+   */
+  private async updateWikiDocumentation(
+    projectPath: string,
+    featureId: string,
+    workDir: string,
+    feature: Feature
+  ): Promise<void> {
+    if (!feature.wikiPages || feature.wikiPages.length === 0) {
+      return;
+    }
+
+    logger.info(`Starting wiki documentation update for feature ${featureId}`);
+    this.emitAutoModeEvent('auto_mode_progress', {
+      featureId,
+      message: 'Updating wiki documentation...',
+      projectPath,
+    });
+
+    try {
+      // Get Azure DevOps config from global settings
+      const settings = await this.settingsService?.getGlobalSettings();
+      const azConfig = settings?.azureDevOps;
+
+      if (!azConfig?.organization || !azConfig?.project || !azConfig?.wikiId) {
+        logger.warn('Azure DevOps configuration missing in global settings, skipping wiki updates');
+        return;
+      }
+
+      // Get authenticated session
+      const authManager = Array.from(azureAuthSessions.values())[0];
+      if (!authManager) {
+        logger.warn('Not authenticated with Azure DevOps, skipping wiki updates');
+        return;
+      }
+
+      // Register adapter if not already registered (WikiService.registerAzureDevOps is idempotent for same adapterId)
+      this.wikiService.registerAzureDevOps(azConfig, authManager);
+
+      // Get git diff of the changes
+      // Use the absolute workDir for git diff
+      const diffResult = await getGitRepositoryDiffs(workDir);
+      const diff = diffResult.diff || 'No code changes detected.';
+
+      // Get model for wiki updates (use spec generation model from Model Defaults as it's good for planning/docs)
+      const phaseModelEntry =
+        settings?.phaseModels?.specGenerationModel || DEFAULT_PHASE_MODELS.specGenerationModel;
+      const { model: updateModel, thinkingLevel: updateThinkingLevel } =
+        resolvePhaseModel(phaseModelEntry);
+
+      logger.info(`Using model '${updateModel}' for wiki documentation update`);
+
+      for (const pageRef of feature.wikiPages) {
+        try {
+          logger.info(`Processing wiki page: ${pageRef.path}`);
+
+          // Get current content
+          const currentContent = await this.wikiService.getPageContent(pageRef.path);
+
+          // Load prompts from settings (allows hot reload of custom prompts)
+          const customPrompts = await getPromptCustomization(this.settingsService, '[AutoMode]');
+
+          // Prepare prompt using template
+          let prompt = customPrompts.enhancement.wikiUpdateTemplate;
+          prompt = prompt.replace('{{featureTitle}}', feature.title || 'Untitled Feature');
+          prompt = prompt.replace('{{featureDescription}}', feature.description);
+          prompt = prompt.replace('{{gitDiff}}', diff);
+          prompt = prompt.replace('{{pageContent}}', currentContent);
+
+          // Get updated content from AI
+          // Using ProviderFactory directly for a simple text-to-text transformation
+          const provider = ProviderFactory.getProviderForModel(updateModel);
+          let updatedContent = '';
+          const stream = provider.executeQuery({
+            prompt,
+            model: updateModel,
+            thinkingLevel: updateThinkingLevel || undefined,
+            cwd: workDir,
+          });
+
+          for await (const msg of stream) {
+            if (msg.type === 'assistant' && msg.message?.content) {
+              for (const block of msg.message.content) {
+                if (block.type === 'text' && block.text) {
+                  updatedContent += block.text;
+                }
+              }
+            }
+          }
+
+          // Basic validation and update
+          if (
+            updatedContent &&
+            updatedContent.trim().length > 0 &&
+            updatedContent.trim() !== currentContent.trim()
+          ) {
+            // Strip potential markdown code blocks if the AI wrapped the entire response
+            let cleanedContent = updatedContent.trim();
+            if (cleanedContent.startsWith('```markdown') && cleanedContent.endsWith('```')) {
+              cleanedContent = cleanedContent.substring(11, cleanedContent.length - 3).trim();
+            } else if (cleanedContent.startsWith('```') && cleanedContent.endsWith('```')) {
+              cleanedContent = cleanedContent.substring(3, cleanedContent.length - 3).trim();
+            }
+
+            await this.wikiService.updatePage(pageRef.path, cleanedContent);
+            logger.info(`Successfully updated wiki page: ${pageRef.path}`);
+          } else {
+            logger.info(`No changes needed or suggested for wiki page: ${pageRef.path}`);
+          }
+        } catch (pageError) {
+          logger.error(`Failed to update wiki page ${pageRef.path}:`, pageError);
+          // Continue with other pages
+        }
+      }
+    } catch (error) {
+      logger.error(`Wiki documentation update failed for feature ${featureId}:`, error);
+      // Don't fail the whole feature if wiki update fails
     }
   }
 

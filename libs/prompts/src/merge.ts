@@ -113,6 +113,10 @@ export function mergeEnhancementPrompts(custom?: EnhancementPrompts): ResolvedEn
       custom?.acceptanceSystemPrompt,
       DEFAULT_ENHANCEMENT_PROMPTS.acceptanceSystemPrompt
     ),
+    wikiUpdateTemplate: resolvePrompt(
+      custom?.wikiUpdateTemplate,
+      DEFAULT_ENHANCEMENT_PROMPTS.wikiUpdateTemplate
+    ),
   };
 }
 

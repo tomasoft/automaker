@@ -459,6 +459,46 @@ import {
 } from './enhancement.js';
 
 /**
+ * ========================================================================
+ * WIKI UPDATE PROMPTS
+ * ========================================================================
+ */
+
+export const DEFAULT_WIKI_UPDATE_PROMPT_TEMPLATE = `You are a technical documentation expert. 
+A feature has just been implemented in the codebase.
+Your task is to update the attached technical documentation (Wiki page) to accurately reflect the changes.
+
+--- FEATURE DESCRIPTION ---
+Title: {{featureTitle}}
+Description: {{featureDescription}}
+
+--- CODE CHANGES (DIFF) ---
+\`\`\`diff
+{{gitDiff}}
+\`\`\`
+
+--- CURRENT DOCUMENTATION CONTENT ---
+{{pageContent}}
+
+--- INSTRUCTIONS ---
+1. Analyze the code changes and the feature description.
+2. Update the documentation content so it remains accurate and up-to-date.
+3. Maintain the same tone, format, and structure of the existing documentation.
+4. If a section is no longer relevant, remove or update it.
+5. If new functionality was added, document it clearly.
+6. Return the COMPLETE updated documentation in Markdown format.
+7. Do not include any extra commentary, only the updated content.
+8. If no changes are needed to the documentation, return the ORIGINAL content exactly.`;
+
+/**
+ * ========================================================================
+ * ENHANCEMENT PROMPTS
+ * ========================================================================
+ * Note: Enhancement prompts are already defined in enhancement.ts
+ * We import and re-export them here for consistency
+ */
+
+/**
  * Default Enhancement prompts (from libs/prompts/src/enhancement.ts)
  */
 export const DEFAULT_ENHANCEMENT_PROMPTS: ResolvedEnhancementPrompts = {
@@ -466,6 +506,7 @@ export const DEFAULT_ENHANCEMENT_PROMPTS: ResolvedEnhancementPrompts = {
   technicalSystemPrompt: TECHNICAL_SYSTEM_PROMPT,
   simplifySystemPrompt: SIMPLIFY_SYSTEM_PROMPT,
   acceptanceSystemPrompt: ACCEPTANCE_SYSTEM_PROMPT,
+  wikiUpdateTemplate: DEFAULT_WIKI_UPDATE_PROMPT_TEMPLATE,
 };
 
 /**
@@ -482,4 +523,7 @@ export const DEFAULT_PROMPTS = {
   agent: DEFAULT_AGENT_PROMPTS,
   backlogPlan: DEFAULT_BACKLOG_PLAN_PROMPTS,
   enhancement: DEFAULT_ENHANCEMENT_PROMPTS,
+  wikiUpdate: {
+    template: DEFAULT_WIKI_UPDATE_PROMPT_TEMPLATE,
+  },
 } as const;

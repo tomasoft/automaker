@@ -101,6 +101,24 @@ export abstract class WikiAdapter {
   ): Promise<WikiSearchResult>;
 
   /**
+   * Update a wiki page
+   *
+   * @param path Page path
+   * @param content New markdown content
+   * @param options Update options
+   */
+  abstract updatePage(
+    path: string,
+    content: string,
+    options?: {
+      /** Optional comment for the change */
+      comment?: string;
+      /** Timeout in milliseconds */
+      timeout?: number;
+    }
+  ): Promise<WikiPageMetadata>;
+
+  /**
    * Get all pages in the wiki (for indexing)
    *
    * @param options Crawl options

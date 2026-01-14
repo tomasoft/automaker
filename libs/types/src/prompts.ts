@@ -89,6 +89,9 @@ export interface EnhancementPrompts {
 
   /** System prompt for "acceptance" mode (add acceptance criteria) */
   acceptanceSystemPrompt?: CustomPrompt;
+
+  /** Template for updating wiki documentation based on feature implementation */
+  wikiUpdateTemplate?: CustomPrompt;
 }
 
 /**
@@ -150,4 +153,5 @@ export interface ResolvedEnhancementPrompts {
   technicalSystemPrompt: string;
   simplifySystemPrompt: string;
   acceptanceSystemPrompt: string;
+  wikiUpdateTemplate: string;
 }

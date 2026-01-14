@@ -199,6 +199,65 @@ export class AzureDevOpsWikiAdapter extends WikiAdapter {
   }
 
   /**
+   * Update a wiki page
+   */
+  async updatePage(
+    path: string,
+    content: string,
+    options?: {
+      comment?: string;
+      timeout?: number;
+    }
+  ): Promise<WikiPageMetadata> {
+    const timeout = options?.timeout || this.DEFAULT_TIMEOUT;
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Request timeout')), timeout)
+    );
+
+    try {
+      const accessToken = await this.authManager.getToken();
+      const url = `https://dev.azure.com/${this.config.organization}/${this.config.project}/_apis/wiki/wikis/${this.config.wikiId}/pages?path=${encodeURIComponent(path)}&api-version=7.1-preview.1`;
+
+      const updatePromise = fetch(url, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          content: content,
+        }),
+      });
+
+      const response = await Promise.race([updatePromise, timeoutPromise]);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to update page (${response.status}): ${errorText}`);
+      }
+
+      const data = (await response.json()) as any;
+
+      // Invalidate cache
+      this.invalidatePage(path);
+
+      return {
+        id: data.id || path,
+        path: data.path || path,
+        title: (data.path || path).split('/').pop() || '',
+        lastModified: new Date().toISOString(),
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Request timeout') {
+        throw new Error(`Timeout updating page: ${path}`);
+      }
+      this.logger.error(`Failed to update page: ${path}`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Get all pages in the wiki (for indexing)
    */
   async getAllPages(options?: {

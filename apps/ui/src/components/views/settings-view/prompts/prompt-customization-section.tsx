@@ -431,6 +431,16 @@ export function PromptCustomizationSection({
                   updatePrompt('enhancement', 'acceptanceSystemPrompt', value)
                 }
               />
+
+              <PromptField
+                label="Wiki Update Template"
+                description="Template for updating wiki documentation based on feature implementation"
+                defaultValue={DEFAULT_ENHANCEMENT_PROMPTS.wikiUpdateTemplate}
+                customValue={promptCustomization?.enhancement?.wikiUpdateTemplate}
+                onCustomValueChange={(value) =>
+                  updatePrompt('enhancement', 'wikiUpdateTemplate', value)
+                }
+              />
             </div>
           </TabsContent>
         </Tabs>

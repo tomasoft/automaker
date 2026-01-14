@@ -192,6 +192,43 @@ export class WikiService {
   }
 
   /**
+   * Get content of a wiki page
+   *
+   * @param path Page path
+   * @returns Markdown content
+   */
+  async getPageContent(path: string): Promise<string> {
+    const adapter = this.getDefaultAdapter();
+    if (!adapter) {
+      throw new Error('No wiki adapter registered');
+    }
+
+    const page = await adapter.getPage(path, { useCache: false });
+    return page.content;
+  }
+
+  /**
+   * Update a wiki page
+   *
+   * @param path Page path
+   * @param content New markdown content
+   */
+  async updatePage(path: string, content: string): Promise<void> {
+    const adapter = this.getDefaultAdapter();
+    if (!adapter) {
+      throw new Error('No wiki adapter registered');
+    }
+
+    try {
+      await adapter.updatePage(path, content);
+      logger.info(`Successfully updated wiki page: ${path}`);
+    } catch (error) {
+      logger.error(`Failed to update wiki page: ${path}`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Invalidate cache for a specific page
    */
   invalidatePage(pagePath: string): void {
