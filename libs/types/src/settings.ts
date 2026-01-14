@@ -454,6 +454,14 @@ export interface AIProfile {
    * Note: For Cursor, thinking is embedded in the model ID (e.g., 'claude-sonnet-4-thinking')
    */
   cursorModel?: CursorModelId;
+
+  // Copilot-specific settings
+  /** Which Copilot model to use - only for GitHub Copilot provider */
+  copilotModel?: string;
+
+  // Local LLM-specific settings
+  /** Which Local LLM model to use - only for Local LLM provider */
+  localModel?: string;
 }
 
 /**
@@ -480,6 +488,12 @@ export function profileHasThinking(profile: AIProfile): boolean {
 export function getProfileModelString(profile: AIProfile): string {
   if (profile.provider === 'cursor') {
     return `cursor:${profile.cursorModel || 'auto'}`;
+  }
+  if (profile.provider === 'github-copilot') {
+    return `copilot:${profile.copilotModel || 'gpt-4o'}`;
+  }
+  if (profile.provider === 'local-llm') {
+    return `local:${profile.localModel || 'model'}`;
   }
 
   // Claude

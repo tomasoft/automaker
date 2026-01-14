@@ -86,23 +86,22 @@ export function ModelSelector({
 
   const handleProviderChange = (provider: ModelProvider) => {
     if (provider === 'local-llm' && selectedProvider !== 'local-llm') {
-      // Use user's favorited model, or first available enabled model, or empty if none
+      // Use user's favorited model, or first available enabled model, or prefix if none
       const defaultModel = localLlmDefaultModel
         ? `local-${localLlmDefaultModel}`
-        : filteredLocalLlmModels[0]?.id || '';
+        : filteredLocalLlmModels[0]?.id || 'local-';
 
-      if (defaultModel) {
-        onModelSelect(defaultModel);
-      }
+      onModelSelect(defaultModel);
     } else if (provider === 'cursor' && selectedProvider !== 'cursor') {
       // Switch to Cursor's default model (from global settings)
-      onModelSelect(`${PROVIDER_PREFIXES.cursor}${cursorDefaultModel}`);
+      onModelSelect(`${PROVIDER_PREFIXES.cursor}${cursorDefaultModel || 'auto'}`);
     } else if (provider === 'claude' && selectedProvider !== 'claude') {
       // Switch to Claude's default model
       onModelSelect('sonnet');
     } else if (provider === 'github-copilot' && selectedProvider !== 'github-copilot') {
       // Switch to Copilot's default model
-      onModelSelect('copilot-gpt-4o');
+      const defaultModel = filteredCopilotModels[0]?.id || 'copilot-gpt-4o';
+      onModelSelect(defaultModel);
     }
   };
 

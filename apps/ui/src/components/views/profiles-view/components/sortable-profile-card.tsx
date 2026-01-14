@@ -1,11 +1,22 @@
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { GripVertical, Lock, Pencil, Trash2, Brain, Bot, Terminal } from 'lucide-react';
+import {
+  GripVertical,
+  Lock,
+  Pencil,
+  Trash2,
+  Brain,
+  Bot,
+  Terminal,
+  Github,
+  Server,
+} from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { AIProfile } from '@automaker/types';
 import { CURSOR_MODEL_MAP, profileHasThinking } from '@automaker/types';
 import { PROFILE_ICONS } from '../constants';
+import { THINKING_LEVEL_LABELS } from '../../board-view/shared/model-constants';
 
 interface SortableProfileCardProps {
   profile: AIProfile;
@@ -73,10 +84,20 @@ export function SortableProfileCard({ profile, onEdit, onDelete }: SortableProfi
           <span className="text-xs px-2 py-0.5 rounded-full border border-border text-muted-foreground bg-muted/50 flex items-center gap-1">
             {profile.provider === 'cursor' ? (
               <Terminal className="w-3 h-3" />
+            ) : profile.provider === 'github-copilot' ? (
+              <Github className="w-3 h-3" />
+            ) : profile.provider === 'local-llm' ? (
+              <Server className="w-3 h-3" />
             ) : (
               <Bot className="w-3 h-3" />
             )}
-            {profile.provider === 'cursor' ? 'Cursor' : 'Claude'}
+            {profile.provider === 'cursor'
+              ? 'Cursor'
+              : profile.provider === 'github-copilot'
+                ? 'Copilot'
+                : profile.provider === 'local-llm'
+                  ? 'Local'
+                  : 'Claude'}
           </span>
 
           {/* Model badge */}
@@ -85,13 +106,20 @@ export function SortableProfileCard({ profile, onEdit, onDelete }: SortableProfi
               ? CURSOR_MODEL_MAP[profile.cursorModel || 'auto']?.label ||
                 profile.cursorModel ||
                 'auto'
-              : profile.model || 'sonnet'}
+              : profile.provider === 'github-copilot'
+                ? profile.copilotModel || 'gpt-4o'
+                : profile.provider === 'local-llm'
+                  ? profile.localModel || 'model'
+                  : profile.model || 'sonnet'}
           </span>
 
           {/* Thinking badge - works for both providers */}
           {profileHasThinking(profile) && (
-            <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10">
-              {profile.provider === 'cursor' ? 'Thinking' : profile.thinkingLevel}
+            <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10 flex items-center gap-1">
+              <Brain className="w-3 h-3" />
+              {profile.provider === 'cursor'
+                ? 'Thinking'
+                : THINKING_LEVEL_LABELS[profile.thinkingLevel || 'none']}
             </span>
           )}
         </div>
