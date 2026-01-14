@@ -356,9 +356,6 @@ export function FeatureDefaultsSection({
             >
               <GitBranch className="w-4 h-4 text-brand-500" />
               Enable Git Worktree Isolation
-              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/20 font-medium">
-                experimental
-              </span>
             </Label>
             <p className="text-xs text-muted-foreground/80 leading-relaxed">
               Creates isolated git branches for each feature. When disabled, agents work directly in

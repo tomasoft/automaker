@@ -768,6 +768,14 @@ export interface GlobalSettings {
   // Azure DevOps Integration
   /** Azure DevOps organization and wiki configuration */
   azureDevOps?: AzureDevOpsConfig;
+  /** Default wiki pages to attach to new features */
+  defaultWikiPages?: Array<{
+    id: string;
+    path: string;
+    name: string;
+    url: string;
+    content: string;
+  }>;
 
   // Skills System Configuration
   /** Enable automatic skill loading based on task relevance */
@@ -1055,7 +1063,7 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   maxConcurrency: 3,
   defaultSkipTests: true,
   enableDependencyBlocking: true,
-  useWorktrees: false,
+  useWorktrees: true,
   showProfilesOnly: false,
   defaultPlanningMode: 'skip',
   defaultRequirePlanApproval: false,
@@ -1080,6 +1088,7 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   enableSandboxMode: false,
   skipSandboxWarning: false,
   mcpServers: [],
+  defaultWikiPages: undefined,
   skillsAutoLoad: true,
   maxAutoSelectedSkills: 3,
   skillSimilarityThreshold: 0.3,

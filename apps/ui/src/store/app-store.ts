@@ -529,6 +529,15 @@ export interface AppState {
   // MCP Servers
   mcpServers: MCPServerConfig[]; // List of configured MCP servers for agent use
 
+  // Wiki Pages
+  defaultWikiPages?: Array<{
+    id: string;
+    path: string;
+    name: string;
+    url: string;
+    content: string;
+  }>; // Default wiki pages to attach to new features
+
   // Prompt Customization
   promptCustomization: PromptCustomization; // Custom prompts for Auto Mode, Agent, Backlog Plan, Enhancement
 
@@ -856,6 +865,11 @@ export interface AppActions {
   removeMCPServer: (id: string) => void;
   reorderMCPServers: (oldIndex: number, newIndex: number) => void;
 
+  // Wiki Sources actions
+  setDefaultWikiPages: (
+    pages: Array<{ id: string; path: string; name: string; url: string; content?: string }>
+  ) => Promise<void>;
+
   // Project Analysis actions
   setProjectAnalysis: (analysis: ProjectAnalysis | null) => void;
   setIsAnalyzing: (analyzing: boolean) => void;
@@ -1040,7 +1054,7 @@ const initialState: AppState = {
   boardViewMode: 'kanban', // Default to kanban view
   defaultSkipTests: true, // Default to manual verification (tests disabled)
   enableDependencyBlocking: true, // Default to enabled (show dependency blocking UI)
-  useWorktrees: false, // Default to disabled (worktree feature is experimental)
+  useWorktrees: true, // Git worktree isolation for safe parallel feature development
   currentWorktreeByProject: {},
   worktreesByProject: {},
   showProfilesOnly: false, // Default to showing all options (not profiles only)
@@ -1068,6 +1082,7 @@ const initialState: AppState = {
   skipSandboxWarning: false, // Default to disabled (show sandbox warning dialog)
   autoAnalyzeImpact: true, // Default to enabled - auto-analyze impact after spec generation
   mcpServers: [], // No MCP servers configured by default
+  defaultWikiPages: [], // No default wiki pages selected by default
   promptCustomization: {}, // Empty by default - all prompts use built-in defaults
   aiProfiles: DEFAULT_AI_PROFILES,
   projectAnalysis: null,
@@ -1869,6 +1884,14 @@ export const useAppStore = create<AppState & AppActions>()(
         const [movedServer] = servers.splice(oldIndex, 1);
         servers.splice(newIndex, 0, movedServer);
         set({ mcpServers: servers });
+      },
+
+      // Wiki Sources actions
+      setDefaultWikiPages: async (pages) => {
+        set({ defaultWikiPages: pages });
+        // Sync to server settings file
+        const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
+        await syncSettingsToServer();
       },
 
       // Project Analysis actions
@@ -3102,6 +3125,8 @@ export const useAppStore = create<AppState & AppActions>()(
           mcpServers: state.mcpServers,
           // Prompt customization
           promptCustomization: state.promptCustomization,
+          // Wiki pages
+          defaultWikiPages: state.defaultWikiPages,
           // Profiles and sessions
           aiProfiles: state.aiProfiles,
           chatSessions: state.chatSessions,

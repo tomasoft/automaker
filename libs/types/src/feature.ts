@@ -142,6 +142,14 @@ export interface Feature {
   model?: string;
   imagePaths?: Array<string | FeatureImagePath | { path: string; [key: string]: unknown }>;
   textFilePaths?: FeatureTextFilePath[];
+  // Wiki pages attached to this feature
+  wikiPages?: Array<{
+    id: string;
+    path: string;
+    name: string;
+    url: string;
+    content?: string;
+  }>;
   // Impact analysis results
   impactAnalysis?: ImpactAnalysisResult;
   // Branch info - worktree path is derived at runtime from branchName

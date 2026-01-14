@@ -81,6 +81,7 @@ export function useBoardActions({
     enableDependencyBlocking,
     isPrimaryWorktreeBranch,
     getPrimaryWorktreeBranch,
+    defaultWikiPages,
   } = useAppStore();
   const autoMode = useAutoMode();
 
@@ -148,6 +149,11 @@ export function useBoardActions({
       // Check if we need to generate a title
       const needsTitleGeneration = !featureData.title.trim() && featureData.description.trim();
 
+      logger.info('Creating feature with wiki pages:', {
+        defaultWikiPages,
+        count: defaultWikiPages?.length,
+      });
+
       const newFeatureData = {
         ...featureData,
         title: featureData.title,
@@ -155,6 +161,7 @@ export function useBoardActions({
         status: 'backlog' as const,
         branchName: finalBranchName,
         dependencies: featureData.dependencies || [],
+        wikiPages: defaultWikiPages || [],
       };
       const createdFeature = addFeature(newFeatureData);
       // Must await to ensure feature exists on server before user can drag it

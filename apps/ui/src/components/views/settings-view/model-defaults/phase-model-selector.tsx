@@ -68,7 +68,14 @@ export function PhaseModelSelector({
   disabled = false,
 }: PhaseModelSelectorProps) {
   // Get enabled Copilot and Local LLM models from store
-  const { enabledCopilotModels, enabledLocalLlmModels } = useAppStore();
+  const {
+    enabledCopilotModels,
+    enabledLocalLlmModels,
+    isClaudeEnabled,
+    isCursorEnabled,
+    isCopilotEnabled,
+    isLocalLlmEnabled,
+  } = useAppStore();
   // Fetch actual Local LLM models dynamically
   const { models: fetchedLocalLlmModels } = useLocalLlmModels();
   const [open, setOpen] = React.useState(false);
@@ -798,13 +805,13 @@ export function PhaseModelSelector({
             </>
           )}
 
-          {claude.length > 0 && (
+          {isClaudeEnabled && claude.length > 0 && (
             <CommandGroup heading="Claude Models">
               {claude.map((model) => renderClaudeModelItem(model))}
             </CommandGroup>
           )}
 
-          {(groupedModels.length > 0 || standaloneCursorModels.length > 0) && (
+          {isCursorEnabled && (groupedModels.length > 0 || standaloneCursorModels.length > 0) && (
             <CommandGroup heading="Cursor Models">
               {/* Grouped models with secondary popover */}
               {groupedModels.map((group) => renderGroupedModelItem(group))}
@@ -813,13 +820,13 @@ export function PhaseModelSelector({
             </CommandGroup>
           )}
 
-          {copilot.length > 0 && (
+          {isCopilotEnabled && copilot.length > 0 && (
             <CommandGroup heading="GitHub Copilot Models">
               {copilot.map((model) => renderCopilotModelItem(model))}
             </CommandGroup>
           )}
 
-          {localLlm.length > 0 && (
+          {isLocalLlmEnabled && localLlm.length > 0 && (
             <CommandGroup heading="Local LLM Models">
               {localLlm.map((model) => renderLocalLlmModelItem(model))}
             </CommandGroup>

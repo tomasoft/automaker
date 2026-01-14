@@ -32,8 +32,10 @@ import {
 import { toast } from 'sonner';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import { WikiBrowser } from './components/wiki-browser';
+import { useAppStore } from '@/store/app-store';
 
 export function WikiSourcesSection() {
+  const { defaultWikiPages, setDefaultWikiPages } = useAppStore();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [deviceCode, setDeviceCode] = useState<string | null>(null);
@@ -767,7 +769,13 @@ export function WikiSourcesSection() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <WikiBrowser organization={organization} project={project} wikiId={wikiId} />
+            <WikiBrowser
+              organization={organization}
+              project={project}
+              wikiId={wikiId}
+              initialSelectedPages={defaultWikiPages}
+              onSelectionChange={setDefaultWikiPages}
+            />
           </CardContent>
         </Card>
       )}

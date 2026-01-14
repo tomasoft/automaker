@@ -26,12 +26,10 @@ export interface NavigationItem {
 
 // Navigation items for the settings side panel
 export const NAV_ITEMS: NavigationItem[] = [
-  { id: 'api-keys', label: 'API Keys', icon: Key },
   { id: 'providers', label: 'AI Providers', icon: Bot },
   { id: 'mcp-servers', label: 'MCP Servers', icon: Plug },
   { id: 'prompts', label: 'Prompt Customization', icon: MessageSquareText },
   { id: 'model-defaults', label: 'Model Defaults', icon: Workflow },
-  { id: 'paths', label: 'Paths', icon: FolderCog },
   { id: 'wiki-sources', label: 'DevOps Resources', icon: BookOpen },
   { id: 'branch-analysis', label: 'Branch Analysis', icon: GitBranch },
   { id: 'skills', label: 'Skills', icon: FileCode },

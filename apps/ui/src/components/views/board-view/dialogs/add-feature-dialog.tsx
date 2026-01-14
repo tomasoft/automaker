@@ -135,7 +135,7 @@ export function AddFeatureDialog({
   const isSpawnMode = !!parentFeature;
   const navigate = useNavigate();
   const httpApi = getHttpApiClient();
-  const { currentProject } = useAppStore();
+  const { currentProject, defaultWikiPages } = useAppStore();
   const [useCurrentBranch, setUseCurrentBranch] = useState(true);
   const [globalSkillsCount, setGlobalSkillsCount] = useState(0);
   const [projectSkillsCount, setProjectSkillsCount] = useState(0);
@@ -629,6 +629,7 @@ export function AddFeatureDialog({
                 error={descriptionError}
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="title">Title (optional)</Label>
               <Input
@@ -829,7 +830,11 @@ export function AddFeatureDialog({
                   project={wikiProject}
                   wikiId={wikiId}
                   resetKey={open ? 'add-feature-dialog' : undefined}
-                  initialSelectedPages={newFeature.textFilePaths}
+                  initialSelectedPages={[
+                    ...(defaultWikiPages || []),
+                    ...(newFeature.textFilePaths || []),
+                  ]}
+                  lockedPages={defaultWikiPages || []}
                   onSelectionChange={(pages) => {
                     setNewFeature({
                       ...newFeature,

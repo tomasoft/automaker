@@ -38,6 +38,13 @@ interface WikiBrowserProps {
     url: string;
     content: string;
   }>;
+  lockedPages?: Array<{
+    id: string;
+    path: string;
+    name: string;
+    url: string;
+    content: string;
+  }>;
   onSelectionChange?: (
     pages: Array<{ id: string; path: string; name: string; url: string; content: string }>
   ) => void;
@@ -134,6 +141,7 @@ export function WikiBrowser({
   project,
   wikiId,
   initialSelectedPages,
+  lockedPages,
   onSelectionChange,
   resetKey,
 }: WikiBrowserProps) {
@@ -141,7 +149,18 @@ export function WikiBrowser({
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [initialExpansionDone, setInitialExpansionDone] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const lockedIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (lockedPages) {
+      lockedPages.forEach((p) => {
+        const normalized = normalizePath(p.id);
+        if (normalized) ids.add(normalized);
+      });
+    }
+    return ids;
+  }, [lockedPages]);
   const [attachedPages, setAttachedPages] = useState<
     Map<string, { id: string; path: string; name: string; url: string; content: string }>
   >(new Map());
@@ -156,76 +175,49 @@ export function WikiBrowser({
     }
   }, [resetKey]);
 
-  // Initialize selected pages from initialSelectedPages only once (or when reset)
+  // Initialize selected pages from initialSelectedPages (only on mount or explicit reset)
   useEffect(() => {
-    // Only initialize if we haven't done so yet and we have initial pages
-    if (!initializedRef.current && initialSelectedPages && initialSelectedPages.length > 0) {
-      const initialIds = new Set<string>();
-      const initialAttached = new Map<
-        string,
-        { id: string; path: string; name: string; url: string; content: string }
-      >();
+    // Only initialize if we haven't done so yet
+    if (!initializedRef.current) {
+      if (initialSelectedPages && initialSelectedPages.length > 0) {
+        const initialIds = new Set<string>();
+        const initialAttached = new Map<
+          string,
+          { id: string; path: string; name: string; url: string; content: string }
+        >();
 
-      initialSelectedPages.forEach((page: any) => {
-        // Handle both formats: direct wiki page objects and FeatureTextFilePath objects
-        let wikiPath: string | null = null;
-        let pageData: {
-          id: string;
-          path: string;
-          name: string;
-          url: string;
-          content: string;
-        } | null = null;
+        initialSelectedPages.forEach((page: any) => {
+          // The saved page.path is the URL, we need to extract the wiki path
+          // page.url is also the URL, and page.id is the actual wiki path ID
+          const wikiPath = page.id; // Use the id which is the normalized wiki path
+          const pageData = page;
 
-        if (page.url && page.name) {
-          // Direct wiki page object format
-          wikiPath = page.path;
-          pageData = page;
-        } else if (page.path && page.filename) {
-          // FeatureTextFilePath format - extract wiki path from URL
-          wikiPath = extractWikiPathFromUrl(page.path);
-          if (wikiPath) {
-            pageData = {
-              id: page.id,
-              path: wikiPath,
-              name: page.filename,
-              url: page.path,
-              content: page.content || '',
-            };
+          if (wikiPath && pageData) {
+            const normalized = normalizePath(wikiPath);
+            if (normalized) {
+              initialIds.add(normalized);
+              initialAttached.set(normalized, pageData);
+            }
           }
-        }
+        });
 
-        if (wikiPath && pageData) {
-          const normalized = normalizePath(wikiPath);
-          if (normalized) {
-            initialIds.add(normalized);
-            initialAttached.set(normalized, pageData);
+        setSelectedIds(initialIds);
+        setAttachedPages(initialAttached);
+
+        // Auto-expand branches that contain selected pages
+        const pathsToExpand = new Set<string>();
+        initialIds.forEach((selectedPath) => {
+          // Expand all parent paths
+          const parts = selectedPath.split('/');
+          for (let i = 1; i < parts.length; i++) {
+            const parentPath = parts.slice(0, i).join('/');
+            if (parentPath) {
+              pathsToExpand.add(parentPath);
+            }
           }
-        }
-      });
-
-      setSelectedIds(initialIds);
-      setAttachedPages(initialAttached);
-      initializedRef.current = true;
-
-      // Auto-expand branches that contain selected pages
-      const pathsToExpand = new Set<string>();
-      initialIds.forEach((selectedPath) => {
-        // Expand all parent paths
-        const parts = selectedPath.split('/');
-        for (let i = 1; i < parts.length; i++) {
-          const parentPath = parts.slice(0, i).join('/');
-          if (parentPath) {
-            pathsToExpand.add(parentPath);
-          }
-        }
-      });
-      setExpandedPaths(pathsToExpand);
-    } else if (
-      (!initialSelectedPages || initialSelectedPages.length === 0) &&
-      !initializedRef.current
-    ) {
-      // Mark as initialized even if there are no initial pages
+        });
+        setExpandedPaths(pathsToExpand);
+      }
       initializedRef.current = true;
     }
   }, [initialSelectedPages]);
@@ -233,6 +225,22 @@ export function WikiBrowser({
   useEffect(() => {
     loadPages();
   }, [organization, project, wikiId]);
+
+  const treeData = useMemo(() => buildTree(pages), [pages]);
+
+  // Auto-expand first level of tree when pages load
+  useEffect(() => {
+    if (!initialExpansionDone && pages.length > 0) {
+      const firstLevelPaths = new Set<string>();
+      treeData.forEach((node) => {
+        if (node.isFolder) {
+          firstLevelPaths.add(node.id);
+        }
+      });
+      setExpandedPaths((prev) => new Set([...prev, ...firstLevelPaths]));
+      setInitialExpansionDone(true);
+    }
+  }, [pages, treeData, initialExpansionDone]);
 
   const loadPages = async (path?: string) => {
     setLoading(true);
@@ -260,8 +268,6 @@ export function WikiBrowser({
       setLoading(false);
     }
   };
-
-  const treeData = useMemo(() => buildTree(pages), [pages]);
 
   const filteredTree = useMemo(() => {
     if (!searchQuery) return treeData;
@@ -483,7 +489,13 @@ export function WikiBrowser({
             <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           )}
 
-          <span className="text-sm truncate flex-1">{node.name}</span>
+          <span
+            className={`text-sm truncate flex-1 ${
+              !node.isFolder && lockedIds.has(node.id) ? 'font-bold italic' : ''
+            }`}
+          >
+            {node.name}
+          </span>
 
           {/* Show indicator for selected pages */}
           {!node.isFolder && selectedIds.has(node.id) && (

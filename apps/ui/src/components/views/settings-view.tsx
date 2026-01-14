@@ -95,7 +95,7 @@ export function SettingsView() {
 
   // Use settings view navigation hook - initialize with tab from URL search params
   const { activeView, navigateTo } = useSettingsView({
-    initialView: (search.tab as any) || 'api-keys',
+    initialView: (search.tab as any) || 'providers',
   });
 
   // Navigate to tab from search params when it changes

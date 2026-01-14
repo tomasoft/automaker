@@ -404,7 +404,7 @@ export async function setupProjectWithPathNoWorktrees(
         chatHistoryOpen: false,
         maxConcurrency: 3,
         aiProfiles: [],
-        useWorktrees: false, // Worktree feature DISABLED
+        useWorktrees: false, // Worktrees disabled for this specific test scenario
         currentWorktreeByProject: {},
         worktreesByProject: {},
       },

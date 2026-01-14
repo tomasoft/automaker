@@ -201,8 +201,12 @@ export class IdeationService {
         existingWorkContext
       );
 
+      // Get model from settings (use suggestionsModel from phase models)
+      const settings = this.settingsService ? await this.settingsService.getGlobalSettings() : null;
+      const suggestionsModel = settings?.phaseModels?.suggestionsModel ?? { model: 'sonnet' };
+
       // Resolve model alias to canonical identifier
-      const modelId = resolveModelString(options?.model ?? 'sonnet');
+      const modelId = resolveModelString(options?.model ?? suggestionsModel.model);
 
       // Create SDK options
       const sdkOptions = await createChatOptions({
@@ -648,8 +652,12 @@ export class IdeationService {
         existingWorkContext
       );
 
+      // Get model from settings (use suggestionsModel from phase models)
+      const settings = this.settingsService ? await this.settingsService.getGlobalSettings() : null;
+      const suggestionsModel = settings?.phaseModels?.suggestionsModel ?? { model: 'sonnet' };
+
       // Resolve model alias to canonical identifier
-      const modelId = resolveModelString('sonnet');
+      const modelId = resolveModelString(suggestionsModel.model);
 
       // Create SDK options
       const sdkOptions = await createChatOptions({

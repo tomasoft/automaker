@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import type { ModelAlias, ThinkingLevel, AIProfile, CursorModelId } from '@automaker/types';
 import { CURSOR_MODEL_MAP, profileHasThinking, PROVIDER_PREFIXES } from '@automaker/types';
 import { PROFILE_ICONS } from './model-constants';
+import { useAppStore } from '@/store/app-store';
 
 /**
  * Get display string for a profile's model configuration
@@ -51,10 +52,18 @@ export function ProfileQuickSelect({
   showManageLink = false,
   onManageLinkClick,
 }: ProfileQuickSelectProps) {
-  // Show both Claude and Cursor profiles
-  const allProfiles = profiles;
+  const { isClaudeEnabled, isCursorEnabled } = useAppStore();
 
-  if (allProfiles.length === 0) {
+  // Filter profiles based on provider enabled state
+  const filteredProfiles = profiles.filter((profile) => {
+    if (profile.provider === 'cursor') {
+      return isCursorEnabled;
+    }
+    // Claude profiles (default)
+    return isClaudeEnabled;
+  });
+
+  if (filteredProfiles.length === 0) {
     return null;
   }
 
@@ -81,7 +90,7 @@ export function ProfileQuickSelect({
         </span>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        {allProfiles.slice(0, 6).map((profile) => {
+        {filteredProfiles.slice(0, 6).map((profile) => {
           const IconComponent = profile.icon ? PROFILE_ICONS[profile.icon] : Brain;
           const isSelected = isProfileSelected(profile);
           const isCursorProfile = profile.provider === 'cursor';

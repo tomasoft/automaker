@@ -61,41 +61,6 @@ export function LocalLlmSettingsTab() {
           {/* CLI Status */}
           <LocalLlmCliStatus status={status} isChecking={isLoading} onRefresh={loadData} />
 
-          {/* Info Banner */}
-          <div
-            className={cn(
-              'rounded-2xl overflow-hidden',
-              'border border-border/50',
-              'bg-gradient-to-br from-card/90 via-card/70 to-card/80 backdrop-blur-xl'
-            )}
-          >
-            <div className="p-6">
-              <div className="flex items-start gap-3">
-                <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-                <div className="text-sm text-muted-foreground flex-1">
-                  <span className="font-medium text-foreground">Getting Started:</span>
-                  <ol className="list-decimal list-inside mt-2 space-y-1">
-                    <li>
-                      Download and install{' '}
-                      <a
-                        href="https://lmstudio.ai/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary hover:underline"
-                      >
-                        LM Studio
-                      </a>
-                    </li>
-                    <li>Download a coding model (e.g., Qwen2.5-Coder-32B)</li>
-                    <li>Start the local server in LM Studio (port 1234)</li>
-                    <li>Refresh this page to see available models</li>
-                    <li>Enable models you want to use in AutoMaker</li>
-                  </ol>
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* Setup Instructions (when not connected) */}
           {!isConnected && (
             <div

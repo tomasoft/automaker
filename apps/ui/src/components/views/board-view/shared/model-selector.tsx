@@ -38,6 +38,10 @@ export function ModelSelector({
     setEnabledLocalLlmModels,
     setLocalLlmDefaultModel,
     updateSeenLocalLlmModels,
+    isClaudeEnabled,
+    isCursorEnabled,
+    isCopilotEnabled,
+    isLocalLlmEnabled,
   } = useAppStore();
   const { cursorCliStatus, copilotStatus } = useSetupStore();
   const { models: localLlmModels, isLoading: isLoadingLocalLlmModels } = useLocalLlmModels();
@@ -108,62 +112,70 @@ export function ModelSelector({
       <div className="space-y-2">
         <Label>AI Provider</Label>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => handleProviderChange('claude')}
-            className={cn(
-              'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
-              selectedProvider === 'claude'
-                ? 'bg-primary text-primary-foreground border-primary'
-                : 'bg-background hover:bg-accent border-border'
-            )}
-            data-testid={`${testIdPrefix}-provider-claude`}
-          >
-            <Bot className="w-4 h-4" />
-            Claude
-          </button>
-          <button
-            type="button"
-            onClick={() => handleProviderChange('cursor')}
-            className={cn(
-              'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
-              selectedProvider === 'cursor'
-                ? 'bg-primary text-primary-foreground border-primary'
-                : 'bg-background hover:bg-accent border-border'
-            )}
-            data-testid={`${testIdPrefix}-provider-cursor`}
-          >
-            <Terminal className="w-4 h-4" />
-            Cursor CLI
-          </button>
-          <button
-            type="button"
-            onClick={() => handleProviderChange('github-copilot')}
-            className={cn(
-              'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
-              selectedProvider === 'github-copilot'
-                ? 'bg-primary text-primary-foreground border-primary'
-                : 'bg-background hover:bg-accent border-border'
-            )}
-            data-testid={`${testIdPrefix}-provider-copilot`}
-          >
-            <Github className="w-4 h-4" />
-            Copilot
-          </button>
-          <button
-            type="button"
-            onClick={() => handleProviderChange('local-llm')}
-            className={cn(
-              'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
-              selectedProvider === 'local-llm'
-                ? 'bg-primary text-primary-foreground border-primary'
-                : 'bg-background hover:bg-accent border-border'
-            )}
-            data-testid={`${testIdPrefix}-provider-local`}
-          >
-            <Server className="w-4 h-4" />
-            Local LLM
-          </button>
+          {isClaudeEnabled && (
+            <button
+              type="button"
+              onClick={() => handleProviderChange('claude')}
+              className={cn(
+                'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                selectedProvider === 'claude'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-accent border-border'
+              )}
+              data-testid={`${testIdPrefix}-provider-claude`}
+            >
+              <Bot className="w-4 h-4" />
+              Claude
+            </button>
+          )}
+          {isCursorEnabled && (
+            <button
+              type="button"
+              onClick={() => handleProviderChange('cursor')}
+              className={cn(
+                'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                selectedProvider === 'cursor'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-accent border-border'
+              )}
+              data-testid={`${testIdPrefix}-provider-cursor`}
+            >
+              <Terminal className="w-4 h-4" />
+              Cursor CLI
+            </button>
+          )}
+          {isCopilotEnabled && (
+            <button
+              type="button"
+              onClick={() => handleProviderChange('github-copilot')}
+              className={cn(
+                'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                selectedProvider === 'github-copilot'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-accent border-border'
+              )}
+              data-testid={`${testIdPrefix}-provider-copilot`}
+            >
+              <Github className="w-4 h-4" />
+              Copilot
+            </button>
+          )}
+          {isLocalLlmEnabled && (
+            <button
+              type="button"
+              onClick={() => handleProviderChange('local-llm')}
+              className={cn(
+                'flex-1 px-3 py-2 rounded-md border text-sm font-medium transition-colors flex items-center justify-center gap-2',
+                selectedProvider === 'local-llm'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background hover:bg-accent border-border'
+              )}
+              data-testid={`${testIdPrefix}-provider-local`}
+            >
+              <Server className="w-4 h-4" />
+              Local LLM
+            </button>
+          )}
         </div>
       </div>
 
