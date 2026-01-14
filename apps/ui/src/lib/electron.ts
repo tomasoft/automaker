@@ -469,6 +469,10 @@ export interface FeaturesAPI {
   generateTitle: (
     description: string
   ) => Promise<{ success: boolean; title?: string; error?: string }>;
+  analyzeImpact: (
+    feature: any,
+    projectPath: string
+  ) => Promise<{ success: boolean; data?: any; message?: string; error?: string }>;
 }
 
 export interface AutoModeAPI {

@@ -328,17 +328,21 @@ export class SettingsService {
         ...DEFAULT_CREDENTIALS.apiKeys,
         ...credentials.apiKeys,
       },
+      azureDevOpsPATs: {
+        ...DEFAULT_CREDENTIALS.azureDevOpsPATs,
+        ...credentials.azureDevOpsPATs,
+      },
     };
   }
 
   /**
    * Update credentials with partial changes
    *
-   * Updates individual API keys. Uses deep merge for apiKeys object.
+   * Updates individual API keys. Uses deep merge for apiKeys and azureDevOpsPATs objects.
    * Creates dataDir if needed. Credentials are written atomically.
    * WARNING: Use only in secure contexts - keys are unencrypted.
    *
-   * @param updates - Partial Credentials (usually just apiKeys)
+   * @param updates - Partial Credentials (usually just apiKeys or azureDevOpsPATs)
    * @returns Promise resolving to complete updated Credentials object
    */
   async updateCredentials(updates: Partial<Credentials>): Promise<Credentials> {
@@ -357,6 +361,22 @@ export class SettingsService {
       updated.apiKeys = {
         ...current.apiKeys,
         ...updates.apiKeys,
+      };
+    }
+
+    // Deep merge Azure DevOps PATs if provided
+    if (updates.azureDevOpsPATs) {
+      updated.azureDevOpsPATs = {
+        ...current.azureDevOpsPATs,
+        ...updates.azureDevOpsPATs,
+      };
+    }
+
+    // Deep merge Azure DevOps tokens if provided
+    if (updates.azureDevOpsTokens) {
+      updated.azureDevOpsTokens = {
+        ...current.azureDevOpsTokens,
+        ...updates.azureDevOpsTokens,
       };
     }
 
@@ -423,6 +443,12 @@ export class SettingsService {
     const settingsPath = getProjectSettingsPath(projectPath);
     const settings = await readJsonFile<ProjectSettings>(settingsPath, DEFAULT_PROJECT_SETTINGS);
 
+    // Log what we're loading to help debug
+    logger.debug(`Loading project settings from ${settingsPath}`);
+    logger.debug(
+      `Has targetRepository: ${!!settings.targetRepository}, Has repositoryGraph: ${!!settings.repositoryGraph}, Has repositoryFileTree: ${!!settings.repositoryFileTree}`
+    );
+
     return {
       ...DEFAULT_PROJECT_SETTINGS,
       ...settings,
@@ -459,6 +485,17 @@ export class SettingsService {
         ...current.boardBackground,
         ...updates.boardBackground,
       };
+    }
+
+    // Log what we're saving
+    logger.info(`Updating project settings for ${projectPath}`);
+    logger.debug(
+      `Saving: targetRepository=${!!updates.targetRepository}, repositoryGraph=${!!updates.repositoryGraph}, repositoryFileTree=${!!updates.repositoryFileTree}`
+    );
+    if (updates.repositoryGraph) {
+      logger.debug(
+        `Repository graph has ${updates.repositoryGraph.nodes?.length || 0} nodes, ${updates.repositoryGraph.edges?.length || 0} edges`
+      );
     }
 
     await atomicWriteJson(settingsPath, updated);
@@ -696,5 +733,102 @@ export class SettingsService {
    */
   getDataDir(): string {
     return this.dataDir;
+  }
+
+  /**
+   * Save Azure DevOps OAuth token to credentials
+   *
+   * @param sessionId - Unique session identifier
+   * @param tokenData - Token data to save
+   */
+  async saveAzureAuthToken(
+    sessionId: string,
+    tokenData: {
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      userId?: string;
+    }
+  ): Promise<void> {
+    const credentials = await this.getCredentials();
+    const tokens = credentials.azureDevOpsTokens || {};
+
+    tokens[sessionId] = {
+      ...tokenData,
+      sessionId,
+    };
+
+    await this.updateCredentials({
+      azureDevOpsTokens: tokens,
+    });
+
+    logger.info(`Saved Azure DevOps auth token for session: ${sessionId}`);
+  }
+
+  /**
+   * Get Azure DevOps OAuth token from credentials
+   *
+   * @param sessionId - Unique session identifier
+   * @returns Token data or null if not found
+   */
+  async getAzureAuthToken(sessionId: string): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    userId?: string;
+    sessionId: string;
+  } | null> {
+    const credentials = await this.getCredentials();
+    const tokens = credentials.azureDevOpsTokens || {};
+    return tokens[sessionId] || null;
+  }
+
+  /**
+   * Get all Azure DevOps OAuth tokens from credentials
+   *
+   * @returns All stored tokens by session ID
+   */
+  async getAllAzureAuthTokens(): Promise<
+    Record<
+      string,
+      {
+        accessToken: string;
+        refreshToken: string;
+        expiresAt: number;
+        userId?: string;
+        sessionId: string;
+      }
+    >
+  > {
+    const credentials = await this.getCredentials();
+    return credentials.azureDevOpsTokens || {};
+  }
+
+  /**
+   * Delete Azure DevOps OAuth token from credentials
+   *
+   * @param sessionId - Unique session identifier
+   */
+  async deleteAzureAuthToken(sessionId: string): Promise<void> {
+    const credentials = await this.getCredentials();
+    const tokens = credentials.azureDevOpsTokens || {};
+
+    if (tokens[sessionId]) {
+      delete tokens[sessionId];
+      await this.updateCredentials({
+        azureDevOpsTokens: tokens,
+      });
+      logger.info(`Deleted Azure DevOps auth token for session: ${sessionId}`);
+    }
+  }
+
+  /**
+   * Clear all Azure DevOps OAuth tokens from credentials
+   */
+  async clearAllAzureAuthTokens(): Promise<void> {
+    await this.updateCredentials({
+      azureDevOpsTokens: {},
+    });
+    logger.info('Cleared all Azure DevOps auth tokens');
   }
 }

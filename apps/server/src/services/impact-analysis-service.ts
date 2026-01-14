@@ -17,6 +17,8 @@ import type {
   RepositoryGraph,
   ImpactRule,
   ServiceBoundary,
+  WikiReference,
+  FeatureTextFilePath,
 } from '@automaker/types';
 
 const logger = createLogger('ImpactAnalysisService');
@@ -382,6 +384,80 @@ export function calculateRiskScore(
 }
 
 /**
+ * Analyze wiki pages for file mentions and their impact
+ */
+export function analyzeWikiReferences(
+  wikiPages: FeatureTextFilePath[],
+  fileExtractionPatterns: string[],
+  fileTree: FileTreeNode[],
+  existingAffectedFiles: Set<string>
+): { references: WikiReference[]; additionalFiles: AffectedFile[] } {
+  const references: WikiReference[] = [];
+  const additionalFiles: AffectedFile[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const wiki of wikiPages) {
+    if (!wiki.content) continue;
+
+    const contributedFiles: string[] = [];
+    const content = wiki.content;
+
+    // Extract file paths from wiki content using the same patterns
+    for (const patternStr of fileExtractionPatterns) {
+      try {
+        const regex = new RegExp(patternStr, 'gi');
+        let match;
+
+        while ((match = regex.exec(content)) !== null) {
+          const filePath = match[1];
+          if (!filePath) continue;
+
+          contributedFiles.push(filePath);
+
+          // Add to additional files if not already in affected files
+          if (!existingAffectedFiles.has(filePath) && !seenPaths.has(filePath)) {
+            seenPaths.add(filePath);
+            const exists = fileTree.some((node) => node.path === filePath);
+
+            additionalFiles.push({
+              path: filePath,
+              exists,
+              confidence: 'medium', // Wiki mentions are less explicit than spec mentions
+              matchedPattern: patternStr,
+            });
+          }
+        }
+      } catch (error) {
+        logger.warn(`[WikiAnalysis] Invalid regex pattern: ${patternStr}`, error);
+      }
+    }
+
+    // Only add wiki reference if it contributed files
+    if (contributedFiles.length > 0) {
+      // Generate impact explanation
+      const uniqueFiles = [...new Set(contributedFiles)];
+      const impact =
+        uniqueFiles.length === 1
+          ? `Mentions ${uniqueFiles[0]}, which may be affected by this feature`
+          : `Mentions ${uniqueFiles.length} files that may be affected: ${uniqueFiles.slice(0, 3).join(', ')}${uniqueFiles.length > 3 ? '...' : ''}`;
+
+      references.push({
+        name: wiki.filename || 'Wiki Page',
+        url: wiki.path,
+        contributedFiles: uniqueFiles,
+        impact,
+      });
+    }
+  }
+
+  logger.info(
+    `[WikiAnalysis] Found ${references.length} relevant wiki pages contributing ${additionalFiles.length} additional files`
+  );
+
+  return { references, additionalFiles };
+}
+
+/**
  * Perform complete impact analysis for a feature
  */
 export function analyzeFeatureImpact(
@@ -409,7 +485,7 @@ export function analyzeFeatureImpact(
     };
   }
 
-  // Step 1: Extract affected files
+  // Step 1: Extract affected files from spec
   const filesStart = Date.now();
   const affectedFiles = extractAffectedFiles(
     feature.spec,
@@ -418,16 +494,37 @@ export function analyzeFeatureImpact(
   );
   timing.files = Date.now() - filesStart;
 
+  // Step 1.5: Analyze wiki pages for additional file mentions
+  const wikiStart = Date.now();
+  const existingFilePaths = new Set(affectedFiles.map((f) => f.path));
+  const { references: wikiReferences, additionalFiles } =
+    feature.textFilePaths && feature.textFilePaths.length > 0
+      ? analyzeWikiReferences(
+          feature.textFilePaths,
+          fileExtractionPatterns,
+          context.fileTree,
+          existingFilePaths
+        )
+      : { references: [], additionalFiles: [] };
+
+  // Merge additional files from wiki into affected files
+  const allAffectedFiles = [...affectedFiles, ...additionalFiles];
+  timing.wiki = Date.now() - wikiStart;
+
+  logger.info(
+    `[ImpactAnalysis] Total affected files: ${allAffectedFiles.length} (${affectedFiles.length} from spec, ${additionalFiles.length} from wiki)`
+  );
+
   // Step 2: Find dependencies
   const graphStart = Date.now();
-  const allImpacts = findDirectImpacts(affectedFiles, context.graph, context.dependencyDepth);
+  const allImpacts = findDirectImpacts(allAffectedFiles, context.graph, context.dependencyDepth);
   const directImpacts = allImpacts.filter((i) => i.hops === 1);
   const indirectImpacts = allImpacts.filter((i) => i.hops > 1);
   timing.graph = Date.now() - graphStart;
 
   // Step 3: Detect cross-boundary risks
   const crossBoundaryRisks = detectCrossBoundaryRisks(
-    affectedFiles,
+    allAffectedFiles,
     allImpacts,
     context.graph,
     context.services
@@ -435,12 +532,12 @@ export function analyzeFeatureImpact(
 
   // Step 4: Execute gotcha rules
   const rulesStart = Date.now();
-  const gotchas = detectGotchas(affectedFiles, context.rules, context.fileTree, context.graph);
+  const gotchas = detectGotchas(allAffectedFiles, context.rules, context.fileTree, context.graph);
   timing.rules = Date.now() - rulesStart;
 
   // Step 5: Calculate risk score
   const { score, level } = calculateRiskScore(
-    affectedFiles,
+    allAffectedFiles,
     allImpacts,
     crossBoundaryRisks,
     gotchas
@@ -449,15 +546,16 @@ export function analyzeFeatureImpact(
   timing.total = Date.now() - timingStart;
 
   logger.info(
-    `[ImpactAnalysis] Analysis complete in ${timing.total}ms: ${affectedFiles.length} files, ${allImpacts.length} impacts, ${gotchas.length} gotchas`
+    `[ImpactAnalysis] Analysis complete in ${timing.total}ms: ${allAffectedFiles.length} files, ${allImpacts.length} impacts, ${gotchas.length} gotchas, ${wikiReferences.length} wiki references`
   );
 
   return {
-    affectedFiles,
+    affectedFiles: allAffectedFiles,
     directImpacts,
     indirectImpacts,
     crossBoundaryRisks,
     gotchas,
+    wikiReferences: wikiReferences.length > 0 ? wikiReferences : undefined,
     riskScore: score,
     riskLevel: level,
     analyzedAt: new Date().toISOString(),

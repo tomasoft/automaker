@@ -12,8 +12,18 @@ import { azureAuthSessions } from '../../azure-devops-auth/routes/poll-azure-aut
 const logger = createLogger('AzureWikiRoutes');
 
 export function createListWikisHandler() {
-  return async (_req: Request, res: Response) => {
+  return async (req: Request, res: Response) => {
     try {
+      const { organization, project } = req.query as { organization?: string; project?: string };
+
+      if (!organization || !project) {
+        res.status(400).json({
+          success: false,
+          error: 'organization and project query parameters are required',
+        });
+        return;
+      }
+
       // Get authenticated session
       const authManager = Array.from(azureAuthSessions.values())[0];
 
@@ -26,7 +36,7 @@ export function createListWikisHandler() {
       }
 
       // Get wikis from Azure DevOps
-      const wikis = await authManager.listWikis();
+      const wikis = await authManager.listWikis(organization, project);
 
       res.json({
         success: true,

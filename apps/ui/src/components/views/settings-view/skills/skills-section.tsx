@@ -16,23 +16,24 @@ import { Input } from '@/components/ui/input';
 import { FileCode, Globe, FolderOpen, Plus, FolderCog, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/store/app-store';
-import { getDefaultWorkspaceDirectory } from '@/lib/workspace-config';
 import { getElectronAPI } from '@/lib/electron';
+import { getHttpApiClient } from '@/lib/http-api-client';
 
 export function SkillsSection() {
   const { currentProject } = useAppStore();
+  const api = getElectronAPI();
+  const httpApi = getHttpApiClient();
   const [globalSkillsPath, setGlobalSkillsPath] = useState<string | null>(null);
   const [projectSkillsPath, setProjectSkillsPath] = useState<string | null>(null);
 
-  // TODO: Fetch actual skills lists from API
-  const globalSkillsCount = 0;
-  const projectSkillsCount = 0;
-  const maxAutoSelected = 3; // TODO: Get from global settings
-  const similarityThreshold = 0.3; // TODO: Get from global settings
+  const [globalSkillsCount, setGlobalSkillsCount] = useState(0);
+  const [projectSkillsCount, setProjectSkillsCount] = useState(0);
+  const [maxAutoSelected, setMaxAutoSelected] = useState(3);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.3);
 
   useEffect(() => {
-    // Load global skills path
-    getDefaultWorkspaceDirectory().then((dir) => {
+    // Load global skills path - use userData directory (app data), not workspace directory
+    api.getPath('userData').then((dir) => {
       if (dir) {
         // Normalize path separators to match the OS
         const normalizedDir = dir.replace(/\//g, '\\');
@@ -46,6 +47,27 @@ export function SkillsSection() {
       const normalizedPath = currentProject.path.replace(/\//g, '\\');
       setProjectSkillsPath(`${normalizedPath}\\skills`);
     }
+
+    // Fetch skills counts and settings
+    const fetchSkills = async () => {
+      try {
+        const result = await httpApi.skills.list(currentProject?.path);
+        if (result.success) {
+          setGlobalSkillsCount(result.global?.length || 0);
+          setProjectSkillsCount(result.project?.length || 0);
+        }
+
+        // Fetch global settings
+        const settings = await httpApi.settings.getGlobal();
+        if (settings.success && settings.settings) {
+          setMaxAutoSelected(settings.settings.maxAutoSelectedSkills ?? 3);
+          setSimilarityThreshold(settings.settings.skillSimilarityThreshold ?? 0.3);
+        }
+      } catch (error) {
+        console.error('Failed to fetch skills:', error);
+      }
+    };
+    fetchSkills();
   }, [currentProject]);
 
   const handleOpenGlobalSkillsFolder = async () => {
@@ -166,9 +188,19 @@ export function SkillsSection() {
               min={1}
               max={10}
               value={maxAutoSelected}
-              onChange={(e) => {
-                // TODO: Update global settings
-                console.log('TODO: Set maxAutoSelectedSkills =', e.target.value);
+              onChange={async (e) => {
+                const newValue = parseInt(e.target.value, 10);
+                if (isNaN(newValue) || newValue < 1 || newValue > 10) return;
+
+                setMaxAutoSelected(newValue);
+                try {
+                  await httpApi.settings.updateGlobal({
+                    maxAutoSelectedSkills: newValue,
+                  });
+                } catch (error) {
+                  console.error('Failed to update max skills:', error);
+                  toast.error('Failed to save setting');
+                }
               }}
               className="w-32"
             />
@@ -191,9 +223,17 @@ export function SkillsSection() {
               max={1}
               step={0.05}
               value={[similarityThreshold]}
-              onValueChange={(value) => {
-                // TODO: Update global settings
-                console.log('TODO: Set skillSimilarityThreshold =', value[0]);
+              onValueChange={async (value) => {
+                const newValue = value[0];
+                setSimilarityThreshold(newValue);
+                try {
+                  await httpApi.settings.updateGlobal({
+                    skillSimilarityThreshold: newValue,
+                  });
+                } catch (error) {
+                  console.error('Failed to update similarity threshold:', error);
+                  toast.error('Failed to save setting');
+                }
               }}
               className="w-full"
             />

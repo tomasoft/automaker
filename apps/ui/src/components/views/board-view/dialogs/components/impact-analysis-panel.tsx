@@ -18,20 +18,26 @@ import {
   Download,
   Loader2,
   AlertCircle,
+  BookOpen,
+  ExternalLink,
 } from 'lucide-react';
 import type { Feature, ImpactAnalysisResult } from '@automaker/types';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import { FilesTab } from './tabs/files-tab';
 import { DependenciesTab } from './tabs/dependencies-tab';
 import { ServicesTab } from './tabs/services-tab';
-import { GotchasTab } from './tabs/gotchas-tab';
 
 interface ImpactAnalysisPanelProps {
   feature: Feature;
   projectPath: string;
+  onAnalysisComplete?: (analysis: ImpactAnalysisResult) => void;
 }
 
-export function ImpactAnalysisPanel({ feature, projectPath }: ImpactAnalysisPanelProps) {
+export function ImpactAnalysisPanel({
+  feature,
+  projectPath,
+  onAnalysisComplete,
+}: ImpactAnalysisPanelProps) {
   const [analysis, setAnalysis] = useState<ImpactAnalysisResult | null>(
     feature.impactAnalysis || null
   );
@@ -43,26 +49,99 @@ export function ImpactAnalysisPanel({ feature, projectPath }: ImpactAnalysisPane
     setError(null);
 
     try {
-      const httpClient = getHttpApiClient();
-      const response = await fetch('/api/features/analyze-impact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feature, projectPath }),
+      console.log('[ImpactAnalysis] Starting analysis', {
+        featureId: feature.id,
+        hasSpec: !!feature.spec,
+        projectPath,
       });
 
-      const result = await response.json();
+      const httpClient = getHttpApiClient();
+      const result = await httpClient.features.analyzeImpact(feature, projectPath);
+
+      console.log('[ImpactAnalysis] Result:', result);
 
       if (result.success && result.data) {
         setAnalysis(result.data);
+        // Notify parent to save the analysis to the feature
+        if (onAnalysisComplete) {
+          onAnalysisComplete(result.data);
+        }
       } else {
         setError(result.message || result.error || 'Analysis failed');
       }
     } catch (err) {
+      console.error('[ImpactAnalysis] Error:', err);
       setError(err instanceof Error ? err.message : 'Failed to analyze impact');
     } finally {
       setIsAnalyzing(false);
     }
   };
+
+  // Extract service names from affected files for count
+  const extractServiceName = (filePath: string): string | null => {
+    // Normalize path separators
+    const normalizedPath = filePath.replace(/\\/g, '/');
+
+    // Try to match common service patterns:
+    // 1. Backend/AzureFaultExplorer.* or Frontend/AzureFaultExplorer.* (from Service-Boundaries wiki)
+    const backendFrontendMatch = normalizedPath.match(
+      /(?:Backend|Frontend)\/AzureFaultExplorer\.([A-Z][a-z]+)\//i
+    );
+    if (backendFrontendMatch) {
+      return `AzureFaultExplorer.${backendFrontendMatch[1]}`;
+    }
+
+    // 2. Microservices/Service[A-Z] (from Service-Boundaries wiki)
+    const microserviceMatch = normalizedPath.match(/Microservices\/(Service[A-Z])\//i);
+    if (microserviceMatch) {
+      return microserviceMatch[1];
+    }
+
+    // 3. AzureFaultExplorer.* pattern without prefix (e.g., Core/... or Blazor/...)
+    const azureMatch = normalizedPath.match(/^(?:.*\/)?(?:AzureFaultExplorer\.)?([A-Z][a-z]+)\//);
+    if (azureMatch && ['Core', 'Api', 'Blazor'].includes(azureMatch[1])) {
+      return `AzureFaultExplorer.${azureMatch[1]}`;
+    }
+
+    // 4. *Service pattern (e.g., OrderingService/, PaymentService/)
+    const serviceMatch = normalizedPath.match(/([A-Z][a-z]+Service)\//);
+    if (serviceMatch) {
+      return serviceMatch[1];
+    }
+
+    // 5. Service[A-Z] pattern (e.g., ServiceA/, ServiceB/)
+    const serviceLetterMatch = normalizedPath.match(/(?:^|\/)(Service[A-Z])\//);
+    if (serviceLetterMatch) {
+      return serviceLetterMatch[1];
+    }
+
+    // 6. Infrastructure folder
+    if (normalizedPath.match(/(?:^|\/)Infrastructure\//i)) {
+      return 'Infrastructure';
+    }
+
+    // 7. Tests folder
+    if (normalizedPath.match(/(?:^|\/)(?:tests?|e2e|E2ETests)\//i)) {
+      return 'E2ETests';
+    }
+
+    // 8. src/Services pattern - likely a shared services folder
+    if (normalizedPath.match(/^src\/Services\//)) {
+      return 'Shared Services';
+    }
+
+    return null;
+  };
+
+  const affectedServicesCount = React.useMemo(() => {
+    if (!analysis) return 0;
+    const serviceNames = new Set(
+      analysis.affectedFiles
+        .map((f) => extractServiceName(f.path))
+        .filter((name): name is string => name !== null)
+    );
+    return serviceNames.size;
+  }, [analysis]);
 
   const getRiskColor = (level: string) => {
     switch (level) {
@@ -124,20 +203,28 @@ ${analysis.crossBoundaryRisks
   .map((r) => `- **${r.risk.toUpperCase()}**: ${r.fromService} → ${r.toService} (${r.dependency})`)
   .join('\n')}
 
-## Gotchas Detected (${analysis.gotchas.length})
+${
+  analysis.wikiReferences && analysis.wikiReferences.length > 0
+    ? `## Wiki References (${analysis.wikiReferences.length})
 
-${analysis.gotchas
+Documentation pages that contributed to this impact analysis:
+
+${analysis.wikiReferences
   .map(
-    (g) => `### ${g.severity.toUpperCase()}: ${g.rule}
+    (ref) => `### ${ref.name}
 
-${g.description}
+**URL:** ${ref.url}
 
-**Suggested Action:** ${g.suggestedAction}
+**Impact:** ${ref.impact}
 
-${g.wikiPages && g.wikiPages.length > 0 ? `**Related Documentation:**\n${g.wikiPages.map((w) => `- ${w}`).join('\n')}` : ''}
+**Contributed Files:**
+${ref.contributedFiles.map((f) => `- \`${f}\``).join('\n')}
 `
   )
   .join('\n')}
+`
+    : ''
+}
 
 ## Analysis Timing
 
@@ -261,7 +348,9 @@ ${g.wikiPages && g.wikiPages.length > 0 ? `**Related Documentation:**\n${g.wikiP
 
       {/* Tabs */}
       <Tabs defaultValue="files" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList
+          className={`grid w-full ${analysis.wikiReferences && analysis.wikiReferences.length > 0 ? 'grid-cols-4' : 'grid-cols-3'}`}
+        >
           <TabsTrigger value="files" className="gap-2">
             <FileText className="h-4 w-4" />
             Files ({analysis.affectedFiles.length})
@@ -272,12 +361,14 @@ ${g.wikiPages && g.wikiPages.length > 0 ? `**Related Documentation:**\n${g.wikiP
           </TabsTrigger>
           <TabsTrigger value="services" className="gap-2">
             <Server className="h-4 w-4" />
-            Services ({analysis.crossBoundaryRisks.length})
+            Services ({affectedServicesCount})
           </TabsTrigger>
-          <TabsTrigger value="gotchas" className="gap-2">
-            <AlertTriangle className="h-4 w-4" />
-            Gotchas ({analysis.gotchas.length})
-          </TabsTrigger>
+          {analysis.wikiReferences && analysis.wikiReferences.length > 0 && (
+            <TabsTrigger value="wiki" className="gap-2">
+              <BookOpen className="h-4 w-4" />
+              Wiki Refs ({analysis.wikiReferences.length})
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="files">
@@ -293,12 +384,69 @@ ${g.wikiPages && g.wikiPages.length > 0 ? `**Related Documentation:**\n${g.wikiP
         </TabsContent>
 
         <TabsContent value="services">
-          <ServicesTab crossBoundaryRisks={analysis.crossBoundaryRisks} />
+          <ServicesTab
+            crossBoundaryRisks={analysis.crossBoundaryRisks}
+            affectedFiles={analysis.affectedFiles}
+          />
         </TabsContent>
 
-        <TabsContent value="gotchas">
-          <GotchasTab gotchas={analysis.gotchas} />
-        </TabsContent>
+        {analysis.wikiReferences && analysis.wikiReferences.length > 0 && (
+          <TabsContent value="wiki">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Wiki References</CardTitle>
+                <CardDescription>
+                  Documentation that contributed to this impact analysis
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {analysis.wikiReferences.map((ref, idx) => (
+                    <div
+                      key={idx}
+                      className="border rounded-lg p-4 hover:bg-accent/50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-2">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <BookOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          <h4 className="font-medium text-sm truncate">{ref.name}</h4>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 gap-2"
+                          onClick={() => window.open(ref.url, '_blank')}
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          Open
+                        </Button>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-3">{ref.impact}</p>
+                      {ref.contributedFiles.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Contributed Files:
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {ref.contributedFiles.map((file, fileIdx) => (
+                              <Badge
+                                key={fileIdx}
+                                variant="secondary"
+                                className="text-xs font-mono"
+                              >
+                                {file}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

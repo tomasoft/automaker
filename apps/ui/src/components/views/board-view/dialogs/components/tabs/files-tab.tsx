@@ -55,11 +55,6 @@ export function FilesTab({ affectedFiles }: FilesTabProps) {
                 <Badge variant="secondary" className={getConfidenceColor(file.confidence)}>
                   {file.confidence}
                 </Badge>
-                {file.matchedPattern && (
-                  <Badge variant="outline" className="text-xs">
-                    {file.matchedPattern}
-                  </Badge>
-                )}
               </div>
             </div>
           ))}

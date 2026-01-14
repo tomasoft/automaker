@@ -13,8 +13,11 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Markdown } from '@/components/ui/markdown';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Feature } from '@/store/app-store';
-import { Check, RefreshCw, Edit2, Eye, Loader2 } from 'lucide-react';
+import { Check, RefreshCw, Edit2, Eye, Loader2, GitBranch } from 'lucide-react';
+import { ImpactAnalysisPanel } from './components/impact-analysis-panel';
+import { useAppStore } from '@/store/app-store';
 
 interface PlanApprovalDialogProps {
   open: boolean;
@@ -41,6 +44,9 @@ export function PlanApprovalDialog({
   const [editedPlan, setEditedPlan] = useState(planContent);
   const [showRejectFeedback, setShowRejectFeedback] = useState(false);
   const [rejectFeedback, setRejectFeedback] = useState('');
+  const [localFeature, setLocalFeature] = useState(feature);
+
+  const { currentProject, updateFeature } = useAppStore();
 
   // Reset state when dialog opens or plan content changes
   useEffect(() => {
@@ -49,8 +55,9 @@ export function PlanApprovalDialog({
       setIsEditMode(false);
       setShowRejectFeedback(false);
       setRejectFeedback('');
+      setLocalFeature(feature);
     }
-  }, [open, planContent]);
+  }, [open, planContent, feature]);
 
   const handleApprove = () => {
     // Only pass edited plan if it was modified
@@ -95,37 +102,34 @@ export function PlanApprovalDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-          {/* Mode Toggle - Only show when not in viewOnly mode */}
-          {!viewOnly && (
-            <div className="flex items-center justify-between mb-3">
-              <Label className="text-sm text-muted-foreground">
-                {isEditMode ? 'Edit Mode' : 'View Mode'}
-              </Label>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsEditMode(!isEditMode)}
-                disabled={isLoading}
-              >
-                {isEditMode ? (
-                  <>
-                    <Eye className="w-4 h-4 mr-2" />
-                    View
-                  </>
-                ) : (
-                  <>
-                    <Edit2 className="w-4 h-4 mr-2" />
-                    Edit
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
+        <Tabs defaultValue="view" className="flex-1 flex flex-col min-h-0">
+          <TabsList className="w-full grid grid-cols-3 mb-4">
+            <TabsTrigger value="view">
+              <Eye className="w-4 h-4 mr-2" />
+              View
+            </TabsTrigger>
+            <TabsTrigger value="edit" disabled={viewOnly}>
+              <Edit2 className="w-4 h-4 mr-2" />
+              Edit
+            </TabsTrigger>
+            <TabsTrigger value="impact">
+              <GitBranch className="w-4 h-4 mr-2" />
+              Impact
+            </TabsTrigger>
+          </TabsList>
 
-          {/* Plan Content */}
-          <div className="flex-1 overflow-y-auto max-h-[70vh] border border-border rounded-lg">
-            {isEditMode && !viewOnly ? (
+          {/* View Tab */}
+          <TabsContent value="view" className="flex-1 overflow-hidden flex flex-col min-h-0">
+            <div className="flex-1 overflow-y-auto max-h-[70vh] border border-border rounded-lg">
+              <div className="p-4 overflow-auto">
+                <Markdown>{editedPlan || 'No plan content available.'}</Markdown>
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* Edit Tab */}
+          <TabsContent value="edit" className="flex-1 overflow-hidden flex flex-col min-h-0">
+            <div className="flex-1 overflow-y-auto max-h-[70vh] border border-border rounded-lg">
               <Textarea
                 value={editedPlan}
                 onChange={(e) => setEditedPlan(e.target.value)}
@@ -133,31 +137,45 @@ export function PlanApprovalDialog({
                 placeholder="Enter plan content..."
                 disabled={isLoading}
               />
-            ) : (
-              <div className="p-4 overflow-auto">
-                <Markdown>{editedPlan || 'No plan content available.'}</Markdown>
-              </div>
-            )}
-          </div>
-
-          {/* Revision Feedback Section - Only show when not in viewOnly mode */}
-          {showRejectFeedback && !viewOnly && (
-            <div className="mt-4 space-y-2">
-              <Label htmlFor="reject-feedback">What changes would you like?</Label>
-              <Textarea
-                id="reject-feedback"
-                value={rejectFeedback}
-                onChange={(e) => setRejectFeedback(e.target.value)}
-                placeholder="Describe the changes you'd like to see in the plan..."
-                className="min-h-[80px]"
-                disabled={isLoading}
-              />
-              <p className="text-xs text-muted-foreground">
-                Leave empty to cancel the feature, or provide feedback to regenerate the plan.
-              </p>
             </div>
-          )}
-        </div>
+          </TabsContent>
+
+          {/* Impact Tab */}
+          <TabsContent value="impact" className="flex-1 overflow-y-auto max-h-[70vh]">
+            {localFeature && (
+              <ImpactAnalysisPanel
+                feature={localFeature}
+                projectPath={currentProject?.path || ''}
+                onAnalysisComplete={(analysis) => {
+                  const updatedFeature = {
+                    ...localFeature,
+                    impactAnalysis: analysis,
+                  };
+                  setLocalFeature(updatedFeature);
+                  updateFeature(localFeature.id, { impactAnalysis: analysis });
+                }}
+              />
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {/* Revision Feedback Section - Only show when not in viewOnly mode */}
+        {showRejectFeedback && !viewOnly && (
+          <div className="mt-4 space-y-2">
+            <Label htmlFor="reject-feedback">What changes would you like?</Label>
+            <Textarea
+              id="reject-feedback"
+              value={rejectFeedback}
+              onChange={(e) => setRejectFeedback(e.target.value)}
+              placeholder="Describe the changes you'd like to see in the plan..."
+              className="min-h-[80px]"
+              disabled={isLoading}
+            />
+            <p className="text-xs text-muted-foreground">
+              Leave empty to cancel the feature, or provide feedback to regenerate the plan.
+            </p>
+          </div>
+        )}
 
         <DialogFooter className="flex-shrink-0 gap-2">
           {viewOnly ? (

@@ -30,6 +30,7 @@ interface FeatureDefaultsSectionProps {
   defaultSkipTests: boolean;
   enableDependencyBlocking: boolean;
   useWorktrees: boolean;
+  autoAnalyzeImpact: boolean;
   defaultPlanningMode: PlanningMode;
   defaultRequirePlanApproval: boolean;
   defaultAIProfileId: string | null;
@@ -38,6 +39,7 @@ interface FeatureDefaultsSectionProps {
   onDefaultSkipTestsChange: (value: boolean) => void;
   onEnableDependencyBlockingChange: (value: boolean) => void;
   onUseWorktreesChange: (value: boolean) => void;
+  onAutoAnalyzeImpactChange: (value: boolean) => void;
   onDefaultPlanningModeChange: (value: PlanningMode) => void;
   onDefaultRequirePlanApprovalChange: (value: boolean) => void;
   onDefaultAIProfileIdChange: (value: string | null) => void;
@@ -48,6 +50,7 @@ export function FeatureDefaultsSection({
   defaultSkipTests,
   enableDependencyBlocking,
   useWorktrees,
+  autoAnalyzeImpact,
   defaultPlanningMode,
   defaultRequirePlanApproval,
   defaultAIProfileId,
@@ -56,6 +59,7 @@ export function FeatureDefaultsSection({
   onDefaultSkipTestsChange,
   onEnableDependencyBlockingChange,
   onUseWorktreesChange,
+  onAutoAnalyzeImpactChange,
   onDefaultPlanningModeChange,
   onDefaultRequirePlanApprovalChange,
   onDefaultAIProfileIdChange,
@@ -274,6 +278,33 @@ export function FeatureDefaultsSection({
             <p className="text-xs text-muted-foreground/80 leading-relaxed">
               When enabled, new features will use TDD with automated tests. When disabled, features
               will require manual verification.
+            </p>
+          </div>
+        </div>
+
+        {/* Separator */}
+        <div className="border-t border-border/30" />
+
+        {/* Auto-Analyze Impact Setting */}
+        <div className="group flex items-start space-x-3 p-3 rounded-xl hover:bg-accent/30 transition-colors duration-200 -mx-3">
+          <Checkbox
+            id="auto-analyze-impact"
+            checked={autoAnalyzeImpact}
+            onCheckedChange={(checked) => onAutoAnalyzeImpactChange(checked === true)}
+            className="mt-1"
+            data-testid="auto-analyze-impact-checkbox"
+          />
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="auto-analyze-impact"
+              className="text-foreground cursor-pointer font-medium flex items-center gap-2"
+            >
+              <GitBranch className="w-4 h-4 text-brand-500" />
+              Auto-analyze impact after spec generation
+            </Label>
+            <p className="text-xs text-muted-foreground/80 leading-relaxed">
+              When enabled, impact analysis will automatically run after generating a spec. Results
+              will be available in the Impact tab of the approval dialog.
             </p>
           </div>
         </div>

@@ -14,6 +14,7 @@ import {
   BookOpen,
   FileCode,
   FolderCog,
+  GitBranch,
 } from 'lucide-react';
 import type { SettingsViewId } from '../hooks/use-settings-view';
 
@@ -32,6 +33,7 @@ export const NAV_ITEMS: NavigationItem[] = [
   { id: 'model-defaults', label: 'Model Defaults', icon: Workflow },
   { id: 'paths', label: 'Paths', icon: FolderCog },
   { id: 'wiki-sources', label: 'DevOps Resources', icon: BookOpen },
+  { id: 'repository-impact', label: 'Repository Impact', icon: GitBranch },
   { id: 'skills', label: 'Skills', icon: FileCode },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'terminal', label: 'Terminal', icon: SquareTerminal },

@@ -65,10 +65,13 @@ import { createIdeationRoutes } from './routes/ideation/index.js';
 import { IdeationService } from './services/ideation-service.js';
 import { createCopilotRoutes } from './routes/copilot/index.js';
 import createLocalLLMRoutes from './routes/local-llm/index.js';
-import azureAuthRoutes from './routes/azure-devops-auth/index.js';
+import { createAzureAuthRoutes } from './routes/azure-devops-auth/index.js';
+import { azureAuthSessions } from './routes/azure-devops-auth/routes/poll-azure-auth.js';
+import { AzureDevOpsAuthManager } from './providers/azure-devops-auth.js';
 import { createAzureDevOpsWikiRoutes } from './routes/azure-devops-wiki/index.js';
 import { createWebhookRoutes } from './routes/webhooks.js';
 import { createRepositoryRoutes } from './routes/repository/index.js';
+import { createSkillsRouter } from './routes/skills/index.js';
 
 // Load environment variables
 dotenv.config();
@@ -170,7 +173,7 @@ const events: EventEmitter = createEventEmitter();
 const settingsService = new SettingsService(DATA_DIR);
 const agentService = new AgentService(DATA_DIR, events, settingsService);
 const featureLoader = new FeatureLoader();
-const autoModeService = new AutoModeService(events, settingsService);
+const autoModeService = new AutoModeService(events, DATA_DIR, settingsService);
 const claudeUsageService = new ClaudeUsageService();
 const mcpTestService = new MCPTestService(settingsService);
 const ideationService = new IdeationService(events, settingsService, featureLoader);
@@ -179,6 +182,41 @@ const ideationService = new IdeationService(events, settingsService, featureLoad
 (async () => {
   await agentService.initialize();
   logger.info('Agent service initialized');
+
+  // Restore Azure DevOps auth sessions from persisted tokens
+  try {
+    const persistedTokens = await settingsService.getAllAzureAuthTokens();
+    const sessionIds = Object.keys(persistedTokens);
+
+    if (sessionIds.length > 0) {
+      logger.info(`Restoring ${sessionIds.length} Azure DevOps auth session(s)...`);
+
+      for (const sessionId of sessionIds) {
+        const tokenData = persistedTokens[sessionId];
+
+        // Check if token is expired (with 5 min buffer)
+        if (tokenData.expiresAt < Date.now() + 300000) {
+          logger.info(`Session ${sessionId} has expired token, will need refresh on next use`);
+        }
+
+        // Create auth manager with cached token
+        const authManager = new AzureDevOpsAuthManager();
+        authManager.setCachedToken({
+          accessToken: tokenData.accessToken,
+          refreshToken: tokenData.refreshToken,
+          expiresAt: tokenData.expiresAt,
+          userId: tokenData.userId,
+        });
+
+        // Add to in-memory sessions
+        azureAuthSessions.set(sessionId, authManager);
+      }
+
+      logger.info(`✓ Restored ${sessionIds.length} Azure DevOps auth session(s)`);
+    }
+  } catch (error) {
+    logger.error('Failed to restore Azure DevOps auth sessions:', error);
+  }
 })();
 
 // Run stale validation cleanup every hour to prevent memory leaks from crashed validations
@@ -197,19 +235,19 @@ app.use('/api', requireJsonContentType);
 // Mount API routes - health and auth are unauthenticated
 app.use('/api/health', createHealthRoutes());
 app.use('/api/auth', createAuthRoutes());
-app.use('/api/azure-auth', azureAuthRoutes);
+app.use('/api/azure-auth', createAzureAuthRoutes(settingsService));
+
+// Azure DevOps wiki routes (uses separate Azure auth session, placed before main auth middleware)
+app.use('/api/azure-devops-wiki', createAzureDevOpsWikiRoutes());
+
+// Repository analysis routes (temporary: before auth to debug)
+app.use('/api/repository', createRepositoryRoutes(settingsService));
 
 // Apply authentication to all other routes
 app.use('/api', authMiddleware);
 
 // Protected health endpoint with detailed info
 app.get('/api/health/detailed', createDetailedHandler());
-
-// Azure DevOps wiki routes (requires authentication)
-app.use('/api/azure-devops-wiki', createAzureDevOpsWikiRoutes());
-
-// Repository analysis routes (requires authentication)
-app.use('/api/repository', createRepositoryRoutes());
 
 app.use('/api/fs', createFsRoutes(events));
 app.use('/api/agent', createAgentRoutes(agentService, events));
@@ -228,6 +266,7 @@ app.use('/api/workspace', createWorkspaceRoutes());
 app.use('/api/templates', createTemplatesRoutes());
 app.use('/api/terminal', createTerminalRoutes());
 app.use('/api/settings', createSettingsRoutes(settingsService));
+app.use('/api/skills', createSkillsRouter(settingsService));
 app.use('/api/claude', createClaudeRoutes(claudeUsageService));
 app.use('/api/github', createGitHubRoutes(events, settingsService));
 app.use('/api/context', createContextRoutes(settingsService));

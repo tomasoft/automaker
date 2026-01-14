@@ -1,6 +1,6 @@
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { FileCode, Shield } from 'lucide-react';
+import { FileCode, Shield, GitBranch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface ClaudeMdSettingsProps {

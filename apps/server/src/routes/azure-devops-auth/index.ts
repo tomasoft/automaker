@@ -4,24 +4,33 @@
  * Provides OAuth 2.0 device flow endpoints for Azure DevOps wiki access
  */
 
-import express from 'express';
+import { Router } from 'express';
+import type { SettingsService } from '../../services/settings-service.js';
 import { createStartAzureAuthHandler } from './routes/start-azure-auth.js';
 import { createPollAzureAuthHandler } from './routes/poll-azure-auth.js';
 import { createCheckAzureAuthHandler } from './routes/check-azure-auth.js';
 import { createLogoutAzureAuthHandler } from './routes/logout-azure-auth.js';
 
-const router = express.Router();
+export function createAzureAuthRoutes(settingsService: SettingsService): Router {
+  const router = Router();
 
-// Start device flow authentication
-router.post('/start', createStartAzureAuthHandler());
+  // Inject settingsService into all requests
+  router.use((req, _res, next) => {
+    (req as any).settingsService = settingsService;
+    next();
+  });
 
-// Poll for authentication completion
-router.post('/poll', createPollAzureAuthHandler());
+  // Start device flow authentication
+  router.post('/start', createStartAzureAuthHandler());
 
-// Check current authentication status
-router.get('/status', createCheckAzureAuthHandler());
+  // Poll for authentication completion
+  router.post('/poll', createPollAzureAuthHandler());
 
-// Logout and revoke tokens
-router.delete('/logout', createLogoutAzureAuthHandler());
+  // Check current authentication status
+  router.get('/status', createCheckAzureAuthHandler());
 
-export default router;
+  // Logout and revoke tokens
+  router.post('/logout', createLogoutAzureAuthHandler());
+
+  return router;
+}

@@ -15,12 +15,20 @@ const logger = createLogger('AnalyzeFeatureImpactRoute');
 export function createAnalyzeFeatureImpactRoute(settingsService: SettingsService) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
+      logger.info('[AnalyzeFeatureImpact] Request body keys:', Object.keys(req.body || {}));
+
       const { feature, projectPath } = req.body as {
         feature: Feature;
         projectPath: string;
       };
 
       if (!feature || !projectPath) {
+        logger.warn(
+          '[AnalyzeFeatureImpact] Missing fields - feature:',
+          !!feature,
+          'projectPath:',
+          !!projectPath
+        );
         res.status(400).json({
           success: false,
           error: 'Missing required fields: feature, projectPath',
@@ -82,16 +90,20 @@ export function createAnalyzeFeatureImpactRoute(settingsService: SettingsService
         `[AnalyzeFeatureImpact] Analysis complete: ${result.affectedFiles.length} files, risk score ${result.riskScore}`
       );
 
-      res.json({
+      res.status(200).json({
         success: true,
         data: result,
       });
     } catch (error) {
       logger.error('[AnalyzeFeatureImpact] Failed:', error);
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to analyze feature impact',
-      });
+
+      // Ensure we always send a valid JSON response
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to analyze feature impact',
+        });
+      }
     }
   };
 }

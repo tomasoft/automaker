@@ -1299,6 +1299,8 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/features/agent-output', { projectPath, featureId }),
     generateTitle: (description: string) =>
       this.post('/api/features/generate-title', { description }),
+    analyzeImpact: (feature: any, projectPath: string) =>
+      this.post('/api/features/analyze-impact', { feature, projectPath }),
     bulkUpdate: (projectPath: string, featureIds: string[], updates: Partial<Feature>) =>
       this.post('/api/features/bulk-update', { projectPath, featureIds, updates }),
   };
@@ -2103,8 +2105,7 @@ export class HttpApiClient implements ElectronAPI {
       wikis?: Array<{ id: string; name: string; type: string; url: string }>;
       error?: string;
     }> => {
-      const serverUrl = await this.getServerUrl();
-      const response = await fetch(`${serverUrl}/api/azure-devops-wiki/wikis`);
+      const response = await fetch(`${this.serverUrl}/api/azure-devops-wiki/wikis`);
       return response.json();
     },
 
@@ -2118,8 +2119,7 @@ export class HttpApiClient implements ElectronAPI {
       pages?: Array<{ id: string; path: string; name: string }>;
       error?: string;
     }> => {
-      const serverUrl = await this.getServerUrl();
-      const response = await fetch(`${serverUrl}/api/azure-devops-wiki/pages`, {
+      const response = await fetch(`${this.serverUrl}/api/azure-devops-wiki/pages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -2137,11 +2137,73 @@ export class HttpApiClient implements ElectronAPI {
       page?: { content: string; path: string; metadata: Record<string, unknown> };
       error?: string;
     }> => {
-      const serverUrl = await this.getServerUrl();
-      const response = await fetch(`${serverUrl}/api/azure-devops-wiki/page`, {
+      const response = await fetch(`${this.serverUrl}/api/azure-devops-wiki/page`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
+      });
+      return response.json();
+    },
+  };
+
+  // Skills API
+  skills = {
+    list: async (
+      projectPath?: string
+    ): Promise<{
+      success: boolean;
+      global?: Array<{
+        id: string;
+        name: string;
+        description: string;
+        tags?: string[];
+        filePath: string;
+        enabled: boolean;
+      }>;
+      project?: Array<{
+        id: string;
+        name: string;
+        description: string;
+        tags?: string[];
+        filePath: string;
+        enabled: boolean;
+      }>;
+      error?: string;
+    }> => {
+      const url = projectPath
+        ? `${this.serverUrl}/api/skills?projectPath=${encodeURIComponent(projectPath)}`
+        : `${this.serverUrl}/api/skills`;
+      const response = await fetch(url, {
+        credentials: 'include',
+        headers: getApiKey() ? { 'X-API-Key': getApiKey()! } : undefined,
+      });
+      return response.json();
+    },
+
+    preview: async (
+      message: string,
+      projectPath?: string
+    ): Promise<{
+      success: boolean;
+      skills?: Array<{
+        id: string;
+        name: string;
+        description: string;
+        score: number;
+        scope: 'global' | 'project';
+        tags?: string[];
+      }>;
+      totalAvailable?: number;
+      error?: string;
+    }> => {
+      const response = await fetch(`${this.serverUrl}/api/skills/preview`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(getApiKey() ? { 'X-API-Key': getApiKey()! } : {}),
+        },
+        body: JSON.stringify({ message, projectPath }),
       });
       return response.json();
     },

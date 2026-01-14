@@ -38,7 +38,11 @@ export function createFeaturesRoutes(
 
   // Impact analysis route (requires settingsService)
   if (settingsService) {
-    router.post('/analyze-impact', createAnalyzeFeatureImpactRoute(settingsService));
+    router.post(
+      '/analyze-impact',
+      validatePathParams('projectPath'),
+      createAnalyzeFeatureImpactRoute(settingsService)
+    );
   }
 
   return router;

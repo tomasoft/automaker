@@ -926,6 +926,23 @@ export function BoardView() {
       if (!pendingPlanApproval || !currentProject) return;
 
       const featureId = pendingPlanApproval.featureId;
+      const feature = hookFeatures.find((f) => f.id === featureId);
+
+      // High risk warning
+      if (feature?.impactAnalysis?.riskLevel === 'high' && feature.impactAnalysis.riskScore > 70) {
+        const confirmed = window.confirm(
+          `⚠️ HIGH RISK FEATURE\n\n` +
+            `This feature has a high risk score (${feature.impactAnalysis.riskScore}/100).\n\n` +
+            `Risks detected:\n` +
+            `• ${feature.impactAnalysis.crossBoundaryRisks.length} cross-boundary risks\n` +
+            `• ${feature.impactAnalysis.gotchas.length} gotchas\n` +
+            `• ${feature.impactAnalysis.affectedFiles.length} affected files\n\n` +
+            `Are you sure you want to proceed with implementation?`
+        );
+
+        if (!confirmed) return;
+      }
+
       setIsPlanApprovalLoading(true);
       try {
         const api = getElectronAPI();

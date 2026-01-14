@@ -10,7 +10,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { createLogger } from '@automaker/utils';
-import { getAllowedRootDirectory } from '@automaker/platform';
 import type { SkillDefinition, GlobalSettings, ProjectSettings } from '@automaker/types';
 import type { WikiService } from './wiki-service.js';
 
@@ -61,10 +60,10 @@ export class SkillsLoaderService {
     private dataDir: string,
     private wikiService: WikiService | undefined
   ) {
-    // Global skills directory: Use ALLOWED_ROOT_DIRECTORY (base projects dir) if set,
-    // otherwise fall back to dataDir (userData)
-    const baseDir = getAllowedRootDirectory() || this.dataDir;
-    this.GLOBAL_SKILLS_DIR = path.join(baseDir, 'skills');
+    // Global skills directory: Always use dataDir (userData) for global skills
+    // This ensures global skills are stored in the user's app data directory,
+    // not in the current project directory
+    this.GLOBAL_SKILLS_DIR = path.join(this.dataDir, 'skills');
 
     logger.debug(`Global skills directory: ${this.GLOBAL_SKILLS_DIR}`);
   }
@@ -173,7 +172,7 @@ export class SkillsLoaderService {
   /**
    * Discover all SKILL.md files from global and project directories
    */
-  private async discoverSkills(): Promise<SkillDefinition[]> {
+  public async discoverSkills(): Promise<SkillDefinition[]> {
     const skills: SkillDefinition[] = [];
 
     // Load global skills (from base directory)
@@ -255,8 +254,9 @@ export class SkillsLoaderService {
   ): Promise<SkillDefinition> {
     const content = fs.readFileSync(filePath, 'utf8');
 
-    // Parse YAML frontmatter
-    const frontmatterMatch = content.match(/^---\n([\s\S]+?)\n---\n([\s\S]*)$/);
+    // Parse YAML frontmatter - handle both Unix (\n) and Windows (\r\n) line endings
+    // Pattern: --- (newline) YAML content (newline) --- (optional newline) markdown content
+    const frontmatterMatch = content.match(/^---\r?\n([\s\S]+?)\r?\n---\r?\n?([\s\S]*)$/);
     if (!frontmatterMatch) {
       throw new Error('Invalid SKILL.md format: missing YAML frontmatter');
     }
@@ -288,11 +288,17 @@ export class SkillsLoaderService {
    */
   private scoreSkills(skills: SkillDefinition[], query: string): LoadedSkill[] {
     const queryWords = this.tokenize(query);
+    logger.debug(`Query tokenized to: ${queryWords.join(', ')}`);
 
     return skills
       .map((skill) => {
-        const skillText = `${skill.description} ${skill.tags?.join(' ') || ''}`;
-        const score = this.calculateSimilarity(queryWords, this.tokenize(skillText));
+        const skillText = `${skill.name} ${skill.description} ${skill.tags?.join(' ') || ''}`;
+        const skillWords = this.tokenize(skillText);
+        const score = this.calculateSimilarity(queryWords, skillWords);
+
+        logger.debug(
+          `Skill "${skill.name}": score=${score.toFixed(3)}, tokens=${skillWords.slice(0, 10).join(', ')}`
+        );
 
         return {
           ...skill,

@@ -16,7 +16,7 @@ import { GitBranch, Database, AlertCircle, CheckCircle2, Loader2 } from 'lucide-
 import { AnalysisProgressModal } from './components/analysis-progress-modal';
 import { ServiceBoundaryExplorer } from './components/service-boundary-explorer';
 import type { RepositoryConfiguration, ServiceBoundary, RepositoryGraph } from '@automaker/types';
-import { getHttpApiClient } from '@/lib/http-api-client';
+import { getHttpApiClient, getServerUrlSync, getSessionToken } from '@/lib/http-api-client';
 
 export function RepositoryConfigSection() {
   const { currentProject } = useAppStore();
@@ -52,6 +52,14 @@ export function RepositoryConfigSection() {
 
         if (result.success && result.settings?.targetRepository) {
           const config = result.settings.targetRepository;
+          console.log('[Repository Config] Loaded config:', {
+            hasServices: !!config.services,
+            servicesCount: config.services?.length,
+            services: config.services,
+            hasGraph: !!result.settings.repositoryGraph,
+            graphNodesCount: result.settings.repositoryGraph?.nodes?.length,
+          });
+
           setRepositoryConfig(config);
           setOrganization(config.organization);
           setProject(config.project);
@@ -60,10 +68,41 @@ export function RepositoryConfigSection() {
 
           if (result.settings.repositoryGraph) {
             setGraph(result.settings.repositoryGraph);
+            console.log(
+              '[Repository Config] Set graph with',
+              result.settings.repositoryGraph.nodes.length,
+              'nodes'
+            );
           }
 
           if (config.services) {
             setServices(config.services);
+            console.log('[Repository Config] Set services:', config.services.length);
+          } else {
+            console.log('[Repository Config] No services in config');
+          }
+        }
+
+        // Check if PAT exists for this project
+        const sessionId = currentProject.path;
+        const serverUrl = getServerUrlSync();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const sessionToken = getSessionToken();
+        if (sessionToken) {
+          headers['X-Session-Token'] = sessionToken;
+        }
+
+        const patCheckResponse = await fetch(`${serverUrl}/api/repository/pat/check`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify({ sessionId }),
+        });
+
+        if (patCheckResponse.ok) {
+          const patCheckData = await patCheckResponse.json();
+          if (patCheckData.success && patCheckData.hasPAT) {
+            setUsePAT(true);
           }
         }
       } catch (err) {
@@ -77,7 +116,10 @@ export function RepositoryConfigSection() {
   }, [currentProject?.path]);
 
   const handleSaveConfig = async () => {
-    if (!currentProject) return;
+    if (!currentProject) {
+      toast.error('No project selected');
+      return;
+    }
 
     const config: RepositoryConfiguration = {
       type: 'azure-devops',
@@ -98,21 +140,32 @@ export function RepositoryConfigSection() {
 
       // Save PAT if provided
       if (usePAT && pat) {
-        const patResult = await httpClient.fetch('/api/repository/pat', {
+        const sessionId = currentProject.path; // Use project path as sessionId for consistency
+        console.log('[Repository Config] Saving PAT for session:', sessionId);
+
+        const serverUrl = getServerUrlSync();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const sessionToken = getSessionToken();
+        if (sessionToken) {
+          headers['X-Session-Token'] = sessionToken;
+        }
+
+        const patResponse = await fetch(`${serverUrl}/api/repository/pat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
+          credentials: 'include',
           body: JSON.stringify({
-            sessionId: currentProject.id,
+            sessionId,
             pat,
           }),
         });
 
-        if (!patResult.ok) {
-          const errorText = await patResult.text();
+        if (!patResponse.ok) {
+          const errorText = await patResponse.text();
           throw new Error(errorText || 'Failed to store PAT');
         }
 
-        const patData = await patResult.json();
+        const patData = await patResponse.json();
 
         if (!patData.success) {
           throw new Error(patData.error || 'Failed to store PAT');
@@ -150,7 +203,8 @@ export function RepositoryConfigSection() {
     setError(null);
 
     try {
-      const httpClient = getHttpApiClient();
+      const sessionId = currentProject.path; // Use project path as sessionId for consistency
+      console.log('[Repository Config] Starting analysis for session:', sessionId);
 
       // Get access token from stored PAT or OAuth
       const accessToken = ''; // Will use stored PAT from session or OAuth token
@@ -172,13 +226,21 @@ export function RepositoryConfigSection() {
         lastIndexed: undefined,
       };
 
-      const response = await httpClient.fetch('/api/repository/analyze', {
+      const serverUrl = getServerUrlSync();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const sessionToken = getSessionToken();
+      if (sessionToken) {
+        headers['X-Session-Token'] = sessionToken;
+      }
+
+      const response = await fetch(`${serverUrl}/api/repository/analyze`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
+        credentials: 'include',
         body: JSON.stringify({
           repositoryConfig: config,
           accessToken,
-          sessionId: currentProject.id,
+          sessionId,
         }),
       });
 
@@ -195,6 +257,13 @@ export function RepositoryConfigSection() {
       setCurrentStep('Linking documentation...');
       setAnalysisProgress(80);
 
+      console.log('[Deep Analyze] Analysis result:', {
+        servicesCount: result.data.services?.length,
+        services: result.data.services,
+        graphNodesCount: result.data.graph?.nodes?.length,
+        fileTreeLength: result.data.fileTree?.length,
+      });
+
       // Update project settings with analysis results
       const updatedConfig: RepositoryConfiguration = {
         ...config,
@@ -206,6 +275,8 @@ export function RepositoryConfigSection() {
         lastIndexed: new Date().toISOString(),
       };
 
+      console.log('[Deep Analyze] Updated config services:', updatedConfig.services);
+
       const httpClient = getHttpApiClient();
       await httpClient.settings.updateProject(currentProject.path, {
         targetRepository: updatedConfig,
@@ -213,10 +284,19 @@ export function RepositoryConfigSection() {
         repositoryGraph: result.data.graph,
       });
 
+      console.log('[Deep Analyze] Settings saved, now updating state');
+
       // Update local state
       setRepositoryConfig(updatedConfig);
       setServices(result.data.services);
       setGraph(result.data.graph);
+
+      console.log(
+        '[Deep Analyze] State updated - services:',
+        result.data.services?.length,
+        'graph nodes:',
+        result.data.graph?.nodes?.length
+      );
 
       setCurrentStep('Analysis complete!');
       setAnalysisProgress(100);

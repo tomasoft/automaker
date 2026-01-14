@@ -16,7 +16,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
-import type { PlanSpec } from '@/store/app-store';
+import type { PlanSpec, Feature } from '@/store/app-store';
+import { Badge } from '@/components/ui/badge';
 
 export type PlanningMode = 'skip' | 'lite' | 'spec' | 'full';
 
@@ -35,6 +36,7 @@ interface PlanningModeSelectorProps {
   onViewSpec?: () => void;
   isGenerating?: boolean;
   featureDescription?: string; // For auto-generation context
+  feature?: Feature; // For impact analysis display
   testIdPrefix?: string;
   compact?: boolean; // For use in dialogs vs settings
 }
@@ -252,6 +254,23 @@ export function PlanningModeSelector({
                     <span className="text-sm text-amber-500 font-medium">
                       Spec Ready for Review
                     </span>
+                    {feature?.impactAnalysis && (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'text-xs ml-2',
+                          feature.impactAnalysis.riskLevel === 'low' &&
+                            'border-green-500/30 text-green-700 dark:text-green-400',
+                          feature.impactAnalysis.riskLevel === 'medium' &&
+                            'border-yellow-500/30 text-yellow-700 dark:text-yellow-400',
+                          feature.impactAnalysis.riskLevel === 'high' &&
+                            'border-red-500/30 text-red-700 dark:text-red-400'
+                        )}
+                      >
+                        Risk: {feature.impactAnalysis.riskLevel} ({feature.impactAnalysis.riskScore}
+                        /100)
+                      </Badge>
+                    )}
                   </>
                 ) : (
                   <>

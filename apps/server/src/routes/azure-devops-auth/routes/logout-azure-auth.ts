@@ -5,6 +5,7 @@
  */
 
 import type { Request, Response } from 'express';
+import { SettingsService } from '../../../services/settings-service.js';
 import { createLogger } from '@automaker/utils';
 import { azureAuthSessions } from './poll-azure-auth.js';
 
@@ -13,32 +14,51 @@ const logger = createLogger('AzureLogoutRoute');
 export function createLogoutAzureAuthHandler() {
   return async (req: Request, res: Response) => {
     try {
+      const settingsService = (req as any).settingsService as SettingsService;
       const { sessionId } = req.body as { sessionId?: string };
 
       if (!sessionId) {
+        // No session ID provided - clear all sessions
+        logger.info('No sessionId provided, clearing all Azure DevOps sessions');
+        const sessionCount = azureAuthSessions.size;
+
+        // Revoke all tokens
+        for (const [id, authManager] of azureAuthSessions.entries()) {
+          try {
+            await authManager.revoke();
+          } catch (error) {
+            logger.warn(`Failed to revoke session ${id}:`, error);
+          }
+        }
+
+        // Clear all sessions (in-memory)
+        azureAuthSessions.clear();
+
+        // Clear all persisted tokens
+        await settingsService.clearAllAzureAuthTokens();
+
+        logger.info(`Cleared ${sessionCount} Azure DevOps session(s)`);
         res.json({
-          success: false,
-          error: 'Session ID required',
+          success: true,
+          message: 'All sessions cleared',
         });
         return;
       }
 
       const authManager = azureAuthSessions.get(sessionId);
-      if (!authManager) {
-        res.json({
-          success: true,
-          message: 'Session not found or already logged out',
-        });
-        return;
+      if (authManager) {
+        // Revoke tokens
+        await authManager.revoke();
+
+        // Remove from in-memory sessions
+        azureAuthSessions.delete(sessionId);
       }
 
-      // Revoke tokens
-      await authManager.revoke();
+      // Remove from persisted tokens (even if not in memory)
+      await settingsService.deleteAzureAuthToken(sessionId);
 
-      // Remove from sessions
-      azureAuthSessions.delete(sessionId);
-
-      logger.info('Successfully logged out from Azure DevOps');
+      logger.info(`Successfully logged out from Azure DevOps (session: ${sessionId})`);
+      logger.info(`Remaining sessions: ${azureAuthSessions.size}`);
 
       res.json({
         success: true,

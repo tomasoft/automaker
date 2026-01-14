@@ -780,6 +780,26 @@ export interface GlobalSettings {
   // Impact Analysis Configuration
   /** Impact analysis settings for repository analysis and gotcha detection */
   impactAnalysis?: ImpactAnalysisSettings;
+  /** Auto-run impact analysis after generating specs (default: true) */
+  autoAnalyzeImpact?: boolean;
+}
+
+/**
+ * AzureDevOpsAuthToken - Stored OAuth tokens for Azure DevOps
+ *
+ * Persisted to credentials.json for session restoration across server restarts
+ */
+export interface AzureDevOpsAuthToken {
+  /** OAuth access token */
+  accessToken: string;
+  /** OAuth refresh token for renewing expired access tokens */
+  refreshToken: string;
+  /** Timestamp (ms) when the access token expires */
+  expiresAt: number;
+  /** User principal name or email from token */
+  userId?: string;
+  /** Session ID for this authentication */
+  sessionId: string;
 }
 
 /**
@@ -800,6 +820,10 @@ export interface Credentials {
     /** OpenAI API key (for compatibility or alternative providers) */
     openai: string;
   };
+  /** Azure DevOps Personal Access Tokens by project path */
+  azureDevOpsPATs?: Record<string, string>;
+  /** Azure DevOps OAuth tokens by session ID */
+  azureDevOpsTokens?: Record<string, AzureDevOpsAuthToken>;
 }
 
 /**
@@ -1070,6 +1094,7 @@ export const DEFAULT_CREDENTIALS: Credentials = {
     google: '',
     openai: '',
   },
+  azureDevOpsPATs: {},
 };
 
 /** Default project settings (empty - all settings are optional and fall back to global) */

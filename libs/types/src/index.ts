@@ -30,6 +30,7 @@ export type {
   CrossBoundaryRisk,
   DetectedGotcha,
   ImpactAnalysisResult,
+  WikiReference,
 } from './feature.js';
 
 // Session types

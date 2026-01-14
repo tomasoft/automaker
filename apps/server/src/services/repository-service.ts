@@ -109,6 +109,14 @@ export class RepositoryIndexer {
       const elapsed = Date.now() - startTime;
       logger.info(`[RepositoryIndexer] Indexed ${fileTree.length} items in ${elapsed}ms`);
 
+      // Log sample paths to debug path format
+      if (fileTree.length > 0) {
+        const samplePaths = fileTree
+          .slice(0, 5)
+          .map((f) => `"${f.path}" (isDir: ${f.isDirectory})`);
+        logger.info(`[RepositoryIndexer] Sample paths: ${samplePaths.join(', ')}`);
+      }
+
       return fileTree;
     } catch (error) {
       logger.error(
@@ -233,8 +241,8 @@ export class RepositoryIndexer {
             documentation: [],
           });
 
-          logger.debug(
-            `[RepositoryIndexer] Detected ${technology} service: ${serviceName} at ${rootPath}`
+          logger.info(
+            `[RepositoryIndexer] Detected ${technology} service: ${serviceName} at rootPath="${rootPath}" (manifest: ${item.path})`
           );
         }
       }
@@ -271,8 +279,8 @@ export class RepositoryIndexer {
           const fileName = pathParts[pathParts.length - 1];
           const componentName = fileName.replace(/\.(cs|ts|tsx|java|py)$/, '');
 
-          // Find parent service
-          const serviceId = services.find((s) => item.path.startsWith(s.rootPath + '/'))?.id;
+          // Find parent service (Azure DevOps paths start with '/')
+          const serviceId = services.find((s) => item.path.startsWith('/' + s.rootPath + '/'))?.id;
 
           nodes.push({
             id: `node-${nodes.length + 1}`,
@@ -300,10 +308,26 @@ export class RepositoryIndexer {
     fileTree: FileTreeNode[],
     nodes: ComponentNode[]
   ): void {
-    const serviceFiles = fileTree.filter(
-      (f) => !f.isDirectory && f.path.startsWith(service.rootPath + '/')
-    );
+    // Azure DevOps file paths start with '/', so we need to add it to the search prefix
+    const searchPrefix = '/' + service.rootPath + '/';
+    const serviceFiles = fileTree.filter((f) => !f.isDirectory && f.path.startsWith(searchPrefix));
     const serviceNodes = nodes.filter((n) => n.serviceId === service.id);
+
+    logger.info(
+      `[RepositoryIndexer] Service "${service.name}" (rootPath="${service.rootPath}"): searching for files starting with "${searchPrefix}" - found ${serviceFiles.length} files, ${serviceNodes.length} components`
+    );
+
+    if (serviceFiles.length === 0 && fileTree.length > 0) {
+      // Show some file paths to debug why they don't match
+      const nearbyFiles = fileTree
+        .filter((f) => !f.isDirectory && f.path.includes(service.name))
+        .slice(0, 3);
+      if (nearbyFiles.length > 0) {
+        logger.info(
+          `[RepositoryIndexer] Sample files containing service name: ${nearbyFiles.map((f) => `"${f.path}"`).join(', ')}`
+        );
+      }
+    }
 
     service.metrics = {
       fileCount: serviceFiles.length,

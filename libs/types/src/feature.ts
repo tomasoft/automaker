@@ -83,6 +83,20 @@ export interface DetectedGotcha {
 }
 
 /**
+ * Wiki page reference that contributed to impact analysis
+ */
+export interface WikiReference {
+  /** Name of the wiki page */
+  name: string;
+  /** URL to the wiki page */
+  url: string;
+  /** Files or patterns mentioned in this wiki page that affected the analysis */
+  contributedFiles: string[];
+  /** Explanation of how this page affected the impact */
+  impact: string;
+}
+
+/**
  * ImpactAnalysisResult - Complete impact analysis for a feature
  */
 export interface ImpactAnalysisResult {
@@ -96,6 +110,8 @@ export interface ImpactAnalysisResult {
   crossBoundaryRisks: CrossBoundaryRisk[];
   /** Detected architectural gotchas */
   gotchas: DetectedGotcha[];
+  /** Wiki pages that contributed to the impact analysis */
+  wikiReferences?: WikiReference[];
   /** Overall risk score (0-100) */
   riskScore: number;
   /** Risk level */

@@ -8,9 +8,13 @@ import { Router } from 'express';
 import { createListWikisHandler } from './routes/list-wikis.js';
 import { createListPagesHandler } from './routes/list-pages.js';
 import { createGetPageHandler } from './routes/get-page.js';
+import { createListProjectsHandler } from './routes/list-projects.js';
 
 export function createAzureDevOpsWikiRoutes(): Router {
   const router = Router();
+
+  // GET /api/azure-devops-wiki/projects - List projects in an organization
+  router.get('/projects', createListProjectsHandler());
 
   // GET /api/azure-devops-wiki/wikis - List available wikis
   router.get('/wikis', createListWikisHandler());

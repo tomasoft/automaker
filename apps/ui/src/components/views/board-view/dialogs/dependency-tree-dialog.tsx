@@ -1,5 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { Feature } from '@/store/app-store';
 import { AlertCircle, CheckCircle2, Circle } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -72,6 +78,9 @@ export function DependencyTreeDialog({
       <DialogContent className="max-w-xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Dependency Tree</DialogTitle>
+          <DialogDescription>
+            View dependencies and dependent features for this feature.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6 mt-4">

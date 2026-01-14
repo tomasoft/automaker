@@ -18,6 +18,18 @@ interface ServiceBoundaryExplorerProps {
 export function ServiceBoundaryExplorer({ services, graph }: ServiceBoundaryExplorerProps) {
   const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
 
+  console.log('[ServiceBoundaryExplorer] Rendering with:', {
+    servicesCount: services.length,
+    services: services.map((s) => ({
+      id: s.id,
+      name: s.name,
+      hasMetrics: !!s.metrics,
+      metrics: s.metrics,
+    })),
+    graphNodesCount: graph.nodes.length,
+    graphNodes: graph.nodes.slice(0, 5),
+  });
+
   const toggleService = (serviceId: string) => {
     const newExpanded = new Set(expandedServices);
     if (newExpanded.has(serviceId)) {

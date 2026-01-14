@@ -47,28 +47,34 @@ interface TokenErrorResponse {
  */
 export class AzureDevOpsAuthManager {
   // Microsoft Entra ID endpoints
-  private static readonly TENANT_ID = 'common'; // 'common' for multi-tenant, or specific tenant ID
-  private static readonly CLIENT_ID = '499b84ac-1321-427f-aa17-267ca6975798'; // Visual Studio Code client ID (public client)
-  private static readonly DEVICE_CODE_URL = `https://login.microsoftonline.com/${AzureDevOpsAuthManager.TENANT_ID}/oauth2/v2.0/devicecode`;
-  private static readonly TOKEN_URL = `https://login.microsoftonline.com/${AzureDevOpsAuthManager.TENANT_ID}/oauth2/v2.0/token`;
+  private static readonly DEFAULT_TENANT_ID = 'organizations'; // 'organizations' for work/school accounts
+  private static readonly CLIENT_ID = '04b07795-8ddb-461a-bbee-02f9e1bf7b46'; // Azure CLI client ID (public client with Azure DevOps consent)
+
+  // URLs are built dynamically with tenant ID
+  private static getDeviceCodeUrl(tenantId: string): string {
+    return `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/devicecode`;
+  }
+
+  private static getTokenUrl(tenantId: string): string {
+    return `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+  }
 
   // Azure DevOps API scopes
-  private static readonly SCOPES = [
-    'vso.wiki', // Wiki read/write
-    'vso.serviceendpoint_query', // For webhooks
-    'offline_access', // Refresh token
-  ].join(' ');
+  // Using .default scope with Azure DevOps resource ID for delegated permissions
+  private static readonly SCOPES = '499b84ac-1321-427f-aa17-267ca6975798/.default offline_access';
 
   private cachedToken: AzureToken | null = null;
   private personalAccessToken: string | null = null;
+  private tenantId: string;
 
-  constructor(cachedToken?: AzureToken, pat?: string) {
+  constructor(cachedToken?: AzureToken, pat?: string, tenantId?: string) {
     if (cachedToken) {
       this.cachedToken = cachedToken;
     }
     if (pat) {
       this.personalAccessToken = pat;
     }
+    this.tenantId = tenantId || AzureDevOpsAuthManager.DEFAULT_TENANT_ID;
   }
 
   /**
@@ -91,6 +97,20 @@ export class AzureDevOpsAuthManager {
    * Get a valid Azure DevOps access token (from cache, PAT, or by refreshing)
    */
   async getToken(): Promise<string> {
+    logger.debug('[AzureDevOpsAuth] getToken() called');
+    logger.debug('[AzureDevOpsAuth] Has PAT:', !!this.personalAccessToken);
+    logger.debug('[AzureDevOpsAuth] Has cached token:', !!this.cachedToken);
+    if (this.cachedToken) {
+      logger.debug(
+        '[AzureDevOpsAuth] Token expires at:',
+        new Date(this.cachedToken.expiresAt).toISOString()
+      );
+      logger.debug(
+        '[AzureDevOpsAuth] Time until expiry (ms):',
+        this.cachedToken.expiresAt - Date.now()
+      );
+    }
+
     // If using PAT, return it directly (PATs don't expire in traditional sense)
     if (this.personalAccessToken) {
       logger.debug('[AzureDevOpsAuth] Using Personal Access Token');
@@ -174,7 +194,7 @@ export class AzureDevOpsAuthManager {
       scope: AzureDevOpsAuthManager.SCOPES,
     });
 
-    const response = await fetch(AzureDevOpsAuthManager.DEVICE_CODE_URL, {
+    const response = await fetch(AzureDevOpsAuthManager.getDeviceCodeUrl(this.tenantId), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -209,7 +229,7 @@ export class AzureDevOpsAuthManager {
           device_code: deviceCode.device_code,
         });
 
-        const response = await fetch(AzureDevOpsAuthManager.TOKEN_URL, {
+        const response = await fetch(AzureDevOpsAuthManager.getTokenUrl(this.tenantId), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -265,7 +285,7 @@ export class AzureDevOpsAuthManager {
       scope: AzureDevOpsAuthManager.SCOPES,
     });
 
-    const response = await fetch(AzureDevOpsAuthManager.TOKEN_URL, {
+    const response = await fetch(AzureDevOpsAuthManager.getTokenUrl(this.tenantId), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -362,13 +382,39 @@ export class AzureDevOpsAuthManager {
   /**
    * List available wikis from Azure DevOps
    */
-  async listWikis(): Promise<{ id: string; name: string; type: string; url: string }[]> {
+  async listWikis(
+    organization: string,
+    project: string
+  ): Promise<{ id: string; name: string; type: string; url: string }[]> {
     const token = await this.getToken();
 
-    // TODO: For now return empty array - need organization/project context
-    // This would require storing organization/project during auth flow
-    logger.warn('[AzureDevOpsAuth] listWikis requires organization/project context');
-    return [];
+    const url = `https://dev.azure.com/${organization}/${project}/_apis/wiki/wikis?api-version=7.1-preview.2`;
+
+    logger.info(`[listWikis] Fetching from URL: ${url}`);
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error(`[listWikis] Failed with status ${response.status}: ${errorText}`);
+      throw new Error(`Failed to list wikis: ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as {
+      value?: Array<{ id: string; name: string; type: string; url: string }>;
+    };
+
+    logger.info(`[listWikis] Found ${data.value?.length || 0} wikis`);
+    if (data.value) {
+      logger.info(`[listWikis] Wikis:`, data.value);
+    }
+
+    return data.value || [];
   }
 
   /**
@@ -382,7 +428,11 @@ export class AzureDevOpsAuthManager {
   ): Promise<{ id: string; path: string; name: string }[]> {
     const token = await this.getToken();
 
-    const url = `https://dev.azure.com/${organization}/${project}/_apis/wiki/wikis/${wikiId}/pages?api-version=7.1-preview.1${path ? `&path=${encodeURIComponent(path)}` : ''}`;
+    // Use recursionLevel=full to get all pages in the tree
+    const pathParam = path ? `&path=${encodeURIComponent(path)}` : '';
+    const url = `https://dev.azure.com/${organization}/${project}/_apis/wiki/wikis/${wikiId}/pages?recursionLevel=full&api-version=7.1-preview.1${pathParam}`;
+
+    logger.info(`[listPages] Fetching from URL: ${url}`);
 
     const response = await fetch(url, {
       headers: {
@@ -392,12 +442,49 @@ export class AzureDevOpsAuthManager {
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      logger.error(`[listPages] Failed with status ${response.status}: ${errorText}`);
       throw new Error(`Failed to list pages: ${response.statusText}`);
     }
 
-    const data = (await response.json()) as { value?: Array<{ id: string; path: string }> };
+    const data = (await response.json()) as any;
 
-    return (data.value || []).map((page) => ({
+    logger.info(`[listPages] Response data structure:`, Object.keys(data));
+    logger.info(`[listPages] Full response:`, JSON.stringify(data, null, 2));
+
+    // The response might have a different structure - let's check
+    let pages: Array<{ id: string; path: string }> = [];
+
+    if (data.subPages && Array.isArray(data.subPages)) {
+      // Flatten the tree structure
+      const flattenPages = (pageNode: any): Array<{ id: string; path: string }> => {
+        const result: Array<{ id: string; path: string }> = [];
+        if (pageNode.path) {
+          // Use path as id if no id is provided
+          result.push({ id: pageNode.path, path: pageNode.path });
+        }
+        if (pageNode.subPages && Array.isArray(pageNode.subPages)) {
+          for (const subPage of pageNode.subPages) {
+            result.push(...flattenPages(subPage));
+          }
+        }
+        return result;
+      };
+
+      // Process all subpages
+      for (const subPage of data.subPages) {
+        pages.push(...flattenPages(subPage));
+      }
+    } else if (data.value && Array.isArray(data.value)) {
+      pages = data.value;
+    }
+
+    logger.info(`[listPages] Got ${pages.length} pages from Azure DevOps`);
+    if (pages.length > 0) {
+      logger.info(`[listPages] First few pages:`, pages.slice(0, 5));
+    }
+
+    return pages.map((page) => ({
       id: page.id,
       path: page.path,
       name: page.path.split('/').pop() || page.path,

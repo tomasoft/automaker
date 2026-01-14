@@ -66,6 +66,17 @@ export default defineConfig(({ command }) => {
     },
     server: {
       port: parseInt(process.env.TEST_PORT || '3007', 10),
+      proxy: {
+        '/api': {
+          target: process.env.VITE_API_URL || 'http://localhost:3008',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/ws': {
+          target: process.env.VITE_WS_URL || 'ws://localhost:3008',
+          ws: true,
+        },
+      },
     },
     build: {
       outDir: 'dist',

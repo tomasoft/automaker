@@ -14,18 +14,40 @@ const logger = createLogger('AnalyzeRepositoryRoute');
 // Store analysis results temporarily (in production, use database)
 const analysisResults = new Map<string, any>();
 
+// This will be injected by the router
+let getPATFunction: ((sessionId: string) => Promise<string | undefined>) | undefined;
+
+export function injectGetPAT(getPAT: (sessionId: string) => Promise<string | undefined>) {
+  getPATFunction = getPAT;
+}
+
 export async function analyzeRepositoryRoute(req: Request, res: Response): Promise<void> {
   try {
     const { repositoryConfig, accessToken, sessionId } = req.body as {
       repositoryConfig: RepositoryConfiguration;
-      accessToken: string;
+      accessToken?: string;
       sessionId: string;
     };
 
-    if (!repositoryConfig || !accessToken) {
+    if (!repositoryConfig) {
       res.status(400).json({
         success: false,
-        error: 'Missing required fields: repositoryConfig, accessToken',
+        error: 'Missing required field: repositoryConfig',
+      });
+      return;
+    }
+
+    // Use provided accessToken or retrieve stored PAT
+    let token = accessToken;
+    if (!token && sessionId && getPATFunction) {
+      token = await getPATFunction(sessionId);
+    }
+
+    if (!token) {
+      res.status(400).json({
+        success: false,
+        error:
+          'No access token provided and no PAT found for this session. Please configure your Personal Access Token first.',
       });
       return;
     }
@@ -35,7 +57,7 @@ export async function analyzeRepositoryRoute(req: Request, res: Response): Promi
     );
 
     // Perform analysis
-    const result = await analyzeRepository(repositoryConfig, accessToken);
+    const result = await analyzeRepository(repositoryConfig, token);
 
     // Store results
     if (sessionId) {

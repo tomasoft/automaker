@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { useSetupStore } from '@/store/setup-store';
+import { useSearch } from '@tanstack/react-router';
 
 import { useSettingsView } from './settings-view/hooks';
 import { NAV_ITEMS } from './settings-view/config/navigation';
@@ -20,12 +21,14 @@ import { ProviderTabs } from './settings-view/providers';
 import { MCPServersSection } from './settings-view/mcp-servers';
 import { PromptCustomizationSection } from './settings-view/prompts';
 import { WikiSourcesSection } from './settings-view/wiki-sources/wiki-sources-section';
+import { RepositoryConfigSection } from './settings-view/repository-config/repository-config-section';
 import { SkillsSection } from './settings-view/skills/skills-section';
 import { PathsSection } from './settings-view/paths/paths-section';
 import type { Project as SettingsProject, Theme } from './settings-view/shared/types';
 import type { Project as ElectronProject } from '@/lib/electron';
 
 export function SettingsView() {
+  const search = useSearch({ from: '/settings' });
   const {
     theme,
     setTheme,
@@ -53,10 +56,14 @@ export function SettingsView() {
     setAutoLoadClaudeMd,
     enableSandboxMode,
     setEnableSandboxMode,
+    autoAnalyzeImpact,
+    setAutoAnalyzeImpact,
     skipSandboxWarning,
     setSkipSandboxWarning,
     promptCustomization,
     setPromptCustomization,
+    targetSettingsTab,
+    setCurrentView,
   } = useAppStore();
 
   // Convert electron Project to settings-view Project type
@@ -86,8 +93,17 @@ export function SettingsView() {
     }
   };
 
-  // Use settings view navigation hook
-  const { activeView, navigateTo } = useSettingsView();
+  // Use settings view navigation hook - initialize with tab from URL search params
+  const { activeView, navigateTo } = useSettingsView({
+    initialView: (search.tab as any) || 'api-keys',
+  });
+
+  // Navigate to tab from search params when it changes
+  useEffect(() => {
+    if (search.tab) {
+      navigateTo(search.tab as any);
+    }
+  }, [search.tab, navigateTo]);
 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showKeyboardMapDialog, setShowKeyboardMapDialog] = useState(false);
@@ -113,6 +129,8 @@ export function SettingsView() {
         return <PathsSection />;
       case 'wiki-sources':
         return <WikiSourcesSection />;
+      case 'repository-impact':
+        return <RepositoryConfigSection />;
       case 'skills':
         return <SkillsSection />;
       case 'appearance':
@@ -140,6 +158,7 @@ export function SettingsView() {
             defaultSkipTests={defaultSkipTests}
             enableDependencyBlocking={enableDependencyBlocking}
             useWorktrees={useWorktrees}
+            autoAnalyzeImpact={autoAnalyzeImpact}
             defaultPlanningMode={defaultPlanningMode}
             defaultRequirePlanApproval={defaultRequirePlanApproval}
             defaultAIProfileId={defaultAIProfileId}
@@ -148,6 +167,7 @@ export function SettingsView() {
             onDefaultSkipTestsChange={setDefaultSkipTests}
             onEnableDependencyBlockingChange={setEnableDependencyBlocking}
             onUseWorktreesChange={setUseWorktrees}
+            onAutoAnalyzeImpactChange={setAutoAnalyzeImpact}
             onDefaultPlanningModeChange={setDefaultPlanningMode}
             onDefaultRequirePlanApprovalChange={setDefaultRequirePlanApproval}
             onDefaultAIProfileIdChange={setDefaultAIProfileId}

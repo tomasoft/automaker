@@ -418,6 +418,8 @@ export interface AppState {
   // View state
   currentView: ViewMode;
   sidebarOpen: boolean;
+  targetSettingsTab?: string; // Target tab when navigating to settings
+  targetSettingsTab?: string; // Target tab when navigating to settings
 
   // Agent Session state (per-project, keyed by project path)
   lastSelectedSessionByProject: Record<string, string>; // projectPath -> sessionId
@@ -516,6 +518,7 @@ export interface AppState {
   autoLoadClaudeMd: boolean; // Auto-load CLAUDE.md files using SDK's settingSources option
   enableSandboxMode: boolean; // Enable sandbox mode for bash commands (may cause issues on some systems)
   skipSandboxWarning: boolean; // Skip the sandbox environment warning dialog on startup
+  autoAnalyzeImpact: boolean; // Auto-run impact analysis after generating specs
 
   // MCP Servers
   mcpServers: MCPServerConfig[]; // List of configured MCP servers for agent use
@@ -700,7 +703,7 @@ export interface AppActions {
   clearProjectHistory: () => void; // Clear history, keeping only current project
 
   // View actions
-  setCurrentView: (view: ViewMode) => void;
+  setCurrentView: (view: ViewMode, settingsTab?: string) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
 
@@ -1004,6 +1007,7 @@ const initialState: AppState = {
   projectHistoryIndex: -1,
   currentView: 'welcome',
   sidebarOpen: true,
+  targetSettingsTab: undefined,
   lastSelectedSessionByProject: {},
   theme: 'dark',
   features: [],
@@ -1050,6 +1054,7 @@ const initialState: AppState = {
   autoLoadClaudeMd: false, // Default to disabled (user must opt-in)
   enableSandboxMode: false, // Default to disabled (can be enabled for additional security)
   skipSandboxWarning: false, // Default to disabled (show sandbox warning dialog)
+  autoAnalyzeImpact: true, // Default to enabled - auto-analyze impact after spec generation
   mcpServers: [], // No MCP servers configured by default
   promptCustomization: {}, // Empty by default - all prompts use built-in defaults
   aiProfiles: DEFAULT_AI_PROFILES,
@@ -1326,7 +1331,8 @@ export const useAppStore = create<AppState & AppActions>()(
       },
 
       // View actions
-      setCurrentView: (view) => set({ currentView: view }),
+      setCurrentView: (view, settingsTab) =>
+        set({ currentView: view, targetSettingsTab: settingsTab }),
       toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
 
@@ -1766,6 +1772,12 @@ export const useAppStore = create<AppState & AppActions>()(
       },
       setSkipSandboxWarning: async (skip) => {
         set({ skipSandboxWarning: skip });
+        // Sync to server settings file
+        const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
+        await syncSettingsToServer();
+      },
+      setAutoAnalyzeImpact: async (enabled) => {
+        set({ autoAnalyzeImpact: enabled });
         // Sync to server settings file
         const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
         await syncSettingsToServer();

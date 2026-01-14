@@ -44,7 +44,10 @@ import {
 } from '../lib/sdk-options.js';
 import { FeatureLoader } from './feature-loader.js';
 import type { SettingsService } from './settings-service.js';
+import { SkillsLoaderService } from './skills-loader.js';
+import { WikiService } from './wiki-service.js';
 import { pipelineService, PipelineService } from './pipeline-service.js';
+import { analyzeFeatureImpact } from './impact-analysis-service.js';
 import {
   getAutoLoadClaudeMdSetting,
   getEnableSandboxModeSetting,
@@ -336,12 +339,14 @@ export class AutoModeService {
   private config: AutoModeConfig | null = null;
   private pendingApprovals = new Map<string, PendingApproval>();
   private settingsService: SettingsService | null = null;
+  private dataDir: string;
   // Track consecutive failures to detect quota/API issues
   private consecutiveFailures: { timestamp: number; error: string }[] = [];
   private pausedDueToFailures = false;
 
-  constructor(events: EventEmitter, settingsService?: SettingsService) {
+  constructor(events: EventEmitter, dataDir: string, settingsService?: SettingsService) {
     this.events = events;
+    this.dataDir = dataDir;
     this.settingsService = settingsService ?? null;
   }
 
@@ -794,6 +799,49 @@ export class AutoModeService {
         logger.info(`[Planning Phase] Spec saved to feature.json (${cleanSpec.length} chars)`);
         logger.info(`[Planning Phase] Spec preview: ${cleanSpec.substring(0, 200)}...`);
 
+        // Auto-run impact analysis if enabled in settings
+        try {
+          const globalSettings = await this.settingsService?.getGlobalSettings();
+          const autoAnalyze = globalSettings?.autoAnalyzeImpact ?? true; // Default to true
+
+          if (autoAnalyze) {
+            logger.info(`[Planning Phase] Auto-analyzing impact...`);
+            const projectSettings = await this.settingsService?.getProjectSettings(projectPath);
+
+            if (projectSettings?.repositoryGraph && projectSettings?.repositoryFileTree) {
+              const impactConfig = globalSettings.impactAnalysis;
+              const projectRules = Array.isArray(projectSettings.impactAnalysisRules)
+                ? projectSettings.impactAnalysisRules
+                : [];
+
+              const context = {
+                fileTree: projectSettings.repositoryFileTree,
+                graph: projectSettings.repositoryGraph,
+                services: projectSettings.targetRepository?.services || [],
+                features: [],
+                rules: projectRules.length > 0 ? projectRules : impactConfig?.rules || [],
+                dependencyDepth: impactConfig?.dependencyDepth || 2,
+              };
+
+              const impactResult = analyzeFeatureImpact(
+                feature,
+                context,
+                impactConfig?.fileExtractionPatterns || []
+              );
+
+              feature.impactAnalysis = impactResult;
+              await secureFs.writeFile(featurePath, JSON.stringify(feature, null, 2));
+              logger.info(
+                `[Planning Phase] Impact analysis complete: Risk ${impactResult.riskLevel} (${impactResult.riskScore}/100)`
+              );
+            } else {
+              logger.info(`[Planning Phase] Skipping impact analysis - repository not analyzed`);
+            }
+          }
+        } catch (error) {
+          logger.warn(`[Planning Phase] Impact analysis failed, continuing anyway:`, error);
+        }
+
         // Now check if approval is required
         if (feature.requirePlanApproval) {
           // Wait for approval before continuing to implementation
@@ -906,6 +954,56 @@ export class AutoModeService {
       // Store model and provider in running feature for tracking
       tempRunningFeature.model = model;
       tempRunningFeature.provider = provider;
+
+      // Load skills based on feature description
+      try {
+        const globalSettings = await this.settingsService?.getGlobalSettings();
+        const projectSettings = await this.settingsService?.getProjectSettings(projectPath);
+
+        if (globalSettings) {
+          // Create WikiService for resolving wiki placeholders in skills
+          const wikiService = new WikiService(this.dataDir);
+
+          const skillsLoader = new SkillsLoaderService(
+            globalSettings,
+            projectSettings,
+            projectPath,
+            this.dataDir,
+            wikiService
+          );
+
+          const skillsResult = await skillsLoader.loadSkills(feature.description, {
+            maxSkills: globalSettings.maxAutoSelectedSkills ?? 3,
+            similarityThreshold: globalSettings.skillSimilarityThreshold ?? 0.3,
+            disabledSkills: projectSettings?.disabledSkills,
+          });
+
+          // Emit skills_loaded event if any skills were loaded
+          if (skillsResult.skills.length > 0) {
+            this.emitAutoModeEvent('skills_loaded', {
+              featureId,
+              projectPath,
+              skills: skillsResult.skills.map((s) => ({
+                id: s.id,
+                name: s.name,
+                description: s.description,
+                score: s.score,
+                tags: s.tags,
+                filePath: s.filePath,
+              })),
+              wikiPagesUsed: skillsResult.wikiPagesUsed,
+              warnings: skillsResult.warnings,
+            });
+
+            logger.info(
+              `Loaded ${skillsResult.skills.length} skills for feature ${featureId}: ${skillsResult.skills.map((s) => s.name).join(', ')}`
+            );
+          }
+        }
+      } catch (error) {
+        logger.warn(`Failed to load skills for feature ${featureId}:`, error);
+        // Don't fail the feature if skills loading fails
+      }
 
       // Run the agent with the feature's model and images
       // Context files are passed as system prompt for higher priority
@@ -2230,6 +2328,40 @@ The user has attached ${feature.imagePaths.length} image(s) for context. These i
 ${imagesList}
 
 You can use the Read tool to view these images at any time during implementation. Review them carefully before implementing.
+`;
+    }
+
+    // Add wiki pages/documentation (textFilePaths)
+    if (feature.textFilePaths && feature.textFilePaths.length > 0) {
+      const wikiList = feature.textFilePaths
+        .map((file, idx) => {
+          const filename = file.filename || file.path.split('/').pop() || 'Unknown';
+          const path = file.path;
+          return `   ${idx + 1}. ${filename}\n      Source: ${path}`;
+        })
+        .join('\n');
+
+      prompt += `
+**📚 Knowledge Base / Wiki Pages:**
+The following documentation and wiki pages have been attached as reference material for this feature:
+
+${wikiList}
+
+These pages contain relevant standards, best practices, architectural guidelines, or domain knowledge that should inform your implementation. Review them to understand:
+- Coding standards and conventions to follow
+- Architectural patterns to use
+- Domain-specific requirements or business rules
+- API documentation or integration guidelines
+
+${feature.textFilePaths
+  .map(
+    (file, idx) => `
+### ${idx + 1}. ${file.filename || 'Document ' + (idx + 1)}
+
+${file.content || '(Content not available - refer to source URL)'}
+`
+  )
+  .join('\n')}
 `;
     }
 

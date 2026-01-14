@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getElectronAPI } from '@/lib/electron';
+import { getHttpApiClient } from '@/lib/http-api-client';
 import { modelSupportsThinking } from '@/lib/utils';
 import {
   useAppStore,
@@ -53,6 +54,7 @@ import {
   BranchSelector,
   PlanningModeSelector,
   AncestorContextSection,
+  SkillsInfo,
 } from '../shared';
 import { ModelOverrideTrigger, useModelOverride } from '@/components/shared';
 import {
@@ -73,6 +75,7 @@ import {
   getModelProvider,
   addProviderPrefix,
 } from '@automaker/types';
+import { WikiBrowser } from '../../settings-view/wiki-sources/components/wiki-browser';
 
 const logger = createLogger('AddFeatureDialog');
 
@@ -131,7 +134,23 @@ export function AddFeatureDialog({
 }: AddFeatureDialogProps) {
   const isSpawnMode = !!parentFeature;
   const navigate = useNavigate();
+  const httpApi = getHttpApiClient();
+  const { currentProject } = useAppStore();
   const [useCurrentBranch, setUseCurrentBranch] = useState(true);
+  const [globalSkillsCount, setGlobalSkillsCount] = useState(0);
+  const [projectSkillsCount, setProjectSkillsCount] = useState(0);
+  const [skillsAutoLoad, setSkillsAutoLoad] = useState(true);
+  const [matchedSkills, setMatchedSkills] = useState<
+    Array<{
+      id: string;
+      name: string;
+      description: string;
+      score: number;
+      scope: 'global' | 'project';
+      tags?: string[];
+    }>
+  >([]);
+  const [isLoadingSkillsPreview, setIsLoadingSkillsPreview] = useState(false);
   const [newFeature, setNewFeature] = useState({
     title: '',
     category: '',
@@ -162,6 +181,14 @@ export function AddFeatureDialog({
   // Spawn mode state
   const [ancestors, setAncestors] = useState<AncestorContext[]>([]);
   const [selectedAncestorIds, setSelectedAncestorIds] = useState<Set<string>>(new Set());
+
+  // Wiki configuration from localStorage
+  const [wikiOrganization] = useState(
+    () => localStorage.getItem('azure_devops_organization') || ''
+  );
+  const [wikiProject] = useState(() => localStorage.getItem('azure_devops_project') || '');
+  const [wikiId] = useState(() => localStorage.getItem('azure_devops_wikiId') || '');
+  const hasWikiConfig = wikiOrganization && wikiProject && wikiId;
 
   // Get planning mode defaults and worktrees setting from store
   const {
@@ -234,6 +261,65 @@ export function AddFeatureDialog({
     allFeatures,
     phaseModels,
   ]);
+
+  // Fetch skills count when dialog opens
+  useEffect(() => {
+    if (open) {
+      const fetchSkillsData = async () => {
+        try {
+          // Fetch skills count
+          const skillsResult = await httpApi.skills.list(currentProject?.path);
+          if (skillsResult.success) {
+            setGlobalSkillsCount(skillsResult.global?.length || 0);
+            setProjectSkillsCount(skillsResult.project?.length || 0);
+          }
+
+          // Fetch global settings for skillsAutoLoad
+          const settings = await httpApi.settings.getGlobal();
+          if (settings.success && settings.settings) {
+            setSkillsAutoLoad(settings.settings.skillsAutoLoad ?? true);
+          }
+        } catch (error) {
+          console.error('Failed to fetch skills data:', error);
+        }
+      };
+      fetchSkillsData();
+    }
+  }, [open, currentProject?.path]);
+
+  // Preview skills when description changes (debounced)
+  useEffect(() => {
+    console.log('[AddFeatureDialog] Skills preview effect triggered:', {
+      open,
+      description: newFeature.description,
+      skillsAutoLoad,
+      globalSkillsCount,
+      projectSkillsCount,
+    });
+
+    if (!open || !newFeature.description.trim() || !skillsAutoLoad) {
+      setMatchedSkills([]);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      console.log('[AddFeatureDialog] Fetching skills preview for:', newFeature.description);
+      setIsLoadingSkillsPreview(true);
+      try {
+        const result = await httpApi.skills.preview(newFeature.description, currentProject?.path);
+        console.log('[AddFeatureDialog] Skills preview result:', result);
+        if (result.success && result.skills) {
+          setMatchedSkills(result.skills);
+        }
+      } catch (error) {
+        console.error('Failed to preview skills:', error);
+      } finally {
+        setIsLoadingSkillsPreview(false);
+      }
+    }, 800); // Debounce 800ms
+
+    return () => clearTimeout(timeoutId);
+  }, [newFeature.description, open, skillsAutoLoad, currentProject?.path]);
 
   const buildFeatureData = (): FeatureData | null => {
     if (!newFeature.description.trim()) {
@@ -483,7 +569,7 @@ export function AddFeatureDialog({
           </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="prompt" className="py-4 flex-1 min-h-0 flex flex-col">
-          <TabsList className="w-full grid grid-cols-3 mb-4">
+          <TabsList className="w-full grid grid-cols-4 mb-4">
             <TabsTrigger value="prompt" data-testid="tab-prompt">
               <MessageSquare className="w-4 h-4 mr-2" />
               Prompt
@@ -642,6 +728,15 @@ export function AddFeatureDialog({
               onPrioritySelect={(priority) => setNewFeature({ ...newFeature, priority })}
               testIdPrefix="priority"
             />
+
+            {/* Skills Info */}
+            <SkillsInfo
+              enabled={skillsAutoLoad}
+              globalSkillsCount={globalSkillsCount}
+              projectSkillsCount={projectSkillsCount}
+              matchedSkills={matchedSkills}
+              isLoadingPreview={isLoadingSkillsPreview}
+            />
           </TabsContent>
 
           {/* Model Tab */}
@@ -726,62 +821,40 @@ export function AddFeatureDialog({
 
           {/* Resources Tab */}
           <TabsContent value="resources" className="space-y-4 overflow-y-auto cursor-default">
-            <div className="space-y-2">
-              <Label>Attached Wiki Pages</Label>
-              <p className="text-sm text-muted-foreground">
-                These wiki pages will be available to the agent as context when executing this
-                feature.
-              </p>
-              {newFeature.textFilePaths && newFeature.textFilePaths.length > 0 ? (
-                <div className="space-y-2 mt-3">
-                  {newFeature.textFilePaths.map((file) => (
-                    <div
-                      key={file.id}
-                      className="flex items-center justify-between p-3 border rounded-md bg-muted/50"
-                    >
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{file.filename}</p>
-                          <p className="text-xs text-muted-foreground truncate">{file.path}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {file.path.startsWith('https://dev.azure.com/') && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => window.open(file.path, '_blank')}
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => {
-                            setNewFeature({
-                              ...newFeature,
-                              textFilePaths: newFeature.textFilePaths?.filter(
-                                (f) => f.id !== file.id
-                              ),
-                            });
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            {/* Wiki Pages */}
+            <div>
+              {hasWikiConfig ? (
+                <WikiBrowser
+                  organization={wikiOrganization}
+                  project={wikiProject}
+                  wikiId={wikiId}
+                  resetKey={open ? 'add-feature-dialog' : undefined}
+                  initialSelectedPages={newFeature.textFilePaths}
+                  onSelectionChange={(pages) => {
+                    setNewFeature({
+                      ...newFeature,
+                      textFilePaths: pages.map((page) => {
+                        // Try to preserve existing ID if this page was already attached
+                        const existingFile = newFeature.textFilePaths?.find(
+                          (f) => f.path === page.url
+                        );
+                        return {
+                          id: existingFile?.id || `wiki-${page.id}-${Date.now()}`,
+                          path: page.url,
+                          filename: page.name,
+                          mimeType: 'text/markdown',
+                          content: page.content,
+                        };
+                      }),
+                    });
+                  }}
+                />
               ) : (
                 <div className="text-center py-8 text-sm text-muted-foreground border rounded-md">
                   <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p>No wiki pages attached</p>
+                  <p>Wiki not configured</p>
                   <p className="text-xs mt-1">
-                    Go to Settings → DevOps Resources to browse and attach wiki pages
+                    Go to Settings → DevOps Resources to configure your wiki
                   </p>
                 </div>
               )}

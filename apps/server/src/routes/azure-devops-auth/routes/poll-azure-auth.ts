@@ -6,6 +6,7 @@
 
 import type { Request, Response } from 'express';
 import { AzureDevOpsAuthManager } from '../../../providers/azure-devops-auth.js';
+import { SettingsService } from '../../../services/settings-service.js';
 import { createLogger } from '@automaker/utils';
 import { pendingAzureAuths } from './start-azure-auth.js';
 
@@ -25,6 +26,8 @@ export const azureAuthSessions = new Map<string, AzureDevOpsAuthManager>();
 export function createPollAzureAuthHandler() {
   return async (req: Request, res: Response) => {
     try {
+      const settingsService = (req as any).settingsService as SettingsService;
+
       const { deviceCodeId, organization, project, wikiId } = req.body as {
         deviceCodeId: string;
         organization?: string;
@@ -52,8 +55,8 @@ export function createPollAzureAuthHandler() {
       }
 
       // Poll Microsoft Entra ID for access token
-      const CLIENT_ID = '499b84ac-1321-427f-aa17-267ca6975798';
-      const TENANT_ID = 'common';
+      const CLIENT_ID = '04b07795-8ddb-461a-bbee-02f9e1bf7b46'; // Azure CLI
+      const TENANT_ID = pendingAuth.tenantId || 'organizations'; // Use stored tenant ID or default
 
       const params = new URLSearchParams({
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
@@ -94,8 +97,22 @@ export function createPollAzureAuthHandler() {
         return;
       }
 
+      if (data.error === 'expired_token' || data.error === 'code_expired') {
+        // Device code expired
+        logger.warn('Device code expired');
+        pendingAzureAuths.delete(deviceCodeId);
+        res.json({
+          success: true,
+          status: 'expired',
+          error: 'Device code has expired. Please start authentication again.',
+        });
+        return;
+      }
+
       if (data.error) {
-        logger.error('Azure authorization error:', data.error);
+        logger.error('Azure authorization error:', data.error, data.error_description);
+        // Clean up on fatal errors
+        pendingAzureAuths.delete(deviceCodeId);
         res.json({
           success: true,
           status: 'error',
@@ -116,9 +133,130 @@ export function createPollAzureAuthHandler() {
         // Get user ID from token
         const tokenInfo = authManager.getCachedTokenInfo();
 
-        // Store auth manager in session (in production, serialize to database/redis)
+        // Generate session ID (moved up to use in both persistence and in-memory storage)
         const sessionId = `azure_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+        // Save token to credentials.json for persistence
+        await settingsService.saveAzureAuthToken(sessionId, {
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          expiresAt: Date.now() + data.expires_in * 1000,
+          userId: tokenInfo?.userId,
+        });
+
+        // Fetch user's Azure DevOps organizations and default project/wiki
+        let fetchedConfig:
+          | {
+              organization?: string;
+              project?: string;
+              wikiId?: string;
+              wikiName?: string;
+              availableOrgs?: Array<{ id: string; name: string }>;
+              availableProjects?: Array<{ id: string; name: string }>;
+              availableWikis?: Array<{ id: string; name: string; type: string }>;
+            }
+          | undefined;
+
+        try {
+          // Get user's organizations
+          const accountsResponse = await fetch(
+            'https://app.vssps.visualstudio.com/_apis/accounts?api-version=6.0',
+            {
+              headers: {
+                Authorization: `Bearer ${data.access_token}`,
+                Accept: 'application/json',
+              },
+            }
+          );
+
+          if (accountsResponse.ok) {
+            const accountsData = (await accountsResponse.json()) as any;
+            if (accountsData.value && accountsData.value.length > 0) {
+              const orgs = accountsData.value.map((acc: any) => ({
+                id: acc.accountId,
+                name: acc.accountName,
+              }));
+
+              const firstOrg = accountsData.value[0].accountName as string;
+
+              // Get projects for this organization
+              const projectsResponse = await fetch(
+                `https://dev.azure.com/${firstOrg}/_apis/projects?api-version=6.0`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${data.access_token}`,
+                    Accept: 'application/json',
+                  },
+                }
+              );
+
+              if (projectsResponse.ok) {
+                const projectsData = (await projectsResponse.json()) as any;
+                if (projectsData.value && projectsData.value.length > 0) {
+                  const projects = projectsData.value.map((proj: any) => ({
+                    id: proj.id,
+                    name: proj.name,
+                  }));
+
+                  const firstProject = projectsData.value[0].name as string;
+
+                  // Get wikis for this project
+                  const wikisResponse = await fetch(
+                    `https://dev.azure.com/${firstOrg}/${firstProject}/_apis/wiki/wikis?api-version=7.1-preview.2`,
+                    {
+                      headers: {
+                        Authorization: `Bearer ${data.access_token}`,
+                        Accept: 'application/json',
+                      },
+                    }
+                  );
+
+                  if (wikisResponse.ok) {
+                    const wikisData = (await wikisResponse.json()) as any;
+                    if (wikisData.value && wikisData.value.length > 0) {
+                      const wikis = wikisData.value.map((wiki: any) => ({
+                        id: wiki.id,
+                        name: wiki.name,
+                        type: wiki.type,
+                      }));
+
+                      const firstWiki = wikisData.value[0];
+                      fetchedConfig = {
+                        organization: firstOrg,
+                        project: firstProject,
+                        wikiId: firstWiki.id, // Use ID instead of name
+                        wikiName: firstWiki.name,
+                        availableOrgs: orgs,
+                        availableProjects: projects,
+                        availableWikis: wikis,
+                      };
+                      logger.info('Fetched Azure DevOps config:', {
+                        org: firstOrg,
+                        project: firstProject,
+                        wikiId: firstWiki.id,
+                        wikiName: firstWiki.name,
+                        totalOrgs: orgs.length,
+                        totalProjects: projects.length,
+                        totalWikis: wikis.length,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (fetchError) {
+          logger.warn('Failed to fetch Azure DevOps organizations/projects:', fetchError);
+          // Continue anyway - authentication still succeeded
+        }
+
+        // Store auth manager in session (in-memory, sessionId already generated above)
         azureAuthSessions.set(sessionId, authManager);
+
+        logger.info(`Stored auth session ${sessionId}, total sessions: ${azureAuthSessions.size}`);
+        logger.info(
+          `Token expires at: ${new Date(data.expires_in * 1000 + Date.now()).toISOString()}`
+        );
 
         // Clean up pending auth
         pendingAzureAuths.delete(deviceCodeId);
@@ -130,15 +268,9 @@ export function createPollAzureAuthHandler() {
           status: 'complete',
           sessionId,
           userId: tokenInfo?.userId,
-          // Include organization/project/wiki config if provided
-          config:
-            organization && project && wikiId
-              ? {
-                  organization,
-                  project,
-                  wikiId,
-                }
-              : undefined,
+          expiresAt: Date.now() + data.expires_in * 1000,
+          // Return fetched config (org/project/wiki)
+          config: fetchedConfig,
         });
       } else {
         res.json({

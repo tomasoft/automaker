@@ -298,6 +298,26 @@ export type AutoModeEvent =
       featureId: string;
       projectPath?: string;
       phaseNumber: number;
+    }
+  | {
+      type: 'skills_loaded';
+      featureId: string;
+      projectPath?: string;
+      skills: Array<{
+        id: string;
+        name: string;
+        description: string;
+        score: number;
+        tags?: string[];
+        filePath: string;
+      }>;
+      wikiPagesUsed: Array<{
+        path: string;
+        title: string;
+        isCached: boolean;
+        isStale: boolean;
+      }>;
+      warnings: string[];
     };
 
 export type SpecRegenerationEvent =

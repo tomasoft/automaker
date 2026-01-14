@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getElectronAPI } from '@/lib/electron';
+import { getHttpApiClient } from '@/lib/http-api-client';
 import { modelSupportsThinking } from '@/lib/utils';
 import {
   Feature,
@@ -51,6 +52,7 @@ import {
   PrioritySelector,
   BranchSelector,
   PlanningModeSelector,
+  SkillsInfo,
 } from '../shared';
 import { ModelOverrideTrigger, useModelOverride } from '@/components/shared';
 import {
@@ -62,6 +64,7 @@ import {
 import { DependencyTreeDialog } from './dependency-tree-dialog';
 import { isCursorModel, PROVIDER_PREFIXES } from '@automaker/types';
 import { ImpactAnalysisPanel } from './components/impact-analysis-panel';
+import { WikiBrowser } from '../../settings-view/wiki-sources/components/wiki-browser';
 
 const logger = createLogger('EditFeatureDialog');
 
@@ -108,7 +111,22 @@ export function EditFeatureDialog({
   aiProfiles,
   allFeatures,
 }: EditFeatureDialogProps) {
+  const httpApi = getHttpApiClient();
   const [editingFeature, setEditingFeature] = useState<Feature | null>(feature);
+  const [globalSkillsCount, setGlobalSkillsCount] = useState(0);
+  const [projectSkillsCount, setProjectSkillsCount] = useState(0);
+  const [skillsAutoLoad, setSkillsAutoLoad] = useState(true);
+  const [matchedSkills, setMatchedSkills] = useState<
+    Array<{
+      id: string;
+      name: string;
+      description: string;
+      score: number;
+      scope: 'global' | 'project';
+      tags?: string[];
+    }>
+  >([]);
+  const [isLoadingSkillsPreview, setIsLoadingSkillsPreview] = useState(false);
   const [useCurrentBranch, setUseCurrentBranch] = useState(() => {
     // If feature has no branchName, default to using current branch
     return !feature?.branchName;
@@ -129,8 +147,16 @@ export function EditFeatureDialog({
   const enhancementAbortRef = useRef<AbortController | null>(null);
   const enhancementTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Get worktrees setting from store
-  const { useWorktrees } = useAppStore();
+  // Wiki configuration from localStorage
+  const [wikiOrganization] = useState(
+    () => localStorage.getItem('azure_devops_organization') || ''
+  );
+  const [wikiProject] = useState(() => localStorage.getItem('azure_devops_project') || '');
+  const [wikiId] = useState(() => localStorage.getItem('azure_devops_wikiId') || '');
+  const hasWikiConfig = wikiOrganization && wikiProject && wikiId;
+
+  // Get worktrees setting and current project from store
+  const { useWorktrees, currentProject } = useAppStore();
 
   // Enhancement model override
   const enhancementOverride = useModelOverride({ phase: 'enhancementModel' });
@@ -142,11 +168,57 @@ export function EditFeatureDialog({
       setRequirePlanApproval(feature.requirePlanApproval ?? false);
       // If feature has no branchName, default to using current branch
       setUseCurrentBranch(!feature.branchName);
+
+      // Fetch skills data
+      const fetchSkillsData = async () => {
+        try {
+          const skillsResult = await httpApi.skills.list(currentProject?.path);
+          if (skillsResult.success) {
+            setGlobalSkillsCount(skillsResult.global?.length || 0);
+            setProjectSkillsCount(skillsResult.project?.length || 0);
+          }
+
+          const settings = await httpApi.settings.getGlobal();
+          if (settings.success && settings.settings) {
+            setSkillsAutoLoad(settings.settings.skillsAutoLoad ?? true);
+          }
+        } catch (error) {
+          console.error('Failed to fetch skills data:', error);
+        }
+      };
+      fetchSkillsData();
     } else {
       setEditFeaturePreviewMap(new Map());
       setShowEditAdvancedOptions(false);
     }
-  }, [feature]);
+  }, [feature, currentProject?.path]);
+
+  // Preview skills when description changes (debounced)
+  useEffect(() => {
+    if (!editingFeature?.description.trim() || !skillsAutoLoad) {
+      setMatchedSkills([]);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsLoadingSkillsPreview(true);
+      try {
+        const result = await httpApi.skills.preview(
+          editingFeature.description,
+          currentProject?.path
+        );
+        if (result.success && result.skills) {
+          setMatchedSkills(result.skills);
+        }
+      } catch (error) {
+        console.error('Failed to preview skills:', error);
+      } finally {
+        setIsLoadingSkillsPreview(false);
+      }
+    }, 800); // Debounce 800ms
+
+    return () => clearTimeout(timeoutId);
+  }, [editingFeature?.description, skillsAutoLoad, currentProject?.path]);
 
   const handleUpdate = () => {
     if (!editingFeature) return;
@@ -188,6 +260,7 @@ export function EditFeatureDialog({
       priority: editingFeature.priority ?? 2,
       planningMode,
       requirePlanApproval,
+      impactAnalysis: editingFeature.impactAnalysis,
     };
 
     onUpdate(editingFeature.id, updates);
@@ -340,7 +413,7 @@ export function EditFeatureDialog({
           <DialogDescription>Modify the feature details.</DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="prompt" className="py-4 flex-1 min-h-0 flex flex-col">
-          <TabsList className="w-full grid grid-cols-3 mb-4">
+          <TabsList className="w-full grid grid-cols-5 mb-4">
             <TabsTrigger value="prompt" data-testid="edit-tab-prompt">
               <MessageSquare className="w-4 h-4 mr-2" />
               Prompt
@@ -352,11 +425,15 @@ export function EditFeatureDialog({
             <TabsTrigger value="options" data-testid="edit-tab-options">
               <SlidersHorizontal className="w-4 h-4 mr-2" />
               Options
-            </TabsTrigger>{' '}
+            </TabsTrigger>
             <TabsTrigger value="resources" data-testid="tab-resources">
               <FileText className="w-4 h-4 mr-2" />
               Resources
-            </TabsTrigger>{' '}
+            </TabsTrigger>
+            <TabsTrigger value="impact" data-testid="tab-impact">
+              <GitBranch className="w-4 h-4 mr-2" />
+              Impact
+            </TabsTrigger>
           </TabsList>
 
           {/* Prompt Tab */}
@@ -512,6 +589,15 @@ export function EditFeatureDialog({
               }
               testIdPrefix="edit-priority"
             />
+
+            {/* Skills Info */}
+            <SkillsInfo
+              enabled={skillsAutoLoad}
+              globalSkillsCount={globalSkillsCount}
+              projectSkillsCount={projectSkillsCount}
+              matchedSkills={matchedSkills}
+              isLoadingPreview={isLoadingSkillsPreview}
+            />
           </TabsContent>
 
           {/* Model Tab */}
@@ -603,75 +689,58 @@ export function EditFeatureDialog({
 
           {/* Resources Tab */}
           <TabsContent value="resources" className="space-y-6 overflow-y-auto cursor-default">
-            {/* Wiki Pages Section */}
-            <div className="space-y-2">
-              <Label>Attached Wiki Pages</Label>
-              <p className="text-sm text-muted-foreground">
-                These wiki pages will be available to the agent as context when executing this
-                feature.
-              </p>
-              {editingFeature.textFilePaths && editingFeature.textFilePaths.length > 0 ? (
-                <div className="space-y-2 mt-3">
-                  {editingFeature.textFilePaths.map((file) => (
-                    <div
-                      key={file.id}
-                      className="flex items-center justify-between p-3 border rounded-md bg-muted/50"
-                    >
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{file.filename}</p>
-                          <p className="text-xs text-muted-foreground truncate">{file.path}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {file.path.startsWith('https://dev.azure.com/') && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => window.open(file.path, '_blank')}
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => {
-                            setEditingFeature({
-                              ...editingFeature,
-                              textFilePaths: editingFeature.textFilePaths?.filter(
-                                (f) => f.id !== file.id
-                              ),
-                            });
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            {/* Wiki Pages */}
+            <div>
+              {hasWikiConfig ? (
+                <WikiBrowser
+                  organization={wikiOrganization}
+                  project={wikiProject}
+                  wikiId={wikiId}
+                  resetKey={feature?.id}
+                  initialSelectedPages={editingFeature.textFilePaths}
+                  onSelectionChange={(pages) => {
+                    setEditingFeature({
+                      ...editingFeature,
+                      textFilePaths: pages.map((page) => {
+                        // Try to preserve existing ID if this page was already attached
+                        const existingFile = editingFeature.textFilePaths?.find(
+                          (f) => f.path === page.url
+                        );
+                        return {
+                          id: existingFile?.id || `wiki-${page.id}-${Date.now()}`,
+                          path: page.url,
+                          filename: page.name,
+                          mimeType: 'text/markdown',
+                          content: page.content,
+                        };
+                      }),
+                    });
+                  }}
+                />
               ) : (
                 <div className="text-center py-8 text-sm text-muted-foreground border rounded-md">
                   <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p>No wiki pages attached</p>
+                  <p>Wiki not configured</p>
                   <p className="text-xs mt-1">
-                    Go to Settings → DevOps Resources to browse and attach wiki pages
+                    Go to Settings → DevOps Resources to configure your wiki
                   </p>
                 </div>
               )}
             </div>
+          </TabsContent>
 
-            {/* Impact Analysis Section */}
-            <div className="pt-4 border-t">
-              <ImpactAnalysisPanel
-                feature={editingFeature}
-                projectPath={editingFeature.projectPath || ''}
-              />
-            </div>
+          {/* Impact Tab */}
+          <TabsContent value="impact" className="space-y-6 overflow-y-auto cursor-default">
+            <ImpactAnalysisPanel
+              feature={editingFeature}
+              projectPath={currentProject?.path || ''}
+              onAnalysisComplete={(analysis) => {
+                setEditingFeature({
+                  ...editingFeature,
+                  impactAnalysis: analysis,
+                });
+              }}
+            />
           </TabsContent>
         </Tabs>
         <DialogFooter className="sm:!justify-between">

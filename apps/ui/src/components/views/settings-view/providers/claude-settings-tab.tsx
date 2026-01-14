@@ -7,7 +7,13 @@ import { ClaudeUsageSection } from '../api-keys/claude-usage-section';
 import { Info } from 'lucide-react';
 
 export function ClaudeSettingsTab() {
-  const { apiKeys, autoLoadClaudeMd, setAutoLoadClaudeMd } = useAppStore();
+  const {
+    apiKeys,
+    autoLoadClaudeMd,
+    setAutoLoadClaudeMd,
+    enableSandboxMode,
+    setEnableSandboxMode,
+  } = useAppStore();
   const { claudeAuthStatus } = useSetupStore();
 
   // Use CLI status hook
@@ -41,6 +47,8 @@ export function ClaudeSettingsTab() {
       <ClaudeMdSettings
         autoLoadClaudeMd={autoLoadClaudeMd}
         onAutoLoadClaudeMdChange={setAutoLoadClaudeMd}
+        enableSandboxMode={enableSandboxMode}
+        onEnableSandboxModeChange={setEnableSandboxMode}
       />
       {showUsageTracking && <ClaudeUsageSection />}
     </div>

@@ -45,7 +45,15 @@ export function createOpenInExplorerHandler() {
       }
 
       console.log('[OpenInExplorer] Running command:', openCommand);
-      await execAsync(openCommand);
+
+      // On Windows, explorer sometimes returns non-zero exit code even on success
+      // So we ignore errors on Windows platform
+      if (platform === 'win32') {
+        exec(openCommand); // Fire and forget on Windows
+      } else {
+        await execAsync(openCommand);
+      }
+
       res.json({
         success: true,
         result: {

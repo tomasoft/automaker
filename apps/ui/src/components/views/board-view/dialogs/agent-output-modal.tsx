@@ -12,6 +12,11 @@ import { LogViewer } from '@/components/ui/log-viewer';
 import { GitDiffPanel } from '@/components/ui/git-diff-panel';
 import { TaskProgressPanel } from '@/components/ui/task-progress-panel';
 import { Markdown } from '@/components/ui/markdown';
+import { SkillsLoadedBanner } from '@/components/views/agent-view/components/skills-loaded-banner';
+import type {
+  LoadedSkill,
+  WikiPageUsed,
+} from '@/components/views/agent-view/components/skills-loaded-banner';
 import { useAppStore } from '@/store/app-store';
 import { extractSummary } from '@/lib/log-parser';
 import type { AutoModeEvent } from '@/types/electron';
@@ -47,6 +52,25 @@ export function AgentOutputModal({
   const [showTaskWarning, setShowTaskWarning] = useState(false);
   const [canRegeneratePlan, setCanRegeneratePlan] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [loadedSkills, setLoadedSkills] = useState<
+    Array<{
+      id: string;
+      name: string;
+      description: string;
+      score: number;
+      tags?: string[];
+      filePath: string;
+    }>
+  >([]);
+  const [wikiPagesUsed, setWikiPagesUsed] = useState<
+    Array<{
+      path: string;
+      title: string;
+      isCached: boolean;
+      isStale: boolean;
+    }>
+  >([]);
+  const [skillWarnings, setSkillWarnings] = useState<string[]>([]);
 
   // Extract summary from output
   const summary = useMemo(() => extractSummary(output), [output]);
@@ -259,6 +283,16 @@ export function AgentOutputModal({
             }
           }, 500);
           break;
+        case 'skills_loaded':
+          // Handle skills loaded event
+          if ('skills' in event) {
+            setLoadedSkills(event.skills || []);
+            setWikiPagesUsed(event.wikiPagesUsed || []);
+            setSkillWarnings(event.warnings || []);
+
+            // Don't append to output - we'll display this separately via SkillsLoadedBanner
+          }
+          break;
         case 'plan_revision_requested': {
           // Show when user requests plan revision
           if ('planVersion' in event) {
@@ -449,6 +483,28 @@ export function AgentOutputModal({
             {featureDescription}
           </DialogDescription>
         </DialogHeader>
+
+        {/* Skills Loaded Banner - shows which skills were auto-selected */}
+        {loadedSkills.length > 0 && (
+          <div className="flex-shrink-0 mx-1">
+            <SkillsLoadedBanner
+              skills={loadedSkills as LoadedSkill[]}
+              wikiPagesUsed={wikiPagesUsed as WikiPageUsed[]}
+              warnings={skillWarnings}
+            />
+          </div>
+        )}
+
+        {/* Skills Loaded Banner - shows which skills were auto-selected */}
+        {loadedSkills.length > 0 && (
+          <div className="flex-shrink-0 mx-1">
+            <SkillsLoadedBanner
+              skills={loadedSkills as LoadedSkill[]}
+              wikiPagesUsed={wikiPagesUsed as WikiPageUsed[]}
+              warnings={skillWarnings}
+            />
+          </div>
+        )}
 
         {/* Task Progress Panel - shows when tasks are being executed */}
         <TaskProgressPanel
