@@ -13,6 +13,7 @@ interface CursorCliStatusProps {
   status: CursorStatus | null;
   isChecking: boolean;
   onRefresh: () => void;
+  disabled?: boolean;
 }
 
 function SkeletonPulse({ className }: { className?: string }) {
@@ -199,7 +200,7 @@ export function ModelConfigSkeleton() {
   );
 }
 
-export function CursorCliStatus({ status, isChecking, onRefresh }: CursorCliStatusProps) {
+export function CursorCliStatus({ status, isChecking, onRefresh, disabled }: CursorCliStatusProps) {
   if (!status) return <CursorCliStatusSkeleton />;
 
   return (
@@ -208,7 +209,8 @@ export function CursorCliStatus({ status, isChecking, onRefresh }: CursorCliStat
         'rounded-2xl overflow-hidden',
         'border border-border/50',
         'bg-gradient-to-br from-card/90 via-card/70 to-card/80 backdrop-blur-xl',
-        'shadow-sm shadow-black/5'
+        'shadow-sm shadow-black/5',
+        disabled && 'opacity-50 pointer-events-none'
       )}
     >
       <div className="p-6 border-b border-border/50 bg-gradient-to-r from-transparent via-accent/5 to-transparent">

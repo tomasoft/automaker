@@ -16,7 +16,11 @@ interface LocalLlmModel {
   contextWindow: number;
 }
 
-export function LocalLlmModelConfiguration() {
+interface LocalLlmModelConfigurationProps {
+  disabled?: boolean;
+}
+
+export function LocalLlmModelConfiguration({ disabled }: LocalLlmModelConfigurationProps = {}) {
   const {
     enabledLocalLlmModels,
     seenLocalLlmModels,
@@ -98,6 +102,7 @@ export function LocalLlmModelConfiguration() {
         'rounded-2xl overflow-hidden',
         'border border-border/50',
         'bg-gradient-to-br from-card/90 via-card/70 to-card/80 backdrop-blur-xl',
+        disabled && 'opacity-50 pointer-events-none',
         'shadow-sm shadow-black/5'
       )}
     >

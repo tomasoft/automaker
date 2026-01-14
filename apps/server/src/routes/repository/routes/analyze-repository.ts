@@ -1,71 +1,42 @@
 /**
  * Analyze Repository Route
  *
- * Triggers deep analysis of configured repository
+ * Triggers deep analysis of local codebase
  */
 
 import type { Request, Response } from 'express';
 import { createLogger } from '@automaker/utils';
-import { analyzeRepository } from '../../../services/repository-service.js';
-import type { RepositoryConfiguration } from '@automaker/types';
+import { analyzeLocalRepository } from '../../../services/repository-service.js';
 
 const logger = createLogger('AnalyzeRepositoryRoute');
 
 // Store analysis results temporarily (in production, use database)
 const analysisResults = new Map<string, any>();
 
-// This will be injected by the router
-let getPATFunction: ((sessionId: string) => Promise<string | undefined>) | undefined;
-
-export function injectGetPAT(getPAT: (sessionId: string) => Promise<string | undefined>) {
-  getPATFunction = getPAT;
-}
-
 export async function analyzeRepositoryRoute(req: Request, res: Response): Promise<void> {
   try {
-    const { repositoryConfig, accessToken, sessionId } = req.body as {
-      repositoryConfig: RepositoryConfiguration;
-      accessToken?: string;
-      sessionId: string;
+    const { projectPath } = req.body as {
+      projectPath: string;
     };
 
-    if (!repositoryConfig) {
+    if (!projectPath) {
       res.status(400).json({
         success: false,
-        error: 'Missing required field: repositoryConfig',
+        error: 'Missing required field: projectPath',
       });
       return;
     }
 
-    // Use provided accessToken or retrieve stored PAT
-    let token = accessToken;
-    if (!token && sessionId && getPATFunction) {
-      token = await getPATFunction(sessionId);
-    }
+    logger.info(`[AnalyzeRepository] Starting analysis for local project: ${projectPath}`);
 
-    if (!token) {
-      res.status(400).json({
-        success: false,
-        error:
-          'No access token provided and no PAT found for this session. Please configure your Personal Access Token first.',
-      });
-      return;
-    }
-
-    logger.info(
-      `[AnalyzeRepository] Starting analysis for ${repositoryConfig.organization}/${repositoryConfig.project}/${repositoryConfig.repository}`
-    );
-
-    // Perform analysis
-    const result = await analyzeRepository(repositoryConfig, token);
+    // Perform analysis on local codebase
+    const result = await analyzeLocalRepository(projectPath);
 
     // Store results
-    if (sessionId) {
-      analysisResults.set(sessionId, {
-        ...result,
-        analyzedAt: new Date().toISOString(),
-      });
-    }
+    analysisResults.set(projectPath, {
+      ...result,
+      analyzedAt: new Date().toISOString(),
+    });
 
     res.json({
       success: true,
@@ -74,6 +45,7 @@ export async function analyzeRepositoryRoute(req: Request, res: Response): Promi
         graph: result.graph,
         services: result.services,
         commitSHA: result.commitSHA,
+        currentBranch: result.currentBranch,
         timing: result.timing,
         stats: {
           filesIndexed: result.fileTree.length,

@@ -21,7 +21,7 @@ import { ProviderTabs } from './settings-view/providers';
 import { MCPServersSection } from './settings-view/mcp-servers';
 import { PromptCustomizationSection } from './settings-view/prompts';
 import { WikiSourcesSection } from './settings-view/wiki-sources/wiki-sources-section';
-import { RepositoryConfigSection } from './settings-view/repository-config/repository-config-section';
+import { BranchAnalysisSection } from './settings-view/branch-analysis/branch-analysis-section';
 import { SkillsSection } from './settings-view/skills/skills-section';
 import { PathsSection } from './settings-view/paths/paths-section';
 import type { Project as SettingsProject, Theme } from './settings-view/shared/types';
@@ -129,8 +129,8 @@ export function SettingsView() {
         return <PathsSection />;
       case 'wiki-sources':
         return <WikiSourcesSection />;
-      case 'repository-impact':
-        return <RepositoryConfigSection />;
+      case 'branch-analysis':
+        return <BranchAnalysisSection />;
       case 'skills':
         return <SkillsSection />;
       case 'appearance':

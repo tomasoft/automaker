@@ -12,6 +12,8 @@ import { useCursorStatus } from '../hooks/use-cursor-status';
 import { useCursorPermissions } from '../hooks/use-cursor-permissions';
 import { CursorPermissionsSection } from './cursor-permissions-section';
 import { CursorModelConfiguration } from './cursor-model-configuration';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 export function CursorSettingsTab() {
   // Global settings from store
@@ -21,6 +23,8 @@ export function CursorSettingsTab() {
     setCursorDefaultModel,
     toggleCursorModel,
     currentProject,
+    isCursorEnabled,
+    setCursorEnabled,
   } = useAppStore();
 
   // Custom hooks for data fetching
@@ -61,43 +65,45 @@ export function CursorSettingsTab() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <CursorCliStatusSkeleton />
-        <CursorPermissionsSkeleton />
-        <ModelConfigSkeleton />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {/* CLI Status */}
-      <CursorCliStatus status={status} isChecking={isLoading} onRefresh={loadData} />
+      {/* Master Toggle */}
+      <div className="flex items-center justify-between p-4 rounded-xl bg-card/50 border border-border/50">
+        <Label htmlFor="cursor-enabled" className="text-base font-medium">
+          Provider Enabled
+        </Label>
+        <Switch id="cursor-enabled" checked={isCursorEnabled} onCheckedChange={setCursorEnabled} />
+      </div>
 
-      {/* CLI Permissions Section */}
-      <CursorPermissionsSection
-        status={status}
-        permissions={permissions}
-        isLoadingPermissions={isLoadingPermissions}
-        isSavingPermissions={isSavingPermissions}
-        copiedConfig={copiedConfig}
-        currentProject={currentProject}
-        onApplyProfile={applyProfile}
-        onCopyConfig={copyConfig}
-        onLoadPermissions={loadPermissions}
-      />
+      {isCursorEnabled && (
+        <>
+          {/* CLI Status */}
+          <CursorCliStatus status={status} isChecking={isLoading} onRefresh={loadData} />
 
-      {/* Model Configuration - Always show (global settings) */}
-      {status?.installed && (
-        <CursorModelConfiguration
-          enabledCursorModels={enabledCursorModels}
-          cursorDefaultModel={cursorDefaultModel}
-          isSaving={isSaving}
-          onDefaultModelChange={handleDefaultModelChange}
-          onModelToggle={handleModelToggle}
-        />
+          {/* CLI Permissions Section */}
+          <CursorPermissionsSection
+            status={status}
+            permissions={permissions}
+            isLoadingPermissions={isLoadingPermissions}
+            isSavingPermissions={isSavingPermissions}
+            copiedConfig={copiedConfig}
+            currentProject={currentProject}
+            onApplyProfile={applyProfile}
+            onCopyConfig={copyConfig}
+            onLoadPermissions={loadPermissions}
+          />
+
+          {/* Model Configuration - Always show (global settings) */}
+          {status?.installed && (
+            <CursorModelConfiguration
+              enabledCursorModels={enabledCursorModels}
+              cursorDefaultModel={cursorDefaultModel}
+              isSaving={isSaving}
+              onDefaultModelChange={handleDefaultModelChange}
+              onModelToggle={handleModelToggle}
+            />
+          )}
+        </>
       )}
     </div>
   );

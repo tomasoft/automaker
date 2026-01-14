@@ -4,7 +4,8 @@ import { useCliStatus } from '../hooks/use-cli-status';
 import { ClaudeCliStatus } from '../cli-status/claude-cli-status';
 import { ClaudeMdSettings } from '../claude/claude-md-settings';
 import { ClaudeUsageSection } from '../api-keys/claude-usage-section';
-import { Info } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 export function ClaudeSettingsTab() {
   const {
@@ -13,6 +14,8 @@ export function ClaudeSettingsTab() {
     setAutoLoadClaudeMd,
     enableSandboxMode,
     setEnableSandboxMode,
+    isClaudeEnabled,
+    setClaudeEnabled,
   } = useAppStore();
   const { claudeAuthStatus } = useSetupStore();
 
@@ -27,30 +30,31 @@ export function ClaudeSettingsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Usage Info */}
-      <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
-        <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-        <div className="text-sm text-blue-400/90">
-          <span className="font-medium">Primary Provider</span>
-          <p className="text-xs text-blue-400/70 mt-1">
-            Claude is used throughout the app including chat, analysis, and agent tasks.
-          </p>
-        </div>
+      {/* Master Toggle */}
+      <div className="flex items-center justify-between p-4 rounded-xl bg-card/50 border border-border/50">
+        <Label htmlFor="claude-enabled" className="text-base font-medium">
+          Provider Enabled
+        </Label>
+        <Switch id="claude-enabled" checked={isClaudeEnabled} onCheckedChange={setClaudeEnabled} />
       </div>
 
-      <ClaudeCliStatus
-        status={claudeCliStatus}
-        authStatus={claudeAuthStatus}
-        isChecking={isCheckingClaudeCli}
-        onRefresh={handleRefreshClaudeCli}
-      />
-      <ClaudeMdSettings
-        autoLoadClaudeMd={autoLoadClaudeMd}
-        onAutoLoadClaudeMdChange={setAutoLoadClaudeMd}
-        enableSandboxMode={enableSandboxMode}
-        onEnableSandboxModeChange={setEnableSandboxMode}
-      />
-      {showUsageTracking && <ClaudeUsageSection />}
+      {isClaudeEnabled && (
+        <>
+          <ClaudeCliStatus
+            status={claudeCliStatus}
+            authStatus={claudeAuthStatus}
+            isChecking={isCheckingClaudeCli}
+            onRefresh={handleRefreshClaudeCli}
+          />
+          <ClaudeMdSettings
+            autoLoadClaudeMd={autoLoadClaudeMd}
+            onAutoLoadClaudeMdChange={setAutoLoadClaudeMd}
+            enableSandboxMode={enableSandboxMode}
+            onEnableSandboxModeChange={setEnableSandboxMode}
+          />
+          {showUsageTracking && <ClaudeUsageSection />}
+        </>
+      )}
     </div>
   );
 }

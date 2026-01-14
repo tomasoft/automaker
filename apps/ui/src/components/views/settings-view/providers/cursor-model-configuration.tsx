@@ -19,6 +19,7 @@ interface CursorModelConfigurationProps {
   isSaving: boolean;
   onDefaultModelChange: (model: CursorModelId) => void;
   onModelToggle: (model: CursorModelId, enabled: boolean) => void;
+  disabled?: boolean;
 }
 
 export function CursorModelConfiguration({
@@ -27,6 +28,7 @@ export function CursorModelConfiguration({
   isSaving,
   onDefaultModelChange,
   onModelToggle,
+  disabled,
 }: CursorModelConfigurationProps) {
   // All available models from the model map
   const availableModels: CursorModelConfig[] = Object.values(CURSOR_MODEL_MAP);
@@ -37,7 +39,8 @@ export function CursorModelConfiguration({
         'rounded-2xl overflow-hidden',
         'border border-border/50',
         'bg-gradient-to-br from-card/90 via-card/70 to-card/80 backdrop-blur-xl',
-        'shadow-sm shadow-black/5'
+        'shadow-sm shadow-black/5',
+        disabled && 'opacity-50 pointer-events-none'
       )}
     >
       <div className="p-6 border-b border-border/50 bg-gradient-to-r from-transparent via-accent/5 to-transparent">

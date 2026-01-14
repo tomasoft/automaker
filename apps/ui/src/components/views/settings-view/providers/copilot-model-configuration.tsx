@@ -103,12 +103,14 @@ interface CopilotModelConfigurationProps {
   enabledModels: string[];
   onModelToggle: (modelId: string, enabled: boolean) => void;
   isSaving?: boolean;
+  disabled?: boolean;
 }
 
 export function CopilotModelConfiguration({
   enabledModels,
   onModelToggle,
   isSaving = false,
+  disabled,
 }: CopilotModelConfigurationProps) {
   // Group models by provider
   const modelsByProvider = ALL_COPILOT_MODELS.reduce(
@@ -128,6 +130,7 @@ export function CopilotModelConfiguration({
         'rounded-2xl overflow-hidden',
         'border border-border/50',
         'bg-gradient-to-br from-card/90 via-card/70 to-card/80 backdrop-blur-xl',
+        disabled && 'opacity-50 pointer-events-none',
         'shadow-sm shadow-black/5'
       )}
     >

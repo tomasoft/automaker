@@ -14,7 +14,7 @@ export type SettingsViewId =
   | 'audio'
   | 'defaults'
   | 'wiki-sources'
-  | 'repository-impact'
+  | 'branch-analysis'
   | 'skills'
   | 'danger';
 

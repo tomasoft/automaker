@@ -33,7 +33,7 @@ export const NAV_ITEMS: NavigationItem[] = [
   { id: 'model-defaults', label: 'Model Defaults', icon: Workflow },
   { id: 'paths', label: 'Paths', icon: FolderCog },
   { id: 'wiki-sources', label: 'DevOps Resources', icon: BookOpen },
-  { id: 'repository-impact', label: 'Repository Impact', icon: GitBranch },
+  { id: 'branch-analysis', label: 'Branch Analysis', icon: GitBranch },
   { id: 'skills', label: 'Skills', icon: FileCode },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'terminal', label: 'Terminal', icon: SquareTerminal },

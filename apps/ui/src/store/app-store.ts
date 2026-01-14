@@ -502,6 +502,12 @@ export interface AppState {
   phaseModels: PhaseModelConfig;
   favoriteModels: string[];
 
+  // Provider Enabled States (global)
+  isClaudeEnabled: boolean; // Master toggle for Claude provider
+  isCursorEnabled: boolean; // Master toggle for Cursor provider
+  isCopilotEnabled: boolean; // Master toggle for GitHub Copilot provider
+  isLocalLlmEnabled: boolean; // Master toggle for Local LLM provider
+
   // Cursor CLI Settings (global)
   enabledCursorModels: CursorModelId[]; // Which Cursor models are available in feature modal
   cursorDefaultModel: CursorModelId; // Default Cursor model selection
@@ -807,6 +813,12 @@ export interface AppActions {
   setPhaseModels: (models: Partial<PhaseModelConfig>) => Promise<void>;
   resetPhaseModels: () => Promise<void>;
   toggleFavoriteModel: (modelId: string) => void;
+
+  // Provider Enabled State actions
+  setClaudeEnabled: (enabled: boolean) => void;
+  setCursorEnabled: (enabled: boolean) => void;
+  setCopilotEnabled: (enabled: boolean) => void;
+  setLocalLlmEnabled: (enabled: boolean) => void;
 
   // Cursor CLI Settings actions
   setEnabledCursorModels: (models: CursorModelId[]) => void;
@@ -1725,6 +1737,12 @@ export const useAppStore = create<AppState & AppActions>()(
           set({ favoriteModels: [...current, modelId] });
         }
       },
+
+      // Provider Enabled State actions
+      setClaudeEnabled: (enabled) => set({ isClaudeEnabled: enabled }),
+      setCursorEnabled: (enabled) => set({ isCursorEnabled: enabled }),
+      setCopilotEnabled: (enabled) => set({ isCopilotEnabled: enabled }),
+      setLocalLlmEnabled: (enabled) => set({ isLocalLlmEnabled: enabled }),
 
       // Cursor CLI Settings actions
       setEnabledCursorModels: (models) => set({ enabledCursorModels: models }),
@@ -3067,6 +3085,10 @@ export const useAppStore = create<AppState & AppActions>()(
           validationModel: state.validationModel,
           phaseModels: state.phaseModels,
           favoriteModels: state.favoriteModels,
+          isClaudeEnabled: state.isClaudeEnabled,
+          isCursorEnabled: state.isCursorEnabled,
+          isCopilotEnabled: state.isCopilotEnabled,
+          isLocalLlmEnabled: state.isLocalLlmEnabled,
           enabledCursorModels: state.enabledCursorModels,
           cursorDefaultModel: state.cursorDefaultModel,
           enabledCopilotModels: state.enabledCopilotModels,

@@ -9,6 +9,7 @@ interface CliStatusProps {
   authStatus?: ClaudeAuthStatus | null;
   isChecking: boolean;
   onRefresh: () => void;
+  disabled?: boolean;
 }
 
 function getAuthMethodLabel(method: string): string {
@@ -79,7 +80,13 @@ function ClaudeCliStatusSkeleton() {
   );
 }
 
-export function ClaudeCliStatus({ status, authStatus, isChecking, onRefresh }: CliStatusProps) {
+export function ClaudeCliStatus({
+  status,
+  authStatus,
+  isChecking,
+  onRefresh,
+  disabled = false,
+}: CliStatusProps) {
   if (!status) return <ClaudeCliStatusSkeleton />;
 
   return (
@@ -88,7 +95,8 @@ export function ClaudeCliStatus({ status, authStatus, isChecking, onRefresh }: C
         'rounded-2xl overflow-hidden',
         'border border-border/50',
         'bg-gradient-to-br from-card/90 via-card/70 to-card/80 backdrop-blur-xl',
-        'shadow-sm shadow-black/5'
+        'shadow-sm shadow-black/5',
+        disabled && 'opacity-50 pointer-events-none'
       )}
     >
       <div className="p-6 border-b border-border/50 bg-gradient-to-r from-transparent via-accent/5 to-transparent">

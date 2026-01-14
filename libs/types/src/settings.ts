@@ -154,7 +154,7 @@ export type PhaseModelKey = keyof PhaseModelConfig;
  */
 export interface RepositoryConfiguration {
   /** Repository type */
-  type: 'azure-devops' | 'github';
+  type: 'azure-devops' | 'github' | 'local';
   /** Azure DevOps organization or GitHub owner */
   organization: string;
   /** Project name */

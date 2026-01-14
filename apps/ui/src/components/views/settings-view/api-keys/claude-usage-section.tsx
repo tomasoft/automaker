@@ -1,13 +1,18 @@
 import { cn } from '@/lib/utils';
 
-export function ClaudeUsageSection() {
+interface ClaudeUsageSectionProps {
+  disabled?: boolean;
+}
+
+export function ClaudeUsageSection({ disabled = false }: ClaudeUsageSectionProps) {
   return (
     <div
       className={cn(
         'rounded-2xl overflow-hidden',
         'border border-border/50',
         'bg-gradient-to-br from-card/90 via-card/70 to-card/80 backdrop-blur-xl',
-        'shadow-sm shadow-black/5'
+        'shadow-sm shadow-black/5',
+        disabled && 'opacity-50 pointer-events-none'
       )}
     >
       <div className="p-6 border-b border-border/50 bg-gradient-to-r from-transparent via-accent/5 to-transparent">

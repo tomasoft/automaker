@@ -2,10 +2,13 @@
  * Repository Service
  *
  * Handles repository indexing, file tree fetching, and dependency graph analysis
- * for Azure DevOps repositories to enable impact analysis.
+ * for local and remote repositories to enable impact analysis.
  */
 
 import { createLogger } from '@automaker/utils';
+import { secureFs } from '@automaker/platform';
+import { join, relative, sep } from 'node:path';
+import { execSync } from 'node:child_process';
 import type {
   RepositoryConfiguration,
   FileTreeNode,
@@ -418,6 +421,172 @@ export async function analyzeRepository(
     graph,
     services,
     commitSHA,
+    timing,
+  };
+}
+
+/**
+ * Perform deep analysis of local repository
+ *
+ * Analyzes the current branch's local file system
+ */
+export async function analyzeLocalRepository(projectPath: string): Promise<{
+  fileTree: FileTreeNode[];
+  graph: RepositoryGraph;
+  services: ServiceBoundary[];
+  commitSHA: string;
+  currentBranch: string;
+  timing: {
+    fileTree: number;
+    serviceBoundaries: number;
+    componentNodes: number;
+    gitInfo: number;
+    total: number;
+  };
+}> {
+  const overallStart = Date.now();
+  const timing = { fileTree: 0, serviceBoundaries: 0, componentNodes: 0, gitInfo: 0, total: 0 };
+
+  logger.info(`[RepositoryService] Starting local analysis for: ${projectPath}`);
+
+  // Step 1: Get Git information
+  const gitStart = Date.now();
+  let commitSHA = 'unknown';
+  let currentBranch = 'main';
+
+  try {
+    // Get current branch
+    const branchOutput = execSync('git rev-parse --abbrev-ref HEAD', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+    }).trim();
+    currentBranch = branchOutput;
+
+    // Get latest commit SHA
+    const shaOutput = execSync('git rev-parse HEAD', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+    }).trim();
+    commitSHA = shaOutput;
+
+    logger.info(
+      `[RepositoryService] Current branch: ${currentBranch}, commit: ${commitSHA.slice(0, 8)}`
+    );
+  } catch (error) {
+    logger.warn('[RepositoryService] Failed to get Git info (not a Git repo?):', error);
+  }
+
+  timing.gitInfo = Date.now() - gitStart;
+
+  // Step 2: Build file tree from local file system
+  const fileTreeStart = Date.now();
+  const fileTree: FileTreeNode[] = [];
+
+  const ignorePatterns = [
+    'node_modules',
+    '.git',
+    'dist',
+    'build',
+    'out',
+    '.next',
+    'coverage',
+    '.vscode',
+    '.idea',
+    'bin',
+    'obj',
+    'target',
+  ];
+
+  async function scanDirectory(dirPath: string, relativePath: string = '') {
+    try {
+      const entries = await secureFs.readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = join(dirPath, entry.name);
+        const relPath = relativePath ? join(relativePath, entry.name) : entry.name;
+
+        // Skip ignored directories
+        if (entry.isDirectory() && ignorePatterns.includes(entry.name)) {
+          continue;
+        }
+
+        if (entry.isDirectory()) {
+          fileTree.push({
+            path: `/${relPath.replace(/\\/g, '/')}`,
+            isDirectory: true,
+          });
+          await scanDirectory(fullPath, relPath);
+        } else {
+          const stats = await secureFs.stat(fullPath);
+          fileTree.push({
+            path: `/${relPath.replace(/\\/g, '/')}`,
+            size: typeof stats.size === 'bigint' ? Number(stats.size) : stats.size,
+            isDirectory: false,
+          });
+        }
+      }
+    } catch (error) {
+      logger.warn(`[RepositoryService] Failed to scan directory ${dirPath}:`, error);
+    }
+  }
+
+  await scanDirectory(projectPath);
+  timing.fileTree = Date.now() - fileTreeStart;
+
+  logger.info(`[RepositoryService] Scanned ${fileTree.length} files/directories`);
+
+  // Step 3: Create a local indexer to reuse existing analysis logic
+  class LocalIndexer extends RepositoryIndexer {
+    constructor() {
+      // Pass dummy values since we're not using Azure DevOps
+      super('', '', '', '');
+    }
+
+    // Override methods that use Azure APIs - these will use the local fileTree
+  }
+
+  const indexer = new LocalIndexer();
+
+  // Step 4: Detect service boundaries
+  const servicesStart = Date.now();
+  const services = await indexer.detectServiceBoundaries(fileTree);
+  timing.serviceBoundaries = Date.now() - servicesStart;
+
+  // Step 5: Build component nodes
+  const nodesStart = Date.now();
+  const nodes = indexer.buildComponentNodes(fileTree, services);
+  timing.componentNodes = Date.now() - nodesStart;
+
+  // Step 6: Calculate metrics for each service
+  for (const service of services) {
+    indexer.calculateServiceMetrics(service, fileTree, nodes);
+  }
+
+  // Build repository graph
+  const graph: RepositoryGraph = {
+    nodes,
+    edges: [],
+    documentationLinks: [],
+    stats: {
+      totalNodes: nodes.length,
+      totalEdges: 0,
+      crossBoundaryEdges: 0,
+      servicesCount: services.length,
+    },
+  };
+
+  timing.total = Date.now() - overallStart;
+
+  logger.info(
+    `[RepositoryService] Local analysis complete: ${fileTree.length} files, ${services.length} services, ${nodes.length} components in ${timing.total}ms`
+  );
+
+  return {
+    fileTree,
+    graph,
+    services,
+    commitSHA,
+    currentBranch,
     timing,
   };
 }
