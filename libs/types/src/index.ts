@@ -96,6 +96,7 @@ export type {
   TrashedProjectRef,
   ChatSessionRef,
   GlobalSettings,
+  ThemeMode,
   Credentials,
   BoardBackgroundSettings,
   WorktreeInfo,

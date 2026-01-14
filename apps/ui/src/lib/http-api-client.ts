@@ -38,7 +38,7 @@ import type {
 import type { Message, SessionListItem } from '@/types/electron';
 import type { Feature, ClaudeUsageResponse } from '@/store/app-store';
 import type { WorktreeAPI, GitAPI, ModelDefinition, ProviderStatus } from '@/types/electron';
-import type { ProjectSettings } from '@automaker/types';
+import type { ProjectSettings, GlobalSettings } from '@automaker/types';
 import { getGlobalFileBrowser } from '@/contexts/file-browser-context';
 
 const logger = createLogger('HttpClient');
@@ -1692,45 +1692,7 @@ export class HttpApiClient implements ElectronAPI {
     // Global settings
     getGlobal: (): Promise<{
       success: boolean;
-      settings?: {
-        version: number;
-        theme: string;
-        sidebarOpen: boolean;
-        chatHistoryOpen: boolean;
-        kanbanCardDetailLevel: string;
-        maxConcurrency: number;
-        defaultSkipTests: boolean;
-        enableDependencyBlocking: boolean;
-        useWorktrees: boolean;
-        showProfilesOnly: boolean;
-        defaultPlanningMode: string;
-        defaultRequirePlanApproval: boolean;
-        defaultAIProfileId: string | null;
-        muteDoneSound: boolean;
-        enhancementModel: string;
-        keyboardShortcuts: Record<string, string>;
-        aiProfiles: unknown[];
-        projects: unknown[];
-        trashedProjects: unknown[];
-        projectHistory: string[];
-        projectHistoryIndex: number;
-        lastProjectDir?: string;
-        recentFolders: string[];
-        worktreePanelCollapsed: boolean;
-        lastSelectedSessionByProject: Record<string, string>;
-        mcpServers?: Array<{
-          id: string;
-          name: string;
-          description?: string;
-          type?: 'stdio' | 'sse' | 'http';
-          command?: string;
-          args?: string[];
-          env?: Record<string, string>;
-          url?: string;
-          headers?: Record<string, string>;
-          enabled?: boolean;
-        }>;
-      };
+      settings?: GlobalSettings;
       error?: string;
     }> => this.get('/api/settings/global'),
 

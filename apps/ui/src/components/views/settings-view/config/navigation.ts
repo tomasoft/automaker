@@ -13,7 +13,6 @@ import {
   MessageSquareText,
   BookOpen,
   FileCode,
-  FolderCog,
   GitBranch,
 } from 'lucide-react';
 import type { SettingsViewId } from '../hooks/use-settings-view';

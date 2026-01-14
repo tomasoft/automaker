@@ -4,6 +4,7 @@ import type { Project, TrashedProject } from '@/lib/electron';
 import type {
   Feature as BaseFeature,
   FeatureImagePath,
+  FeatureTextFilePath,
   ModelAlias,
   PlanningMode,
   AIProfile,
@@ -16,11 +17,12 @@ import type {
   PipelineConfig,
   PipelineStep,
   PromptCustomization,
+  ThemeMode,
 } from '@automaker/types';
 import { getAllCursorModelIds, DEFAULT_PHASE_MODELS } from '@automaker/types';
 
 // Re-export types for convenience
-export type { ThemeMode, ModelAlias };
+export type { ModelAlias };
 
 export type ViewMode =
   | 'welcome'
@@ -36,25 +38,6 @@ export type ViewMode =
   | 'terminal'
   | 'wiki'
   | 'ideation';
-
-export type ThemeMode =
-  | 'light'
-  | 'dark'
-  | 'system'
-  | 'retro'
-  | 'dracula'
-  | 'nord'
-  | 'monokai'
-  | 'tokyonight'
-  | 'solarized'
-  | 'gruvbox'
-  | 'catppuccin'
-  | 'onedark'
-  | 'synthwave'
-  | 'red'
-  | 'cream'
-  | 'sunset'
-  | 'gray';
 
 export type KanbanCardDetailLevel = 'minimal' | 'standard' | 'detailed';
 
@@ -419,7 +402,6 @@ export interface AppState {
   currentView: ViewMode;
   sidebarOpen: boolean;
   targetSettingsTab?: string; // Target tab when navigating to settings
-  targetSettingsTab?: string; // Target tab when navigating to settings
 
   // Agent Session state (per-project, keyed by project path)
   lastSelectedSessionByProject: Record<string, string>; // projectPath -> sessionId
@@ -454,6 +436,11 @@ export interface AppState {
   >;
   autoModeActivityLog: AutoModeActivity[];
   maxConcurrency: number; // Maximum number of concurrent agent tasks
+
+  // Skill Settings
+  skillsAutoLoad: boolean; // Enable automatic skill loading based on task relevance
+  maxAutoSelectedSkills: number; // Maximum number of skills that can be automatically selected for a feature
+  skillSimilarityThreshold: number; // Minimum similarity score (0.0 to 1.0) for a skill to be auto-selected
 
   // Kanban Card Display Settings
   kanbanCardDetailLevel: KanbanCardDetailLevel; // Level of detail shown on kanban cards
@@ -848,6 +835,7 @@ export interface AppActions {
   setAutoLoadClaudeMd: (enabled: boolean) => Promise<void>;
   setEnableSandboxMode: (enabled: boolean) => Promise<void>;
   setSkipSandboxWarning: (skip: boolean) => Promise<void>;
+  setAutoAnalyzeImpact: (enabled: boolean) => Promise<void>;
 
   // Prompt Customization actions
   setPromptCustomization: (customization: PromptCustomization) => Promise<void>;
@@ -864,6 +852,11 @@ export interface AppActions {
   updateMCPServer: (id: string, updates: Partial<MCPServerConfig>) => void;
   removeMCPServer: (id: string) => void;
   reorderMCPServers: (oldIndex: number, newIndex: number) => void;
+
+  // Skills Settings actions
+  setSkillsAutoLoad: (enabled: boolean) => void;
+  setMaxAutoSelectedSkills: (count: number) => void;
+  setSkillSimilarityThreshold: (threshold: number) => void;
 
   // Wiki Sources actions
   setDefaultWikiPages: (
@@ -1050,6 +1043,12 @@ const initialState: AppState = {
   autoModeByProject: {},
   autoModeActivityLog: [],
   maxConcurrency: 3, // Default to 3 concurrent agents
+
+  // Skill Settings
+  skillsAutoLoad: true,
+  maxAutoSelectedSkills: 3,
+  skillSimilarityThreshold: 0.3,
+
   kanbanCardDetailLevel: 'standard', // Default to standard detail level
   boardViewMode: 'kanban', // Default to kanban view
   defaultSkipTests: true, // Default to manual verification (tests disabled)
@@ -1064,6 +1063,13 @@ const initialState: AppState = {
   validationModel: 'opus', // Default to opus for GitHub issue validation
   phaseModels: DEFAULT_PHASE_MODELS, // Phase-specific model configuration
   favoriteModels: [],
+
+  // Provider Enabled States (global)
+  isClaudeEnabled: true,
+  isCursorEnabled: true,
+  isCopilotEnabled: true,
+  isLocalLlmEnabled: true,
+
   enabledCursorModels: getAllCursorModelIds(), // All Cursor models enabled by default
   cursorDefaultModel: 'auto', // Default to auto selection
   enabledCopilotModels: [
@@ -1809,7 +1815,7 @@ export const useAppStore = create<AppState & AppActions>()(
         const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
         await syncSettingsToServer();
       },
-      setAutoAnalyzeImpact: async (enabled) => {
+      setAutoAnalyzeImpact: async (enabled: boolean) => {
         set({ autoAnalyzeImpact: enabled });
         // Sync to server settings file
         const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
@@ -1819,6 +1825,25 @@ export const useAppStore = create<AppState & AppActions>()(
       setPromptCustomization: async (customization) => {
         set({ promptCustomization: customization });
         // Sync to server settings file
+        const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
+        await syncSettingsToServer();
+      },
+
+      // Skills Settings actions
+      setSkillsAutoLoad: async (enabled) => {
+        set({ skillsAutoLoad: enabled });
+        const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
+        await syncSettingsToServer();
+      },
+
+      setMaxAutoSelectedSkills: async (count) => {
+        set({ maxAutoSelectedSkills: count });
+        const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
+        await syncSettingsToServer();
+      },
+
+      setSkillSimilarityThreshold: async (threshold) => {
+        set({ skillSimilarityThreshold: threshold });
         const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
         await syncSettingsToServer();
       },
@@ -1888,7 +1913,12 @@ export const useAppStore = create<AppState & AppActions>()(
 
       // Wiki Sources actions
       setDefaultWikiPages: async (pages) => {
-        set({ defaultWikiPages: pages });
+        set({
+          defaultWikiPages: pages.map((p) => ({
+            ...p,
+            content: p.content || '',
+          })),
+        });
         // Sync to server settings file
         const { syncSettingsToServer } = await import('@/hooks/use-settings-migration');
         await syncSettingsToServer();
@@ -3094,6 +3124,9 @@ export const useAppStore = create<AppState & AppActions>()(
           // Settings
           apiKeys: state.apiKeys,
           maxConcurrency: state.maxConcurrency,
+          skillsAutoLoad: state.skillsAutoLoad,
+          maxAutoSelectedSkills: state.maxAutoSelectedSkills,
+          skillSimilarityThreshold: state.skillSimilarityThreshold,
           // Note: autoModeByProject is intentionally NOT persisted
           // Auto-mode should always default to OFF on app refresh
           defaultSkipTests: state.defaultSkipTests,

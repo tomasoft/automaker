@@ -9,7 +9,6 @@ import { SettingsHeader } from './settings-view/components/settings-header';
 import { KeyboardMapDialog } from './settings-view/components/keyboard-map-dialog';
 import { DeleteProjectDialog } from './settings-view/components/delete-project-dialog';
 import { SettingsNavigation } from './settings-view/components/settings-navigation';
-import { ApiKeysSection } from './settings-view/api-keys/api-keys-section';
 import { ModelDefaultsSection } from './settings-view/model-defaults';
 import { AppearanceSection } from './settings-view/appearance/appearance-section';
 import { TerminalSection } from './settings-view/terminal/terminal-section';
@@ -23,7 +22,6 @@ import { PromptCustomizationSection } from './settings-view/prompts';
 import { WikiSourcesSection } from './settings-view/wiki-sources/wiki-sources-section';
 import { BranchAnalysisSection } from './settings-view/branch-analysis/branch-analysis-section';
 import { SkillsSection } from './settings-view/skills/skills-section';
-import { PathsSection } from './settings-view/paths/paths-section';
 import type { Project as SettingsProject, Theme } from './settings-view/shared/types';
 import type { Project as ElectronProject } from '@/lib/electron';
 
@@ -125,8 +123,6 @@ export function SettingsView() {
         );
       case 'model-defaults':
         return <ModelDefaultsSection />;
-      case 'paths':
-        return <PathsSection />;
       case 'wiki-sources':
         return <WikiSourcesSection />;
       case 'branch-analysis':
@@ -138,7 +134,7 @@ export function SettingsView() {
           <AppearanceSection
             effectiveTheme={effectiveTheme}
             currentProject={settingsProject}
-            onThemeChange={handleSetTheme}
+            onThemeChange={handleSetTheme as any}
           />
         );
       case 'terminal':
@@ -183,7 +179,7 @@ export function SettingsView() {
           />
         );
       default:
-        return <ApiKeysSection />;
+        return <ProviderTabs />;
     }
   };
 

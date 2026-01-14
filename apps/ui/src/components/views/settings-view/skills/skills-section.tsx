@@ -20,7 +20,13 @@ import { getElectronAPI } from '@/lib/electron';
 import { getHttpApiClient } from '@/lib/http-api-client';
 
 export function SkillsSection() {
-  const { currentProject } = useAppStore();
+  const {
+    currentProject,
+    maxAutoSelectedSkills,
+    skillSimilarityThreshold,
+    setMaxAutoSelectedSkills,
+    setSkillSimilarityThreshold,
+  } = useAppStore();
   const api = getElectronAPI();
   const httpApi = getHttpApiClient();
   const [globalSkillsPath, setGlobalSkillsPath] = useState<string | null>(null);
@@ -28,8 +34,6 @@ export function SkillsSection() {
 
   const [globalSkillsCount, setGlobalSkillsCount] = useState(0);
   const [projectSkillsCount, setProjectSkillsCount] = useState(0);
-  const [maxAutoSelected, setMaxAutoSelected] = useState(3);
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.3);
 
   useEffect(() => {
     // Load global skills path - use userData directory (app data), not workspace directory
@@ -57,18 +61,22 @@ export function SkillsSection() {
           setProjectSkillsCount(result.project?.length || 0);
         }
 
-        // Fetch global settings
-        const settings = await httpApi.settings.getGlobal();
-        if (settings.success && settings.settings) {
-          setMaxAutoSelected(settings.settings.maxAutoSelectedSkills ?? 3);
-          setSimilarityThreshold(settings.settings.skillSimilarityThreshold ?? 0.3);
+        // Fetch global settings and sync with store
+        const settingsResult = await httpApi.settings.getGlobal();
+        if (settingsResult.success && settingsResult.settings) {
+          if (settingsResult.settings.maxAutoSelectedSkills !== undefined) {
+            setMaxAutoSelectedSkills(settingsResult.settings.maxAutoSelectedSkills);
+          }
+          if (settingsResult.settings.skillSimilarityThreshold !== undefined) {
+            setSkillSimilarityThreshold(settingsResult.settings.skillSimilarityThreshold);
+          }
         }
       } catch (error) {
         console.error('Failed to fetch skills:', error);
       }
     };
     fetchSkills();
-  }, [currentProject]);
+  }, [currentProject, setMaxAutoSelectedSkills, setSkillSimilarityThreshold]);
 
   const handleOpenGlobalSkillsFolder = async () => {
     if (!globalSkillsPath) return;
@@ -180,27 +188,20 @@ export function SkillsSection() {
           <div className="space-y-3">
             <Label htmlFor="max-skills" className="flex items-center justify-between">
               <span>Maximum Auto-Selected Skills</span>
-              <span className="text-sm font-normal text-muted-foreground">{maxAutoSelected}</span>
+              <span className="text-sm font-normal text-muted-foreground">
+                {maxAutoSelectedSkills}
+              </span>
             </Label>
             <Input
               id="max-skills"
               type="number"
               min={1}
               max={10}
-              value={maxAutoSelected}
-              onChange={async (e) => {
+              value={maxAutoSelectedSkills}
+              onChange={(e) => {
                 const newValue = parseInt(e.target.value, 10);
                 if (isNaN(newValue) || newValue < 1 || newValue > 10) return;
-
-                setMaxAutoSelected(newValue);
-                try {
-                  await httpApi.settings.updateGlobal({
-                    maxAutoSelectedSkills: newValue,
-                  });
-                } catch (error) {
-                  console.error('Failed to update max skills:', error);
-                  toast.error('Failed to save setting');
-                }
+                setMaxAutoSelectedSkills(newValue);
               }}
               className="w-32"
             />
@@ -214,7 +215,7 @@ export function SkillsSection() {
             <Label htmlFor="similarity-threshold" className="flex items-center justify-between">
               <span>Similarity Threshold</span>
               <span className="text-sm font-normal text-muted-foreground">
-                {similarityThreshold.toFixed(2)}
+                {skillSimilarityThreshold.toFixed(2)}
               </span>
             </Label>
             <Slider
@@ -222,18 +223,10 @@ export function SkillsSection() {
               min={0}
               max={1}
               step={0.05}
-              value={[similarityThreshold]}
-              onValueChange={async (value) => {
+              value={[skillSimilarityThreshold]}
+              onValueChange={(value) => {
                 const newValue = value[0];
-                setSimilarityThreshold(newValue);
-                try {
-                  await httpApi.settings.updateGlobal({
-                    skillSimilarityThreshold: newValue,
-                  });
-                } catch (error) {
-                  console.error('Failed to update similarity threshold:', error);
-                  toast.error('Failed to save setting');
-                }
+                setSkillSimilarityThreshold(newValue);
               }}
               className="w-full"
             />

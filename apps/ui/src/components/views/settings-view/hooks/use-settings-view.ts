@@ -1,13 +1,10 @@
 import { useState, useCallback } from 'react';
 
 export type SettingsViewId =
-  | 'api-keys'
-  | 'claude'
   | 'providers'
   | 'mcp-servers'
   | 'prompts'
   | 'model-defaults'
-  | 'paths'
   | 'appearance'
   | 'terminal'
   | 'keyboard'
@@ -16,13 +13,14 @@ export type SettingsViewId =
   | 'wiki-sources'
   | 'branch-analysis'
   | 'skills'
-  | 'danger';
+  | 'danger'
+  | 'claude'; // Keep for backwards compatibility
 
 interface UseSettingsViewOptions {
   initialView?: SettingsViewId;
 }
 
-export function useSettingsView({ initialView = 'api-keys' }: UseSettingsViewOptions = {}) {
+export function useSettingsView({ initialView = 'providers' }: UseSettingsViewOptions = {}) {
   const [activeView, setActiveView] = useState<SettingsViewId>(initialView);
 
   const navigateTo = useCallback((viewId: SettingsViewId) => {
