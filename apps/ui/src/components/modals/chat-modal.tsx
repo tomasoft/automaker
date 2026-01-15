@@ -16,6 +16,13 @@ interface Position {
   y: number;
 }
 
+interface Size {
+  width: number;
+  height: number;
+}
+
+type ResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw' | null;
+
 interface ChatModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -74,9 +81,27 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
     };
   };
 
+  const getInitialSize = (): Size => {
+    try {
+      const stored = localStorage.getItem('chatModalSize');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (error) {
+      console.error('Failed to load chat size:', error);
+    }
+
+    // Default size
+    return { width: 420, height: 580 };
+  };
+
   const [position, setPosition] = useState<Position>(getInitialPosition);
+  const [size, setSize] = useState<Size>(getInitialSize);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 });
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeDirection, setResizeDirection] = useState<ResizeDirection>(null);
+  const [resizeStart, setResizeStart] = useState<{ pos: Position; size: Size } | null>(null);
   const [showSettings, setShowSettings] = useState(true);
   const [showSessions, setShowSessions] = useState(true);
 
@@ -836,6 +861,86 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
     };
   }, [isDragging, dragOffset]);
 
+  // Resizing functionality
+  const handleResizeStart = (direction: ResizeDirection) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    setResizeDirection(direction);
+    setResizeStart({
+      pos: { x: e.clientX, y: e.clientY },
+      size: { ...size },
+    });
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing || !resizeStart || !resizeDirection) return;
+
+      const deltaX = e.clientX - resizeStart.pos.x;
+      const deltaY = e.clientY - resizeStart.pos.y;
+      const minWidth = 320;
+      const minHeight = 400;
+
+      let newWidth = resizeStart.size.width;
+      let newHeight = resizeStart.size.height;
+      let newX = position.x;
+      let newY = position.y;
+
+      // Handle horizontal resizing
+      if (resizeDirection.includes('e')) {
+        newWidth = Math.max(minWidth, resizeStart.size.width + deltaX);
+      } else if (resizeDirection.includes('w')) {
+        const potentialWidth = resizeStart.size.width - deltaX;
+        if (potentialWidth >= minWidth) {
+          newWidth = potentialWidth;
+          newX = resizeStart.pos.x + deltaX - (resizeStart.pos.x - position.x);
+        }
+      }
+
+      // Handle vertical resizing
+      if (resizeDirection.includes('s')) {
+        newHeight = Math.max(minHeight, resizeStart.size.height + deltaY);
+      } else if (resizeDirection.includes('n')) {
+        const potentialHeight = resizeStart.size.height - deltaY;
+        if (potentialHeight >= minHeight) {
+          newHeight = potentialHeight;
+          newY = resizeStart.pos.y + deltaY - (resizeStart.pos.y - position.y);
+        }
+      }
+
+      setSize({ width: newWidth, height: newHeight });
+      if (newX !== position.x || newY !== position.y) {
+        setPosition({ x: newX, y: newY });
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (isResizing) {
+        // Save size and position to localStorage
+        try {
+          localStorage.setItem('chatModalSize', JSON.stringify(size));
+          localStorage.setItem('chatModalPosition', JSON.stringify(position));
+        } catch (error) {
+          console.error('Failed to save chat size:', error);
+        }
+      }
+      setIsResizing(false);
+      setResizeDirection(null);
+      setResizeStart(null);
+    };
+
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, resizeStart, resizeDirection, position, size]);
+
   if (!isOpen) return null;
 
   return (
@@ -845,11 +950,53 @@ export function ChatModal({ isOpen, onClose }: ChatModalProps) {
         style={{
           left: `${position.x}px`,
           top: `${position.y}px`,
-          width: '420px',
-          height: '580px',
-          cursor: isDragging ? 'grabbing' : 'default',
+          width: `${size.width}px`,
+          height: `${size.height}px`,
+          cursor: isDragging ? 'grabbing' : isResizing ? 'default' : 'default',
         }}
       >
+        {/* Resize Handles */}
+        <div
+          className="absolute top-0 left-0 w-full h-1 cursor-n-resize hover:bg-primary/20"
+          onMouseDown={handleResizeStart('n')}
+          style={{ pointerEvents: 'auto' }}
+        />
+        <div
+          className="absolute bottom-0 left-0 w-full h-1 cursor-s-resize hover:bg-primary/20"
+          onMouseDown={handleResizeStart('s')}
+          style={{ pointerEvents: 'auto' }}
+        />
+        <div
+          className="absolute top-0 left-0 w-1 h-full cursor-w-resize hover:bg-primary/20"
+          onMouseDown={handleResizeStart('w')}
+          style={{ pointerEvents: 'auto' }}
+        />
+        <div
+          className="absolute top-0 right-0 w-1 h-full cursor-e-resize hover:bg-primary/20"
+          onMouseDown={handleResizeStart('e')}
+          style={{ pointerEvents: 'auto' }}
+        />
+        {/* Corner Handles */}
+        <div
+          className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize hover:bg-primary/30"
+          onMouseDown={handleResizeStart('nw')}
+          style={{ pointerEvents: 'auto' }}
+        />
+        <div
+          className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize hover:bg-primary/30"
+          onMouseDown={handleResizeStart('ne')}
+          style={{ pointerEvents: 'auto' }}
+        />
+        <div
+          className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize hover:bg-primary/30"
+          onMouseDown={handleResizeStart('sw')}
+          style={{ pointerEvents: 'auto' }}
+        />
+        <div
+          className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize hover:bg-primary/30"
+          onMouseDown={handleResizeStart('se')}
+          style={{ pointerEvents: 'auto' }}
+        />
         {/* Header */}
         <div
           className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/50 rounded-t-lg cursor-grab active:cursor-grabbing"
