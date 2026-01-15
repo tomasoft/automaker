@@ -1442,6 +1442,8 @@ export class HttpApiClient implements ElectronAPI {
       }),
     commit: (worktreePath: string, message: string) =>
       this.post('/api/worktree/commit', { worktreePath, message }),
+    discardChanges: (worktreePath: string) =>
+      this.post('/api/worktree/discard-changes', { worktreePath }),
     push: (worktreePath: string, force?: boolean) =>
       this.post('/api/worktree/push', { worktreePath, force }),
     createPR: (worktreePath: string, options?: any) =>

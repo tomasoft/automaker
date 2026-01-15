@@ -22,6 +22,7 @@ import {
   GitMerge,
   AlertCircle,
   FolderOpen,
+  Undo2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { WorktreeInfo, DevServerInfo, PRInfo, GitRepoStatus } from '../types';
@@ -45,6 +46,7 @@ interface WorktreeActionsDropdownProps {
   onOpenInEditor: (worktree: WorktreeInfo) => void;
   onOpenInExplorer: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
+  onDiscardChanges: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
   onAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;
   onResolveConflicts: (worktree: WorktreeInfo) => void;
@@ -72,6 +74,7 @@ export function WorktreeActionsDropdown({
   onOpenInEditor,
   onOpenInExplorer,
   onCommit,
+  onDiscardChanges,
   onCreatePR,
   onAddressPRComments,
   onResolveConflicts,
@@ -224,6 +227,27 @@ export function WorktreeActionsDropdown({
             >
               <GitCommit className="w-3.5 h-3.5 mr-2" />
               Commit Changes
+              {!gitRepoStatus.isGitRepo && (
+                <AlertCircle className="w-3 h-3 ml-auto text-muted-foreground" />
+              )}
+            </DropdownMenuItem>
+          </TooltipWrapper>
+        )}
+        {worktree.hasChanges && (
+          <TooltipWrapper
+            showTooltip={!gitRepoStatus.isGitRepo}
+            tooltipContent="Not a git repository"
+          >
+            <DropdownMenuItem
+              onClick={() => gitRepoStatus.isGitRepo && onDiscardChanges(worktree)}
+              disabled={!gitRepoStatus.isGitRepo}
+              className={cn(
+                'text-xs text-destructive focus:text-destructive',
+                !gitRepoStatus.isGitRepo && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              <Undo2 className="w-3.5 h-3.5 mr-2" />
+              Discard Changes
               {!gitRepoStatus.isGitRepo && (
                 <AlertCircle className="w-3 h-3 ml-auto text-muted-foreground" />
               )}

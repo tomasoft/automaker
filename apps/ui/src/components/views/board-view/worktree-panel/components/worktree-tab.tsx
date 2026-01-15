@@ -39,6 +39,7 @@ interface WorktreeTabProps {
   onOpenInEditor: (worktree: WorktreeInfo) => void;
   onOpenInExplorer: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
+  onDiscardChanges: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
   onAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;
   onResolveConflicts: (worktree: WorktreeInfo) => void;
@@ -81,6 +82,7 @@ export function WorktreeTab({
   onOpenInEditor,
   onOpenInExplorer,
   onCommit,
+  onDiscardChanges,
   onCreatePR,
   onAddressPRComments,
   onResolveConflicts,
@@ -186,9 +188,12 @@ export function WorktreeTab({
               isSelected && 'bg-primary text-primary-foreground',
               !isSelected && 'bg-secondary/50 hover:bg-secondary'
             )}
-            onClick={() => onSelectWorktree(worktree)}
+            onClick={() => {
+              onSelectWorktree(worktree);
+              onOpenInEditor(worktree);
+            }}
             disabled={isActivating}
-            title={`Click to preview ${worktree.branch}`}
+            title={`Click to preview ${worktree.branch} in editor`}
             aria-label={worktree.branch}
             data-testid={`worktree-branch-${worktree.branch}`}
           >
@@ -251,12 +256,15 @@ export function WorktreeTab({
             !isSelected && 'bg-secondary/50 hover:bg-secondary',
             !worktree.hasWorktree && !isSelected && 'opacity-70'
           )}
-          onClick={() => onSelectWorktree(worktree)}
+          onClick={() => {
+            onSelectWorktree(worktree);
+            onOpenInEditor(worktree);
+          }}
           disabled={isActivating}
           title={
             worktree.hasWorktree
-              ? "Click to switch to this worktree's branch"
-              : 'Click to switch to this branch'
+              ? "Click to open this worktree's branch in editor"
+              : 'Click to open this branch in editor'
           }
         >
           {isRunning && <Loader2 className="w-3 h-3 animate-spin" />}
@@ -331,6 +339,7 @@ export function WorktreeTab({
         onOpenInEditor={onOpenInEditor}
         onOpenInExplorer={onOpenInExplorer}
         onCommit={onCommit}
+        onDiscardChanges={onDiscardChanges}
         onCreatePR={onCreatePR}
         onAddressPRComments={onAddressPRComments}
         onResolveConflicts={onResolveConflicts}

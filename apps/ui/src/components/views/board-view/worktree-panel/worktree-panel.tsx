@@ -21,6 +21,7 @@ export function WorktreePanel({
   onCreateWorktree,
   onDeleteWorktree,
   onCommit,
+  onDiscardChanges,
   onCreatePR,
   onCreateBranch,
   onAddressPRComments,
@@ -224,6 +225,7 @@ export function WorktreePanel({
             onOpenInEditor={handleOpenInEditor}
             onOpenInExplorer={handleOpenInExplorer}
             onCommit={onCommit}
+            onDiscardChanges={onDiscardChanges}
             onCreatePR={onCreatePR}
             onAddressPRComments={onAddressPRComments}
             onResolveConflicts={onResolveConflicts}
@@ -280,6 +282,7 @@ export function WorktreePanel({
                   onOpenInEditor={handleOpenInEditor}
                   onOpenInExplorer={handleOpenInExplorer}
                   onCommit={onCommit}
+                  onDiscardChanges={onDiscardChanges}
                   onCreatePR={onCreatePR}
                   onAddressPRComments={onAddressPRComments}
                   onResolveConflicts={onResolveConflicts}

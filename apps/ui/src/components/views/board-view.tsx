@@ -355,6 +355,49 @@ export function BoardView() {
     [hookFeatures, updateFeature, persistFeatureUpdate]
   );
 
+  // Handler for discarding uncommitted changes
+  const handleDiscardChanges = useCallback(
+    async (worktree: { path: string; branch: string; changedFilesCount?: number }) => {
+      const fileCountText = worktree.changedFilesCount
+        ? ` (${worktree.changedFilesCount} file${worktree.changedFilesCount !== 1 ? 's' : ''})`
+        : '';
+
+      const confirmed = window.confirm(
+        `⚠️ Discard all uncommitted changes?\n\n` +
+          `Branch: ${worktree.branch}${fileCountText}\n\n` +
+          `This will permanently delete all uncommitted changes and untracked files.\n` +
+          `This action cannot be undone.\n\n` +
+          `Are you sure you want to continue?`
+      );
+
+      if (!confirmed) return;
+
+      try {
+        const api = getElectronAPI();
+        const result = await api.worktree?.discardChanges(worktree.path);
+
+        if (result?.success) {
+          toast.success('Changes discarded successfully', {
+            description:
+              result.result?.message || `All changes in ${worktree.branch} have been discarded`,
+          });
+          // Refresh worktrees to update the UI
+          setWorktreeRefreshKey((k) => k + 1);
+        } else {
+          toast.error('Failed to discard changes', {
+            description: result?.error || 'Unknown error occurred',
+          });
+        }
+      } catch (error) {
+        logger.error('Error discarding changes:', error);
+        toast.error('Failed to discard changes', {
+          description: error instanceof Error ? error.message : 'Unknown error occurred',
+        });
+      }
+    },
+    []
+  );
+
   // Get in-progress features for keyboard shortcuts (needed before actions hook)
   const inProgressFeaturesForShortcuts = useMemo(() => {
     return hookFeatures.filter((f) => {
@@ -1128,6 +1171,7 @@ export function BoardView() {
           setSelectedWorktreeForAction(worktree);
           setShowCommitWorktreeDialog(true);
         }}
+        onDiscardChanges={handleDiscardChanges}
         onCreatePR={(worktree) => {
           setSelectedWorktreeForAction(worktree);
           setShowCreatePRDialog(true);

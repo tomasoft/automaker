@@ -69,6 +69,7 @@ export interface WorktreePanelProps {
   onCreateWorktree: () => void;
   onDeleteWorktree: (worktree: WorktreeInfo) => void;
   onCommit: (worktree: WorktreeInfo) => void;
+  onDiscardChanges: (worktree: WorktreeInfo) => void;
   onCreatePR: (worktree: WorktreeInfo) => void;
   onCreateBranch: (worktree: WorktreeInfo) => void;
   onAddressPRComments: (worktree: WorktreeInfo, prInfo: PRInfo) => void;

@@ -768,6 +768,16 @@ export interface WorktreeAPI {
     error?: string;
   }>;
 
+  // Discard all uncommitted changes in a worktree
+  discardChanges: (worktreePath: string) => Promise<{
+    success: boolean;
+    result?: {
+      discarded: boolean;
+      message: string;
+    };
+    error?: string;
+  }>;
+
   // Push a worktree branch to remote
   push: (
     worktreePath: string,
