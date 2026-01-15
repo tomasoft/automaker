@@ -157,6 +157,7 @@ export interface KeyboardShortcuts {
   addFeature: string;
   addContextFile: string;
   startNext: string;
+  planBacklog: string;
   newSession: string;
   openProject: string;
   projectPicker: string;
@@ -196,6 +197,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
   addFeature: 'N', // Only active in board view
   addContextFile: 'N', // Only active in context view
   startNext: 'G', // Only active in board view
+  planBacklog: 'B', // Only active in board view
   newSession: 'N', // Only active in agent view
   openProject: 'O', // Global shortcut
   projectPicker: 'P', // Global shortcut

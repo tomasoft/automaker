@@ -18,6 +18,8 @@ import type {
   FeaturesAPI,
   SuggestionsAPI,
   SpecRegenerationAPI,
+  BacklogPlanAPI,
+  BacklogPlanEvent,
   AutoModeEvent,
   SuggestionsEvent,
   SpecRegenerationEvent,
@@ -38,7 +40,13 @@ import type {
 import type { Message, SessionListItem } from '@/types/electron';
 import type { Feature, ClaudeUsageResponse } from '@/store/app-store';
 import type { WorktreeAPI, GitAPI, ModelDefinition, ProviderStatus } from '@/types/electron';
-import type { ProjectSettings, GlobalSettings, ChatSessionListItem } from '@automaker/types';
+import type {
+  ProjectSettings,
+  GlobalSettings,
+  ChatSessionListItem,
+  BacklogPlanResult,
+  BacklogChange,
+} from '@automaker/types';
 import { getGlobalFileBrowser } from '@/contexts/file-browser-context';
 
 const logger = createLogger('HttpClient');
@@ -1858,7 +1866,7 @@ export class HttpApiClient implements ElectronAPI {
   };
 
   // Backlog Plan API
-  backlogPlan = {
+  backlogPlan: BacklogPlanAPI = {
     generate: (
       projectPath: string,
       prompt: string,
@@ -1874,24 +1882,11 @@ export class HttpApiClient implements ElectronAPI {
 
     apply: (
       projectPath: string,
-      plan: {
-        changes: Array<{
-          type: 'add' | 'update' | 'delete';
-          featureId?: string;
-          feature?: Record<string, unknown>;
-          reason: string;
-        }>;
-        summary: string;
-        dependencyUpdates: Array<{
-          featureId: string;
-          removedDependencies: string[];
-          addedDependencies: string[];
-        }>;
-      }
-    ): Promise<{ success: boolean; appliedChanges?: string[]; error?: string }> =>
+      plan: BacklogPlanResult
+    ): Promise<{ success: boolean; appliedChanges?: BacklogChange[]; error?: string }> =>
       this.post('/api/backlog-plan/apply', { projectPath, plan }),
 
-    onEvent: (callback: (data: unknown) => void): (() => void) => {
+    onEvent: (callback: (event: BacklogPlanEvent) => void): (() => void) => {
       return this.subscribeToEvent('backlog-plan:event', callback as EventCallback);
     },
   };

@@ -11,6 +11,7 @@ interface UseBoardKeyboardShortcutsProps {
   runningAutoTasks: string[];
   onAddFeature: () => void;
   onStartNextFeatures: () => void;
+  onPlanBacklog: () => void;
   onViewOutput: (feature: Feature) => void;
 }
 
@@ -19,6 +20,7 @@ export function useBoardKeyboardShortcuts({
   runningAutoTasks,
   onAddFeature,
   onStartNextFeatures,
+  onPlanBacklog,
   onViewOutput,
 }: UseBoardKeyboardShortcutsProps) {
   const shortcuts = useKeyboardShortcutsConfig();
@@ -52,6 +54,11 @@ export function useBoardKeyboardShortcuts({
         action: () => startNextFeaturesRef.current(),
         description: 'Start next features from backlog',
       },
+      {
+        key: shortcuts.planBacklog,
+        action: onPlanBacklog,
+        description: 'Backlog planning',
+      },
     ];
 
     // Add shortcuts for in-progress cards (1-9 and 0 for 10th)
@@ -68,7 +75,7 @@ export function useBoardKeyboardShortcuts({
     });
 
     return shortcutsList;
-  }, [inProgressFeaturesForShortcuts, shortcuts, onAddFeature, onViewOutput]);
+  }, [inProgressFeaturesForShortcuts, shortcuts, onAddFeature, onPlanBacklog, onViewOutput]);
 
   useKeyboardShortcuts(boardShortcuts);
 

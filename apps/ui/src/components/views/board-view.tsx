@@ -300,10 +300,10 @@ export function BoardView() {
 
   // Calculate unarchived card counts per branch
   const branchCardCounts = useMemo(() => {
-    return hookFeatures.reduce(
+    return hookFeatures.reduce<Record<string, number>>(
       (counts, feature) => {
         if (feature.status !== 'completed') {
-          const branch = feature.branchName ?? 'main';
+          const branch: string = (feature.branchName as string | undefined) ?? 'main';
           counts[branch] = (counts[branch] || 0) + 1;
         }
         return counts;
@@ -558,7 +558,7 @@ export function BoardView() {
         if (currentWorktreeBranch === null) {
           // Viewing main but branch hasn't been initialized
           return currentProject?.path
-            ? isPrimaryWorktreeBranch(currentProject.path, featureBranch)
+            ? isPrimaryWorktreeBranch(currentProject.path, featureBranch as string)
             : false;
         }
         // Match by branch name
@@ -832,7 +832,7 @@ export function BoardView() {
             // We're viewing main but branch hasn't been initialized yet
             // Show features assigned to primary worktree's branch
             return currentProject.path
-              ? isPrimaryWorktreeBranch(currentProject.path, featureBranch)
+              ? isPrimaryWorktreeBranch(currentProject.path, featureBranch as string)
               : false;
           }
 
@@ -846,7 +846,7 @@ export function BoardView() {
 
         // Sort by priority (lower number = higher priority, priority 1 is highest)
         const sortedBacklog = [...backlogFeatures].sort(
-          (a, b) => (a.priority || 999) - (b.priority || 999)
+          (a, b) => ((a.priority as number) ?? 999) - ((b.priority as number) ?? 999)
         );
 
         // Filter out features with blocking dependencies if dependency blocking is enabled
@@ -931,6 +931,7 @@ export function BoardView() {
     runningAutoTasks,
     onAddFeature: () => setShowAddDialog(true),
     onStartNextFeatures: handleStartNextFeatures,
+    onPlanBacklog: () => setShowPlanDialog(true),
     onViewOutput: handleViewOutput,
   });
 
@@ -973,14 +974,31 @@ export function BoardView() {
       const feature = hookFeatures.find((f) => f.id === featureId);
 
       // High risk warning
-      if (feature?.impactAnalysis?.riskLevel === 'high' && feature.impactAnalysis.riskScore > 70) {
+      if (
+        feature?.impactAnalysis &&
+        typeof feature.impactAnalysis === 'object' &&
+        'riskLevel' in feature.impactAnalysis &&
+        (feature.impactAnalysis as any).riskLevel === 'high' &&
+        'riskScore' in feature.impactAnalysis &&
+        'affectedFiles' in feature.impactAnalysis &&
+        'crossBoundaryRisks' in feature.impactAnalysis &&
+        'gotchas' in feature.impactAnalysis &&
+        typeof (feature.impactAnalysis as any).riskScore === 'number' &&
+        (feature.impactAnalysis as any).riskScore > 70
+      ) {
+        const analysis = feature.impactAnalysis as {
+          riskScore: number;
+          crossBoundaryRisks: unknown[];
+          gotchas: unknown[];
+          affectedFiles: unknown[];
+        };
         const confirmed = window.confirm(
           `⚠️ HIGH RISK FEATURE\n\n` +
-            `This feature has a high risk score (${feature.impactAnalysis.riskScore}/100).\n\n` +
+            `This feature has a high risk score (${analysis.riskScore}/100).\n\n` +
             `Risks detected:\n` +
-            `• ${feature.impactAnalysis.crossBoundaryRisks.length} cross-boundary risks\n` +
-            `• ${feature.impactAnalysis.gotchas.length} gotchas\n` +
-            `• ${feature.impactAnalysis.affectedFiles.length} affected files\n\n` +
+            `• ${analysis.crossBoundaryRisks.length} cross-boundary risks\n` +
+            `• ${analysis.gotchas.length} gotchas\n` +
+            `• ${analysis.affectedFiles.length} affected files\n\n` +
             `Are you sure you want to proceed with implementation?`
         );
 
@@ -1009,7 +1027,7 @@ export function BoardView() {
             planSpec: {
               status: 'approved',
               content: editedPlan || pendingPlanApproval.planContent,
-              version: currentFeature?.planSpec?.version || 1,
+              version: (currentFeature?.planSpec as any)?.version || 1,
               approvedAt: new Date().toISOString(),
               reviewedByUser: true,
             },
@@ -1066,7 +1084,7 @@ export function BoardView() {
             planSpec: {
               status: 'rejected',
               content: pendingPlanApproval.planContent,
-              version: currentFeature?.planSpec?.version || 1,
+              version: (currentFeature?.planSpec as any)?.version || 1,
               reviewedByUser: true,
             },
           });
@@ -1095,7 +1113,7 @@ export function BoardView() {
   // Handle opening approval dialog from feature card button
   const handleOpenApprovalDialog = useCallback(
     (feature: Feature) => {
-      if (!feature.planSpec?.content || !currentProject) return;
+      if (!(feature.planSpec as any)?.content || !currentProject) return;
 
       // Determine the planning mode for approval (skip should never have a plan requiring approval)
       const mode = feature.planningMode;
@@ -1106,7 +1124,7 @@ export function BoardView() {
       setPendingPlanApproval({
         featureId: feature.id,
         projectPath: currentProject.path,
-        planContent: feature.planSpec.content,
+        planContent: (feature.planSpec as any).content,
         planningMode: approvalMode,
       });
     },
@@ -1155,6 +1173,11 @@ export function BoardView() {
           action: () => setShowAddDialog(true),
           description: 'Add new feature',
         }}
+        planBacklogShortcut={{
+          key: shortcuts.planBacklog,
+          action: () => setShowPlanDialog(true),
+          description: 'Backlog planning',
+        }}
         isMounted={isMounted}
       />
 
@@ -1187,7 +1210,7 @@ export function BoardView() {
         branchCardCounts={branchCardCounts}
         features={hookFeatures.map((f) => ({
           id: f.id,
-          branchName: f.branchName,
+          branchName: f.branchName as string | undefined,
         }))}
       />
 
@@ -1448,12 +1471,12 @@ export function BoardView() {
       />
 
       {/* View Plan Dialog (read-only) */}
-      {viewPlanFeature && viewPlanFeature.planSpec?.content && (
+      {viewPlanFeature && (viewPlanFeature.planSpec as any)?.content && (
         <PlanApprovalDialog
           open={true}
           onOpenChange={(open) => !open && setViewPlanFeature(null)}
           feature={viewPlanFeature}
-          planContent={viewPlanFeature.planSpec.content}
+          planContent={(viewPlanFeature.planSpec as any).content}
           onApprove={() => setViewPlanFeature(null)}
           onReject={() => setViewPlanFeature(null)}
           viewOnly={true}

@@ -19,6 +19,7 @@ interface BoardHeaderProps {
   onAddFeature: () => void;
   onOpenPlanDialog: () => void;
   addFeatureShortcut: KeyboardShortcut;
+  planBacklogShortcut: KeyboardShortcut;
   isMounted: boolean;
 }
 
@@ -36,6 +37,7 @@ export function BoardHeader({
   onAddFeature,
   onOpenPlanDialog,
   addFeatureShortcut,
+  planBacklogShortcut,
   isMounted,
 }: BoardHeaderProps) {
   const apiKeys = useAppStore((state) => state.apiKeys);
@@ -100,18 +102,21 @@ export function BoardHeader({
           </div>
         )}
 
-        <Button
+        <HotkeyButton
           size="sm"
           variant="outline"
           onClick={onOpenPlanDialog}
+          hotkey={planBacklogShortcut}
+          hotkeyActive={false}
           data-testid="plan-backlog-button"
         >
           <Wand2 className="w-4 h-4 mr-2" />
-          Plan
-        </Button>
+          Backlog Planning
+        </HotkeyButton>
 
         <HotkeyButton
           size="sm"
+          variant="outline"
           onClick={onAddFeature}
           hotkey={addFeatureShortcut}
           hotkeyActive={false}

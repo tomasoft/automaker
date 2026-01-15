@@ -389,6 +389,45 @@ export interface SpecRegenerationAPI {
   onEvent: (callback: (event: SpecRegenerationEvent) => void) => () => void;
 }
 
+export interface BacklogPlanAPI {
+  generate: (
+    projectPath: string,
+    prompt: string,
+    model?: string
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  apply: (
+    projectPath: string,
+    plan: BacklogPlanResult
+  ) => Promise<{
+    success: boolean;
+    appliedChanges?: BacklogChange[];
+    error?: string;
+  }>;
+
+  stop: () => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  status: () => Promise<{
+    success: boolean;
+    isRunning?: boolean;
+    error?: string;
+  }>;
+
+  onEvent: (callback: (event: BacklogPlanEvent) => void) => () => void;
+}
+
+export interface BacklogPlanEvent {
+  type: string;
+  result?: BacklogPlanResult;
+  error?: string;
+}
+
 export interface AutoModeAPI {
   stopFeature: (featureId: string) => Promise<{
     success: boolean;
@@ -487,6 +526,7 @@ export interface ElectronAPI {
   ping: () => Promise<string>;
   getApiKey?: () => Promise<string | null>;
   quit?: () => Promise<void>;
+  isElectron?: boolean;
   openExternalLink: (url: string) => Promise<{ success: boolean; error?: string }>;
 
   // Dialog APIs
@@ -612,6 +652,9 @@ export interface ElectronAPI {
 
   // Spec Regeneration APIs
   specRegeneration: SpecRegenerationAPI;
+
+  // Backlog Plan APIs
+  backlogPlan: BacklogPlanAPI;
 
   // Chat API
   chat: ChatAPI;

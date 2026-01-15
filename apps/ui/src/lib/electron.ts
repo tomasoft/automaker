@@ -10,7 +10,6 @@ import type {
   IssueValidationResponse,
   IssueValidationEvent,
   StoredValidation,
-  AgentModel,
   GitHubComment,
   IssueCommentsResult,
   Idea,
@@ -25,6 +24,8 @@ import type {
   CreateIdeaInput,
   UpdateIdeaInput,
   ConvertToFeatureOptions,
+  BacklogPlanResult,
+  BacklogChange,
 } from '@automaker/types';
 import { getJSON, setJSON, removeItem } from './storage';
 
@@ -314,7 +315,7 @@ export interface GitHubAPI {
   validateIssue: (
     projectPath: string,
     issue: IssueValidationInput,
-    model?: AgentModel
+    model?: string
   ) => Promise<{ success: boolean; message?: string; issueNumber?: number; error?: string }>;
   /** Check validation status for an issue or all issues */
   getValidationStatus: (
@@ -443,6 +444,43 @@ export interface SpecRegenerationAPI {
   onEvent: (callback: (event: SpecRegenerationEvent) => void) => () => void;
 }
 
+// Backlog Plan API types
+export interface BacklogPlanAPI {
+  generate: (
+    projectPath: string,
+    prompt: string,
+    model?: string
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+  apply: (
+    projectPath: string,
+    plan: BacklogPlanResult
+  ) => Promise<{
+    success: boolean;
+    appliedChanges?: BacklogChange[];
+    error?: string;
+  }>;
+  stop: () => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+  status: () => Promise<{
+    success: boolean;
+    isRunning?: boolean;
+    error?: string;
+  }>;
+
+  onEvent: (callback: (event: BacklogPlanEvent) => void) => () => void;
+}
+
+export interface BacklogPlanEvent {
+  type: string;
+  result?: BacklogPlanResult;
+  error?: string;
+}
+
 // Features API types
 export interface FeaturesAPI {
   getAll: (
@@ -547,6 +585,7 @@ export interface ElectronAPI {
   ping: () => Promise<string>;
   getApiKey?: () => Promise<string | null>;
   quit?: () => Promise<void>;
+  isElectron?: boolean;
   openExternalLink: (url: string) => Promise<{ success: boolean; error?: string }>;
   openDirectory: () => Promise<DialogResult>;
   openFile: (options?: object) => Promise<DialogResult>;
@@ -601,6 +640,7 @@ export interface ElectronAPI {
   git?: GitAPI;
   suggestions?: SuggestionsAPI;
   specRegeneration?: SpecRegenerationAPI;
+  backlogPlan?: BacklogPlanAPI;
   autoMode?: AutoModeAPI;
   features?: FeaturesAPI;
   runningAgents?: RunningAgentsAPI;
@@ -1467,6 +1507,17 @@ function createMockWorktreeAPI(): WorktreeAPI {
           commitHash: 'abc123',
           branch: 'feature-branch',
           message,
+        },
+      };
+    },
+
+    discardChanges: async (worktreePath: string) => {
+      console.log('[Mock] Discarding changes:', { worktreePath });
+      return {
+        success: true,
+        result: {
+          discarded: true,
+          message: 'All uncommitted changes have been discarded',
         },
       };
     },
@@ -2802,6 +2853,21 @@ function createMockFeaturesAPI(): FeaturesAPI {
       const title = words.length > 40 ? words.substring(0, 40) + '...' : words;
       return { success: true, title: `Add ${title}` };
     },
+
+    analyzeImpact: async (feature: any, projectPath: string) => {
+      console.log('[Mock] Analyzing impact for:', { featureId: feature.id, projectPath });
+      return {
+        success: true,
+        data: {
+          riskLevel: 'low',
+          riskScore: 25,
+          affectedFiles: [],
+          crossBoundaryRisks: [],
+          gotchas: [],
+        },
+        message: 'Impact analysis completed (mock)',
+      };
+    },
   };
 }
 
@@ -2859,7 +2925,7 @@ function createMockGitHubAPI(): GitHubAPI {
         mergedPRs: [],
       };
     },
-    validateIssue: async (projectPath: string, issue: IssueValidationInput, model?: AgentModel) => {
+    validateIssue: async (projectPath: string, issue: IssueValidationInput, model?: string) => {
       console.log('[Mock] Starting async validation:', { projectPath, issue, model });
 
       // Simulate async validation in background
