@@ -69,6 +69,7 @@ import { createAzureAuthRoutes } from './routes/azure-devops-auth/index.js';
 import { azureAuthSessions } from './routes/azure-devops-auth/routes/poll-azure-auth.js';
 import { AzureDevOpsAuthManager } from './providers/azure-devops-auth.js';
 import { createAzureDevOpsWikiRoutes } from './routes/azure-devops-wiki/index.js';
+import { createAzureWorkItemsRoutes } from './routes/azure-devops-work-items/index.js';
 import { createWebhookRoutes } from './routes/webhooks.js';
 import { createRepositoryRoutes } from './routes/repository/index.js';
 import { createSkillsRouter } from './routes/skills/index.js';
@@ -253,7 +254,10 @@ app.use('/api/auth', createAuthRoutes());
 app.use('/api/azure-auth', createAzureAuthRoutes(settingsService));
 
 // Azure DevOps wiki routes (uses separate Azure auth session, placed before main auth middleware)
-app.use('/api/azure-devops-wiki', createAzureDevOpsWikiRoutes());
+app.use('/api/azure-devops-wiki', createAzureDevOpsWikiRoutes(settingsService));
+
+// Azure DevOps work items routes (uses separate Azure auth session, placed before main auth middleware)
+app.use('/api/azure-devops-work-items', createAzureWorkItemsRoutes(settingsService));
 
 // Repository analysis routes (temporary: before auth to debug)
 app.use('/api/repository', createRepositoryRoutes(settingsService));

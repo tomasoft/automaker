@@ -590,7 +590,11 @@ export interface ElectronAPI {
   openDirectory: () => Promise<DialogResult>;
   openFile: (options?: object) => Promise<DialogResult>;
   readFile: (filePath: string) => Promise<FileResult>;
-  writeFile: (filePath: string, content: string) => Promise<WriteResult>;
+  writeFile: (
+    filePath: string,
+    content: string,
+    encoding?: 'utf-8' | 'base64'
+  ) => Promise<WriteResult>;
   mkdir: (dirPath: string) => Promise<WriteResult>;
   readdir: (dirPath: string) => Promise<ReaddirResult>;
   exists: (filePath: string) => Promise<boolean>;
@@ -598,6 +602,7 @@ export interface ElectronAPI {
   deleteFile: (filePath: string) => Promise<WriteResult>;
   trashItem?: (filePath: string) => Promise<WriteResult>;
   getPath: (name: string) => Promise<string>;
+  openPath?: (path: string) => Promise<{ success: boolean; error?: string }>;
   openInEditor?: (
     filePath: string,
     line?: number,
@@ -1135,6 +1140,12 @@ const getMockElectronAPI = (): ElectronAPI => {
         return '/mock/userData';
       }
       return `/mock/${name}`;
+    },
+
+    openPath: async (path: string) => {
+      console.log('[Mock] Would open file:', path);
+      // In mock mode, we can't actually open files, just log it
+      return { success: false, error: 'Mock mode - cannot open files' };
     },
 
     // Save image to temp directory

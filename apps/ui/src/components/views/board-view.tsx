@@ -36,6 +36,7 @@ import {
   EditFeatureDialog,
   FollowUpDialog,
   PlanApprovalDialog,
+  ImportWorkItemsDialog,
 } from './board-view/dialogs';
 import { PipelineSettingsDialog } from './board-view/dialogs/pipeline-settings-dialog';
 import { CreateWorktreeDialog } from './board-view/dialogs/create-worktree-dialog';
@@ -58,6 +59,7 @@ import {
   useFollowUpState,
   useSelectionMode,
 } from './board-view/hooks';
+import { useAzureSync } from './board-view/hooks/use-azure-sync';
 import { SelectionActionBar } from './board-view/components';
 import { MassEditDialog } from './board-view/dialogs';
 
@@ -140,6 +142,9 @@ export function BoardView() {
   const [pendingBacklogPlan, setPendingBacklogPlan] = useState<BacklogPlanResult | null>(null);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
+  // Import work items dialog state
+  const [showImportWorkItemsDialog, setShowImportWorkItemsDialog] = useState(false);
+
   // Pipeline settings dialog state
   const [showPipelineSettings, setShowPipelineSettings] = useState(false);
 
@@ -211,6 +216,9 @@ export function BoardView() {
     featuresWithContext,
     setFeaturesWithContext,
   });
+
+  // Sync feature status to Azure DevOps
+  useAzureSync();
 
   // Load pipeline config when project changes
   useEffect(() => {
@@ -1168,6 +1176,7 @@ export function BoardView() {
         }}
         onAddFeature={() => setShowAddDialog(true)}
         onOpenPlanDialog={() => setShowPlanDialog(true)}
+        onOpenImportDialog={() => setShowImportWorkItemsDialog(true)}
         addFeatureShortcut={{
           key: shortcuts.addFeature,
           action: () => setShowAddDialog(true),
@@ -1453,6 +1462,14 @@ export function BoardView() {
         setPendingPlanResult={setPendingBacklogPlan}
         isGeneratingPlan={isGeneratingPlan}
         setIsGeneratingPlan={setIsGeneratingPlan}
+      />
+
+      {/* Import Work Items Dialog */}
+      <ImportWorkItemsDialog
+        open={showImportWorkItemsDialog}
+        onClose={() => setShowImportWorkItemsDialog(false)}
+        projectPath={currentProject.path}
+        onImported={loadFeatures}
       />
 
       {/* Plan Approval Dialog */}

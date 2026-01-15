@@ -530,4 +530,519 @@ export class AzureDevOpsAuthManager {
       },
     };
   }
+
+  /**
+   * Get current user profile from Azure DevOps
+   */
+  async getCurrentUser(): Promise<{ id: string; displayName: string; emailAddress: string }> {
+    const token = await this.getToken();
+
+    const response = await fetch(
+      'https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=6.0',
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to get user profile: ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as {
+      id: string;
+      displayName: string;
+      emailAddress: string;
+    };
+
+    return {
+      id: data.id,
+      displayName: data.displayName,
+      emailAddress: data.emailAddress,
+    };
+  }
+
+  /**
+   * Query work items assigned to the authenticated user
+   */
+  async getMyWorkItems(
+    organization: string,
+    project: string,
+    workItemTypes: string[] = ['Bug', 'User Story', 'Feature']
+  ): Promise<
+    Array<{
+      id: number;
+      title: string;
+      workItemType: string;
+      state: string;
+      assignedTo: string;
+      description?: string;
+      acceptanceCriteria?: string;
+      tags?: string;
+      priority?: number;
+      url: string;
+    }>
+  > {
+    const token = await this.getToken();
+
+    // Build WIQL query to get work items assigned to current user
+    // Using @Me macro which resolves to current authenticated user
+    const wiql = {
+      query: `SELECT [System.Id], [System.Title], [System.WorkItemType], [System.State], [System.AssignedTo], [System.Description], [Microsoft.VSTS.Common.AcceptanceCriteria], [System.Tags], [Microsoft.VSTS.Common.Priority]
+              FROM workitems
+              WHERE [System.TeamProject] = @project
+                AND [System.AssignedTo] = @Me
+                AND [System.WorkItemType] IN (${workItemTypes.map((t) => `'${t}'`).join(', ')})
+              ORDER BY [Microsoft.VSTS.Common.Priority] ASC, [System.CreatedDate] DESC`,
+    };
+
+    logger.info(
+      `[getMyWorkItems] Executing WIQL query for org=${organization}, project=${project}`
+    );
+    logger.info(`[getMyWorkItems] WIQL: ${wiql.query}`);
+
+    // Execute WIQL query
+    const wiqlResponse = await fetch(
+      `https://dev.azure.com/${organization}/${project}/_apis/wit/wiql?api-version=7.1`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(wiql),
+      }
+    );
+
+    if (!wiqlResponse.ok) {
+      const errorText = await wiqlResponse.text();
+      logger.error(
+        `[getMyWorkItems] WIQL query failed with status ${wiqlResponse.status}: ${errorText}`
+      );
+      throw new Error(`Failed to query work items: ${wiqlResponse.statusText}`);
+    }
+
+    const wiqlData = (await wiqlResponse.json()) as {
+      workItems?: Array<{ id: number; url: string }>;
+    };
+
+    if (!wiqlData.workItems || wiqlData.workItems.length === 0) {
+      logger.info('[getMyWorkItems] No work items found matching query');
+      logger.info(`[getMyWorkItems] Query returned: ${JSON.stringify(wiqlData)}`);
+      return [];
+    }
+
+    logger.info(`[getMyWorkItems] Found ${wiqlData.workItems.length} work items`);
+
+    // Fetch full details for each work item
+    const workItemIds = wiqlData.workItems.map((wi) => wi.id);
+    logger.info(`[getMyWorkItems] Fetching details for IDs: ${workItemIds.join(', ')}`);
+    const batchResponse = await fetch(
+      `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${workItemIds.join(',')}&$expand=all&api-version=7.1`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+        },
+      }
+    );
+
+    if (!batchResponse.ok) {
+      const errorText = await batchResponse.text();
+      logger.error(
+        `[getMyWorkItems] Batch fetch failed with status ${batchResponse.status}: ${errorText}`
+      );
+      throw new Error(`Failed to fetch work item details: ${batchResponse.statusText}`);
+    }
+
+    const batchData = (await batchResponse.json()) as {
+      value?: Array<{
+        id: number;
+        url: string;
+        relations?: Array<{
+          rel: string;
+          url: string;
+          attributes?: {
+            name?: string;
+            [key: string]: any;
+          };
+        }>;
+        fields: {
+          'System.Title': string;
+          'System.WorkItemType': string;
+          'System.State': string;
+          'System.AssignedTo'?: { displayName: string };
+          'System.Description'?: string;
+          'Microsoft.VSTS.Common.AcceptanceCriteria'?: string;
+          'System.Tags'?: string;
+          'Microsoft.VSTS.Common.Priority'?: number;
+        };
+      }>;
+    };
+
+    if (!batchData.value) {
+      return [];
+    }
+
+    logger.info(`[getMyWorkItems] Fetched details for ${batchData.value.length} work items`);
+
+    return batchData.value.map((wi) => {
+      const attachments =
+        wi.relations
+          ?.filter((rel: any) => rel.rel === 'AttachedFile')
+          .map((rel: any) => ({
+            id: rel.url.split('/').pop(),
+            name: rel.attributes?.name || 'attachment',
+            url: rel.url,
+          })) || [];
+
+      if (attachments.length > 0) {
+        logger.info(
+          `[getMyWorkItems] Work item ${wi.id} has ${attachments.length} attachments:`,
+          attachments.map((a) => a.name)
+        );
+      }
+
+      return {
+        id: wi.id,
+        title: wi.fields['System.Title'],
+        workItemType: wi.fields['System.WorkItemType'],
+        state: wi.fields['System.State'],
+        assignedTo: wi.fields['System.AssignedTo']?.displayName || 'Unassigned',
+        description: wi.fields['System.Description'],
+        acceptanceCriteria: wi.fields['Microsoft.VSTS.Common.AcceptanceCriteria'],
+        tags: wi.fields['System.Tags'],
+        priority: wi.fields['Microsoft.VSTS.Common.Priority'],
+        url: wi.url,
+        attachments,
+      };
+    });
+  }
+
+  /**
+   * Get child work items for a parent work item (e.g., bugs/stories under a feature)
+   */
+  async getChildWorkItems(
+    organization: string,
+    project: string,
+    parentId: number
+  ): Promise<
+    Array<{
+      id: number;
+      title: string;
+      workItemType: string;
+      state: string;
+      url: string;
+    }>
+  > {
+    const token = await this.getToken();
+
+    logger.info(`[getChildWorkItems] Fetching children for work item ${parentId}`);
+
+    // Get work item with relations
+    const response = await fetch(
+      `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems/${parentId}?$expand=relations&api-version=7.1`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error(`[getChildWorkItems] Failed with status ${response.status}: ${errorText}`);
+      throw new Error(`Failed to get work item: ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as {
+      relations?: Array<{
+        rel: string;
+        url: string;
+      }>;
+    };
+
+    if (!data.relations) {
+      logger.info(`[getChildWorkItems] No relations found for work item ${parentId}`);
+      return [];
+    }
+
+    // Filter for child relations
+    const childRelations = data.relations.filter(
+      (r) => r.rel === 'System.LinkTypes.Hierarchy-Forward'
+    );
+
+    if (childRelations.length === 0) {
+      logger.info(`[getChildWorkItems] No child work items found for ${parentId}`);
+      return [];
+    }
+
+    // Extract child IDs from URLs
+    const childIds = childRelations
+      .map((r) => {
+        const match = r.url.match(/\/(\d+)$/);
+        return match ? parseInt(match[1], 10) : null;
+      })
+      .filter((id) => id !== null) as number[];
+
+    logger.info(`[getChildWorkItems] Found ${childIds.length} child work items for ${parentId}`);
+
+    if (childIds.length === 0) {
+      return [];
+    }
+
+    // Fetch details for child work items
+    const batchResponse = await fetch(
+      `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${childIds.join(',')}&api-version=7.1`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+        },
+      }
+    );
+
+    if (!batchResponse.ok) {
+      const errorText = await batchResponse.text();
+      logger.error(
+        `[getChildWorkItems] Batch fetch failed with status ${batchResponse.status}: ${errorText}`
+      );
+      throw new Error(`Failed to fetch child work item details: ${batchResponse.statusText}`);
+    }
+
+    const batchData = (await batchResponse.json()) as {
+      value?: Array<{
+        id: number;
+        url: string;
+        fields: {
+          'System.Title': string;
+          'System.WorkItemType': string;
+          'System.State': string;
+        };
+      }>;
+    };
+
+    if (!batchData.value) {
+      return [];
+    }
+
+    return batchData.value.map((wi) => ({
+      id: wi.id,
+      title: wi.fields['System.Title'],
+      workItemType: wi.fields['System.WorkItemType'],
+      state: wi.fields['System.State'],
+      url: wi.url,
+    }));
+  }
+
+  /**
+   * Update Azure DevOps work item status
+   */
+  async updateWorkItemStatus(
+    organization: string,
+    project: string,
+    workItemId: number,
+    status: string
+  ): Promise<void> {
+    const token = await this.getToken();
+
+    const updatePayload = [
+      {
+        op: 'add',
+        path: '/fields/System.State',
+        value: status,
+      },
+    ];
+
+    const response = await fetch(
+      `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems/${workItemId}?api-version=7.1`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json-patch+json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(updatePayload),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error(`[updateWorkItemStatus] Failed with status ${response.status}: ${errorText}`);
+      throw new Error(`Failed to update work item status: ${response.statusText}`);
+    }
+
+    logger.info(`[updateWorkItemStatus] Updated work item ${workItemId} to status: ${status}`);
+  }
+
+  /**
+   * Add a link reference to an Azure DevOps work item as a comment
+   * (Azure DevOps doesn't support custom URL protocols like automaker://)
+   */
+  async addWorkItemLink(
+    organization: string,
+    project: string,
+    workItemId: number,
+    linkUrl: string,
+    linkComment?: string
+  ): Promise<void> {
+    const token = await this.getToken();
+
+    // Add as a comment since Azure DevOps doesn't support custom URL protocols
+    const commentText = linkComment
+      ? `${linkComment}\n\nAutoMaker Feature: ${linkUrl}`
+      : `Linked to AutoMaker feature: ${linkUrl}`;
+
+    const updatePayload = [
+      {
+        op: 'add',
+        path: '/fields/System.History',
+        value: commentText,
+      },
+    ];
+
+    const response = await fetch(
+      `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems/${workItemId}?api-version=7.1`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json-patch+json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(updatePayload),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error(`[addWorkItemLink] Failed with status ${response.status}: ${errorText}`);
+      throw new Error(`Failed to add link to work item: ${response.statusText}`);
+    }
+
+    logger.info(`[addWorkItemLink] Added link comment to work item ${workItemId}: ${linkUrl}`);
+  }
+
+  /**
+   * Download an attachment from an Azure DevOps work item
+   */
+  async downloadAttachment(
+    organization: string,
+    project: string,
+    attachmentId: string
+  ): Promise<Buffer> {
+    const token = await this.getToken();
+
+    // Note: Attachments API doesn't use project in the URL path
+    const response = await fetch(
+      `https://dev.azure.com/${organization}/_apis/wit/attachments/${attachmentId}?api-version=7.1`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error(`[downloadAttachment] Failed with status ${response.status}: ${errorText}`);
+      throw new Error(`Failed to download attachment: ${response.statusText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+
+  /**
+   * Get comments/discussions for a work item
+   */
+  async getWorkItemComments(
+    organization: string,
+    project: string,
+    workItemId: number
+  ): Promise<
+    Array<{
+      id: number;
+      text: string;
+      createdDate: string;
+      createdBy: string;
+      attachments?: Array<{
+        id: string;
+        name: string;
+        url: string;
+      }>;
+    }>
+  > {
+    const token = await this.getToken();
+
+    logger.info(`[getWorkItemComments] Fetching comments for work item ${workItemId}`);
+
+    const response = await fetch(
+      `https://dev.azure.com/${organization}/${project}/_apis/wit/workItems/${workItemId}/comments?api-version=7.1-preview.3`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error(`[getWorkItemComments] Failed with status ${response.status}: ${errorText}`);
+      throw new Error(`Failed to get work item comments: ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as {
+      comments?: Array<{
+        id: number;
+        text: string;
+        createdDate: string;
+        createdBy: { displayName: string };
+        url: string;
+      }>;
+    };
+
+    if (!data.comments || data.comments.length === 0) {
+      logger.info(`[getWorkItemComments] No comments found for work item ${workItemId}`);
+      return [];
+    }
+
+    logger.info(
+      `[getWorkItemComments] Found ${data.comments.length} comments for work item ${workItemId}`
+    );
+
+    // Parse comments for attachments (look for image/file references in HTML)
+    return data.comments.map((comment) => {
+      const attachments: Array<{ id: string; name: string; url: string }> = [];
+
+      // Look for attachment references in comment text (Azure DevOps uses HTML with img tags and attachment links)
+      // Example: src="https://dev.azure.com/.../attachments/07e3ea22-2376-4799-a9e5-9cd8be425502?fileName=image.png"
+      const imgRegex = /attachments\/([a-f0-9-]+)(?:\?fileName=([^"&]+))?/gi;
+
+      let match;
+      while ((match = imgRegex.exec(comment.text)) !== null) {
+        const id = match[1]; // Just the UUID, no query params
+        const filename = match[2] || `attachment-${id}`;
+        attachments.push({
+          id,
+          name: filename,
+          url: match[0], // Full match for reference
+        });
+      }
+
+      return {
+        id: comment.id,
+        text: comment.text,
+        createdDate: comment.createdDate,
+        createdBy: comment.createdBy.displayName,
+        attachments: attachments.length > 0 ? attachments : undefined,
+      };
+    });
+  }
 }

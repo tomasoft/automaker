@@ -583,6 +583,7 @@ export interface ElectronAPI {
 
   // App APIs
   getPath: (name: string) => Promise<string>;
+  openPath?: (path: string) => Promise<{ success: boolean; error?: string }>;
   saveImageToTemp: (
     data: string,
     filename: string,

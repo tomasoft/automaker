@@ -5,13 +5,18 @@
  */
 
 import { Router } from 'express';
+import type { SettingsService } from '../../services/settings-service.js';
 import { createListWikisHandler } from './routes/list-wikis.js';
 import { createListPagesHandler } from './routes/list-pages.js';
 import { createGetPageHandler } from './routes/get-page.js';
 import { createListProjectsHandler } from './routes/list-projects.js';
+import { createGetConfigHandler } from './routes/get-config.js';
 
-export function createAzureDevOpsWikiRoutes(): Router {
+export function createAzureDevOpsWikiRoutes(settingsService: SettingsService): Router {
   const router = Router();
+
+  // GET /api/azure-devops-wiki/config - Get current Azure DevOps config
+  router.get('/config', createGetConfigHandler(settingsService));
 
   // GET /api/azure-devops-wiki/projects - List projects in an organization
   router.get('/projects', createListProjectsHandler());

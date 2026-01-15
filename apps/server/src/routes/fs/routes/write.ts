@@ -12,9 +12,10 @@ import { getErrorMessage, logError } from '../common.js';
 export function createWriteHandler() {
   return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { filePath, content } = req.body as {
+      const { filePath, content, encoding } = req.body as {
         filePath: string;
         content: string;
+        encoding?: 'utf-8' | 'base64';
       };
 
       if (!filePath) {
@@ -24,7 +25,14 @@ export function createWriteHandler() {
 
       // Ensure parent directory exists (symlink-safe)
       await mkdirSafe(path.dirname(path.resolve(filePath)));
-      await secureFs.writeFile(filePath, content, 'utf-8');
+
+      // If content is base64, decode it and write as binary
+      if (encoding === 'base64') {
+        const buffer = Buffer.from(content, 'base64');
+        await secureFs.writeFile(filePath, buffer);
+      } else {
+        await secureFs.writeFile(filePath, content, 'utf-8');
+      }
 
       res.json({ success: true });
     } catch (error) {

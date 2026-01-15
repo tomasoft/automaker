@@ -791,6 +791,27 @@ export class HttpApiClient implements ElectronAPI {
     return { success: true };
   }
 
+  async openPath(path: string): Promise<{ success: boolean; error?: string }> {
+    // If running in Electron, use the native API
+    if (window.electronAPI?.openPath) {
+      try {
+        const result = await window.electronAPI.openPath(path);
+        return result;
+      } catch (error) {
+        console.error('Failed to open path via Electron API:', error);
+        return { success: false, error: String(error) };
+      }
+    }
+
+    // Fallback: try to open as file URL in browser
+    try {
+      window.open(`file://${path}`, '_blank');
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
+  }
+
   async openInEditor(
     filePath: string,
     line?: number,
@@ -893,8 +914,12 @@ export class HttpApiClient implements ElectronAPI {
     return this.post('/api/fs/read', { filePath });
   }
 
-  async writeFile(filePath: string, content: string): Promise<WriteResult> {
-    return this.post('/api/fs/write', { filePath, content });
+  async writeFile(
+    filePath: string,
+    content: string,
+    encoding?: 'utf-8' | 'base64'
+  ): Promise<WriteResult> {
+    return this.post('/api/fs/write', { filePath, content, encoding: encoding || 'utf-8' });
   }
 
   async mkdir(dirPath: string): Promise<WriteResult> {

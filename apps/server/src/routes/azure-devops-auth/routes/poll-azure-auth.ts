@@ -253,6 +253,26 @@ export function createPollAzureAuthHandler() {
         // Store auth manager in session (in-memory, sessionId already generated above)
         azureAuthSessions.set(sessionId, authManager);
 
+        // Save Azure DevOps config to settings if we fetched it successfully
+        if (fetchedConfig) {
+          try {
+            await settingsService.updateGlobalSettings({
+              azureDevOps: {
+                organization: fetchedConfig.organization!,
+                project: fetchedConfig.project!,
+                wikiId: fetchedConfig.wikiId!,
+              },
+            });
+            logger.info('Saved Azure DevOps config to settings:', {
+              organization: fetchedConfig.organization,
+              project: fetchedConfig.project,
+              wikiId: fetchedConfig.wikiId,
+            });
+          } catch (saveError) {
+            logger.warn('Failed to save Azure DevOps config to settings:', saveError);
+          }
+        }
+
         logger.info(`Stored auth session ${sessionId}, total sessions: ${azureAuthSessions.size}`);
         logger.info(
           `Token expires at: ${new Date(data.expires_in * 1000 + Date.now()).toISOString()}`

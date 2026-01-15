@@ -398,6 +398,26 @@ export function WikiSourcesSection() {
             if (result.config.availableProjects)
               setAvailableProjects(result.config.availableProjects);
             if (result.config.availableWikis) setAvailableWikis(result.config.availableWikis);
+
+            // Save config to server settings for other features to use
+            if (result.config.organization && result.config.project && result.config.wikiId) {
+              try {
+                await fetch('http://localhost:3008/api/settings/global', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'include',
+                  body: JSON.stringify({
+                    azureDevOps: {
+                      organization: result.config.organization,
+                      project: result.config.project,
+                      wikiId: result.config.wikiId,
+                    },
+                  }),
+                });
+              } catch (error) {
+                console.error('Failed to save Azure DevOps config to settings:', error);
+              }
+            }
           }
 
           setIsAuthenticating(false);

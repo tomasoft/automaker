@@ -679,7 +679,7 @@ export class AutoModeService {
         );
 
         // Build spec generation prompt
-        const featurePrompt = this.buildFeaturePrompt(feature);
+        const featurePrompt = this.buildFeaturePrompt(feature, workDir);
         const planningPrefix = await this.getPlanningPromptPrefix(feature);
         const specPrompt = planningPrefix + featurePrompt;
 
@@ -912,7 +912,7 @@ export class AutoModeService {
           logger.info(`[Implementation Phase] Starting implementation with ${feature.model}...`);
 
           // Build implementation prompt (feature now includes the spec)
-          const featurePromptWithSpec = this.buildFeaturePrompt(feature);
+          const featurePromptWithSpec = this.buildFeaturePrompt(feature, workDir);
           prompt = featurePromptWithSpec;
         } else {
           logger.info(
@@ -925,12 +925,12 @@ export class AutoModeService {
           );
 
           // Build implementation prompt (feature now includes the spec)
-          const featurePromptWithSpec = this.buildFeaturePrompt(feature);
+          const featurePromptWithSpec = this.buildFeaturePrompt(feature, workDir);
           prompt = featurePromptWithSpec;
         }
       } else {
         // Normal flow: build prompt with planning phase (for lite/full modes or skip)
-        const featurePrompt = this.buildFeaturePrompt(feature);
+        const featurePrompt = this.buildFeaturePrompt(feature, workDir);
         const planningPrefix = await this.getPlanningPromptPrefix(feature);
         prompt = planningPrefix + featurePrompt;
 
@@ -1168,7 +1168,7 @@ export class AutoModeService {
       });
 
       // Build prompt for this pipeline step
-      const prompt = this.buildPipelineStepPrompt(step, feature, previousContext);
+      const prompt = this.buildPipelineStepPrompt(step, feature, previousContext, projectPath);
 
       // Get model from feature
       const model = resolveModelString(feature.model, DEFAULT_MODELS.claude);
@@ -1223,14 +1223,15 @@ export class AutoModeService {
   private buildPipelineStepPrompt(
     step: PipelineStep,
     feature: Feature,
-    previousContext: string
+    previousContext: string,
+    projectPath: string
   ): string {
     let prompt = `## Pipeline Step: ${step.name}
 
 This is an automated pipeline step following the initial feature implementation.
 
 ### Feature Context
-${this.buildFeaturePrompt(feature)}
+${this.buildFeaturePrompt(feature, projectPath)}
 
 `;
 
@@ -1373,7 +1374,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
     // Build complete prompt with feature info, previous context, and follow-up instructions
     let fullPrompt = `## Follow-up on Feature Implementation
 
-${feature ? this.buildFeaturePrompt(feature) : `**Feature ID:** ${featureId}`}
+${feature ? this.buildFeaturePrompt(feature, workDir) : `**Feature ID:** ${featureId}`}
 `;
 
     if (previousContext) {
@@ -2438,7 +2439,7 @@ Format your response as a structured markdown document.`;
     return planningPrompt + '\n\n---\n\n## Feature Request\n\n';
   }
 
-  private buildFeaturePrompt(feature: Feature): string {
+  private buildFeaturePrompt(feature: Feature, projectRoot?: string): string {
     const title = this.extractTitleFromDescription(feature.description);
 
     let prompt = `## Feature Implementation Task
@@ -2459,11 +2460,17 @@ ${feature.spec}
     if (feature.imagePaths && feature.imagePaths.length > 0) {
       const imagesList = feature.imagePaths
         .map((img, idx) => {
-          const path = typeof img === 'string' ? img : img.path;
+          const absolutePath = typeof img === 'string' ? img : img.path;
+          // Make path relative to project root if projectRoot is provided
+          const relativePath = projectRoot
+            ? path.relative(projectRoot, absolutePath).replace(/\\/g, '/')
+            : absolutePath;
           const filename =
-            typeof img === 'string' ? path.split('/').pop() : img.filename || path.split('/').pop();
+            typeof img === 'string'
+              ? relativePath.split('/').pop()
+              : img.filename || relativePath.split('/').pop();
           const mimeType = typeof img === 'string' ? 'image/*' : img.mimeType || 'image/*';
-          return `   ${idx + 1}. ${filename} (${mimeType})\n      Path: ${path}`;
+          return `   ${idx + 1}. ${filename} (${mimeType})\n      Path: ${relativePath}`;
         })
         .join('\n');
 
@@ -2482,29 +2489,37 @@ You can use the Read tool to view these images at any time during implementation
       const wikiList = feature.textFilePaths
         .map((file, idx) => {
           const filename = file.filename || file.path.split('/').pop() || 'Unknown';
-          const path = file.path;
-          return `   ${idx + 1}. ${filename}\n      Source: ${path}`;
+          const absolutePath = file.path;
+          // Make path relative to project root if projectRoot is provided
+          const relativePath = projectRoot
+            ? path.relative(projectRoot, absolutePath).replace(/\\/g, '/')
+            : absolutePath;
+          return `   ${idx + 1}. ${filename}\n      Type: ${file.mimeType || 'Unknown'}\n      Location: ${relativePath}`;
         })
         .join('\n');
 
       prompt += `
-**📚 Knowledge Base / Wiki Pages:**
-The following documentation and wiki pages have been attached as reference material for this feature:
+**📚 Reference Documents & Attachments:**
+The following documents have been attached as reference material for this feature:
 
 ${wikiList}
 
-These pages contain relevant standards, best practices, architectural guidelines, or domain knowledge that should inform your implementation. Review them to understand:
-- Coding standards and conventions to follow
-- Architectural patterns to use
-- Domain-specific requirements or business rules
-- API documentation or integration guidelines
+**IMPORTANT:** These documents contain critical requirements, specifications, or reference materials.
+- Review the file names and types above - they indicate what information is available
+- For PDF files: These likely contain detailed specifications, mockups, or technical documentation
+- For Word documents: These may contain requirements, user stories, or design documents
+- For text/markdown files: These contain readable documentation shown below
+
+Note: Binary files (PDFs, images, Word docs) are stored in the project but cannot be read by the agent directly. 
+The requirements from these files should be summarized in the feature description and comments sections above.
 
 ${feature.textFilePaths
+  .filter((file) => file.content && !file.content.startsWith('[Binary file:'))
   .map(
     (file, idx) => `
 ### ${idx + 1}. ${file.filename || 'Document ' + (idx + 1)}
 
-${file.content || '(Content not available - refer to source URL)'}
+${file.content}
 `
   )
   .join('\n')}
@@ -3756,7 +3771,7 @@ Implement all the changes described in the plan above.`;
 
     const prompt = `## Continuing Feature Implementation
 
-${this.buildFeaturePrompt(feature)}
+${this.buildFeaturePrompt(feature, projectPath)}
 
 ## Previous Context
 The following is the output from a previous implementation attempt. Continue from where you left off:

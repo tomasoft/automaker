@@ -28,12 +28,18 @@ export const DEFAULT_AUTO_MODE_PLANNING_LITE = `## Planning Phase (Lite Mode)
 
 IMPORTANT: Do NOT output exploration text, tool usage, or thinking before the plan. Start DIRECTLY with the planning outline format below. Silently analyze the codebase first, then output ONLY the structured plan.
 
+**CRITICAL: Review ALL context before planning:**
+- **Feature Description**: Read COMPLETELY - contains requirements and Azure DevOps details
+- **"## Comments from Azure DevOps" Section**: If present, contains CRITICAL additional requirements that MUST be in your plan
+  * Example: If comment says "exclude character 5", your tasks must include implementing that constraint
+- **Attached Images/Documents**: Note visual requirements and additional specifications
+
 Create a brief planning outline:
 
 1. **Goal**: What are we accomplishing? (1 sentence)
-2. **Approach**: How will we do it? (2-3 sentences)
+2. **Approach**: How will we do it? (2-3 sentences, including ALL requirements from description AND comments)
 3. **Files to Touch**: List files and what changes
-4. **Tasks**: Numbered task list (3-7 items)
+4. **Tasks**: Numbered task list (3-7 items) - MUST cover ALL requirements from comments
 5. **Risks**: Any gotchas to watch for
 
 After generating the outline, output:
@@ -46,12 +52,18 @@ export const DEFAULT_AUTO_MODE_PLANNING_LITE_WITH_APPROVAL = `## Planning Phase 
 
 IMPORTANT: Do NOT output exploration text, tool usage, or thinking before the plan. Start DIRECTLY with the planning outline format below. Silently analyze the codebase first, then output ONLY the structured plan.
 
+**CRITICAL: Review ALL context before planning:**
+- **Feature Description**: Read COMPLETELY - contains requirements and Azure DevOps details
+- **"## Comments from Azure DevOps" Section**: If present, contains CRITICAL additional requirements that MUST be in your plan
+  * Example: If comment says "exclude character 5", your tasks must include implementing that constraint
+- **Attached Images/Documents**: Note visual requirements and additional specifications
+
 Create a brief planning outline:
 
 1. **Goal**: What are we accomplishing? (1 sentence)
-2. **Approach**: How will we do it? (2-3 sentences)
+2. **Approach**: How will we do it? (2-3 sentences, including ALL requirements from description AND comments)
 3. **Files to Touch**: List files and what changes
-4. **Tasks**: Numbered task list (3-7 items)
+4. **Tasks**: Numbered task list (3-7 items) - MUST cover ALL requirements from comments
 5. **Risks**: Any gotchas to watch for
 
 After generating the outline, output:
@@ -64,6 +76,67 @@ export const DEFAULT_AUTO_MODE_PLANNING_SPEC = `## Specification Phase (Spec Mod
 
 IMPORTANT: Do NOT output exploration text, tool usage, or thinking before the spec. Start DIRECTLY with the specification format below. Silently analyze the codebase first, then output ONLY the structured specification.
 
+**CRITICAL: Review ALL provided context sources BEFORE writing the specification:**
+
+1. **Feature Description** (MANDATORY READ):
+   - Read the COMPLETE description from top to bottom
+   - Contains core requirements and acceptance criteria
+   - May include Azure DevOps work item details
+   
+2. **"## Comments from Azure DevOps" Section** (IF PRESENT - HIGHEST PRIORITY):
+   - ⚠️ **CRITICAL**: Comments contain ADDITIONAL requirements that MUST be included in acceptance criteria
+   - Comments often add constraints, exclusions, or modifications to the main requirements
+   - **Example**: If description says "generate password" and comment says "Number 5 should be excluded", your acceptance criteria MUST include "Password must NOT contain the number 5"
+   - **Search for this section** in the description and extract ALL requirements from it
+   
+3. **Attached Images/Screenshots**:
+   - Visual mockups, UI designs, or examples
+   - Note any UI requirements or design patterns shown
+   
+4. **"Reference Documents & Attachments" Section** (IF PRESENT):
+   - PDF/Word documents may contain detailed specs
+   - Text files with extracted content are shown inline
+   - Requirements from these documents should already be summarized in description/comments
+   
+5. **Cross-Check Requirements**:
+   - Merge requirements from ALL sources (description + comments + documents)
+   - If there are conflicts, comment requirements take precedence
+   - Every requirement from comments MUST appear in acceptance criteria
+
+**BEFORE writing the spec, mentally answer:**
+- "Did I read the entire feature description?"
+- "Is there a 'Comments from Azure DevOps' section? If yes, did I extract ALL requirements from it?"
+- "Do my acceptance criteria include EVERY constraint mentioned in comments?"
+
+---
+
+Create a comprehensive specification with these sections:
+
+1. **Overview**: Brief summary (2-3 sentences)
+
+2. **Requirements**: Functional and non-functional requirements
+
+3. **Acceptance Criteria**:
+   - **MUST include ALL requirements from:**
+     * Main feature description
+     * Comments section (if present)
+     * Attached documents
+   - Each criterion should be testable
+   - Mark priority: [Must Have], [Should Have], [Nice to Have]
+   - **Example format**:
+     - [Must Have] User can generate a secure password
+     - [Must Have] Generated password excludes characters: %, $, 0, 5 (per comments)
+     - [Should Have] Password length is configurable
+
+4. **Files to Modify**:
+
+**CRITICAL: Review ALL provided context before planning:**
+- **Feature Description**: Read COMPLETELY - it contains the core requirements, acceptance criteria, and details from Azure DevOps
+- **Comments Section**: If present, this contains CRITICAL additional requirements, clarifications, and constraints that MUST be incorporated
+- **Attached Images/Screenshots**: Review ALL - they may contain mockups, examples, or visual requirements
+- **Attached Documents**: Listed in "Reference Documents & Attachments" - note their names and types as they indicate important context
+- **Key Point**: Requirements from comments and attachments are AS IMPORTANT as the main description - incorporate them into your acceptance criteria
+
 Generate a specification with an actionable task breakdown. WAIT for approval before implementing.
 
 ### Specification Format
@@ -74,6 +147,7 @@ Generate a specification with an actionable task breakdown. WAIT for approval be
 
 3. **Acceptance Criteria**: 3-5 items in GIVEN-WHEN-THEN format
    - GIVEN [context], WHEN [action], THEN [outcome]
+   - **IMPORTANT**: Base these on ALL provided context including images, documents, and comments
 
 4. **Files to Modify**:
    | File | Purpose | Action |
@@ -137,6 +211,43 @@ export const DEFAULT_AUTO_MODE_PLANNING_FULL = `## Full Specification Phase (Ful
 
 IMPORTANT: Do NOT output exploration text, tool usage, or thinking before the spec. Start DIRECTLY with the specification format below. Silently analyze the codebase first, then output ONLY the structured specification.
 
+**CRITICAL: Review ALL provided context sources BEFORE writing the specification:**
+
+1. **Feature Description** (Top of Feature):
+   - Read the ENTIRE description from beginning to end
+   - Contains core requirements and acceptance criteria
+   - May include original Azure DevOps work item details
+
+2. **"## Comments from Azure DevOps" Section** (IF PRESENT - HIGHEST PRIORITY):
+   - ⚠️ **CRITICAL**: Comments contain ADDITIONAL requirements that MUST be included
+   - **Example**: If comment says "Number 5 should be excluded", acceptance criteria MUST include specific GIVEN-WHEN-THEN for excluding character 5
+   - **Search for this section** in the description and extract ALL requirements
+   - Comments often contain:
+     * Additional constraints not in main description
+     * Clarifications from stakeholders
+     * Examples of expected behavior
+     * Edge cases to handle
+
+3. **Attached Images/Screenshots**:
+   - Review ALL - they may contain mockups, examples, or visual requirements
+   - Images often show UI expectations or example outputs
+
+4. **Attached Documents** (listed in "Reference Documents & Attachments"):
+   - Check document types (PDF, DOCX) for detailed requirements
+   - Extracted content appears in "textFilePaths" section
+   - May contain detailed specifications or examples
+
+5. **Cross-Check**:
+   - Merge requirements from ALL sources (description + comments + documents + images)
+   - If there are conflicts, comment requirements take precedence
+   - Every requirement from comments MUST appear in acceptance criteria
+
+**BEFORE writing the spec, mentally answer:**
+- "Did I read the entire feature description?"
+- "Is there a 'Comments from Azure DevOps' section? If yes, did I extract ALL requirements?"
+- "Did I review all attached documents and images?"
+- "Do my GIVEN-WHEN-THEN scenarios include EVERY constraint mentioned in comments?"
+
 Generate a comprehensive specification with phased task breakdown. WAIT for approval before implementing.
 
 ### Specification Format
@@ -146,9 +257,22 @@ Generate a comprehensive specification with phased task breakdown. WAIT for appr
 2. **User Story**: As a [user], I want [goal], so that [benefit]
 
 3. **Acceptance Criteria**: Multiple scenarios with GIVEN-WHEN-THEN
-   - **Happy Path**: GIVEN [context], WHEN [action], THEN [expected outcome]
-   - **Edge Cases**: GIVEN [edge condition], WHEN [action], THEN [handling]
-   - **Error Handling**: GIVEN [error condition], WHEN [action], THEN [error response]
+   - **MUST include ALL requirements from:**
+     * Main feature description
+     * Comments section (if present - HIGHEST PRIORITY)
+     * Attached documents
+     * Attached images
+   
+   - **Format for each scenario**:
+     * **Happy Path**: GIVEN [context], WHEN [action], THEN [expected outcome]
+     * **Edge Cases**: GIVEN [edge condition], WHEN [action], THEN [handling]
+     * **Error Handling**: GIVEN [error condition], WHEN [action], THEN [error response]
+   
+   - **Example incorporating comment requirements**:
+     * If comment says "Number 5 should be excluded":
+       - GIVEN user requests password generation
+       - WHEN password is generated
+       - THEN password must NOT contain the character '5' (per Azure DevOps comments)
 
 4. **Technical Context**:
    | Aspect | Value |

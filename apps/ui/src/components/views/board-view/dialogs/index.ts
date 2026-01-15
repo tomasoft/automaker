@@ -8,3 +8,4 @@ export { EditFeatureDialog } from './edit-feature-dialog';
 export { FollowUpDialog } from './follow-up-dialog';
 export { PlanApprovalDialog } from './plan-approval-dialog';
 export { MassEditDialog } from './mass-edit-dialog';
+export { ImportWorkItemsDialog } from './import-work-items-dialog';

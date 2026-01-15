@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Plus, Bot, Wand2 } from 'lucide-react';
+import { Plus, Bot, Wand2, Download } from 'lucide-react';
 import { KeyboardShortcut } from '@/hooks/use-keyboard-shortcuts';
 import { ClaudeUsagePopover } from '@/components/claude-usage-popover';
 import { useAppStore } from '@/store/app-store';
@@ -18,6 +18,7 @@ interface BoardHeaderProps {
   onAutoModeToggle: (enabled: boolean) => void;
   onAddFeature: () => void;
   onOpenPlanDialog: () => void;
+  onOpenImportDialog?: () => void;
   addFeatureShortcut: KeyboardShortcut;
   planBacklogShortcut: KeyboardShortcut;
   isMounted: boolean;
@@ -36,6 +37,7 @@ export function BoardHeader({
   onAutoModeToggle,
   onAddFeature,
   onOpenPlanDialog,
+  onOpenImportDialog,
   addFeatureShortcut,
   planBacklogShortcut,
   isMounted,
@@ -113,6 +115,18 @@ export function BoardHeader({
           <Wand2 className="w-4 h-4 mr-2" />
           Backlog Planning
         </HotkeyButton>
+
+        {onOpenImportDialog && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onOpenImportDialog}
+            data-testid="import-work-items-button"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Import from Azure DevOps
+          </Button>
+        )}
 
         <HotkeyButton
           size="sm"

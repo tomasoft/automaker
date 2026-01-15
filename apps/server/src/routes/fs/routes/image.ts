@@ -53,10 +53,18 @@ export function createImageHandler() {
         '.webp': 'image/webp',
         '.svg': 'image/svg+xml',
         '.bmp': 'image/bmp',
+        '.pdf': 'application/pdf',
       };
 
-      res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+      const contentType = mimeTypes[ext] || 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=3600');
+
+      // For PDFs, set Content-Disposition to inline for browser preview
+      if (ext === '.pdf') {
+        res.setHeader('Content-Disposition', 'inline');
+      }
+
       res.send(buffer);
     } catch (error) {
       logError(error, 'Serve image failed');

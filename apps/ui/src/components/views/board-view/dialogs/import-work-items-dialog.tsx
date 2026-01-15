@@ -1,0 +1,1210 @@
+import { useState, useEffect, useCallback } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Loader2,
+  Download,
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Paperclip,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { useAppStore } from '@/store/app-store';
+import { getElectronAPI } from '@/lib/electron';
+import { getModelProvider, addProviderPrefix } from '@automaker/types';
+
+interface AzureWorkItem {
+  id: number;
+  title: string;
+  workItemType: string;
+  state: string;
+  assignedTo: string;
+  description?: string;
+  acceptanceCriteria?: string;
+  tags?: string;
+  priority?: number;
+  url: string;
+  attachments?: Array<{
+    id: string;
+    name: string;
+    url: string;
+  }>;
+}
+
+interface ChildWorkItem {
+  id: number;
+  title: string;
+  workItemType: string;
+  state: string;
+  url: string;
+  attachments?: Array<{
+    id: string;
+    name: string;
+    url: string;
+  }>;
+}
+
+interface ImportWorkItemsDialogProps {
+  open: boolean;
+  onClose: () => void;
+  projectPath: string;
+  onImported?: () => void;
+}
+
+export function ImportWorkItemsDialog({
+  open,
+  onClose,
+  projectPath,
+  onImported,
+}: ImportWorkItemsDialogProps) {
+  const addFeature = useAppStore((state) => state.addFeature);
+  const phaseModels = useAppStore((state) => state.phaseModels);
+  const defaultPlanningMode = useAppStore((state) => state.defaultPlanningMode);
+  const defaultRequirePlanApproval = useAppStore((state) => state.defaultRequirePlanApproval);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [workItems, setWorkItems] = useState<AzureWorkItem[]>([]);
+  const [childWorkItems, setChildWorkItems] = useState<Map<number, ChildWorkItem[]>>(new Map());
+  const [selectedWorkItems, setSelectedWorkItems] = useState<Set<number>>(new Set());
+  const [selectedChildren, setSelectedChildren] = useState<Set<number>>(new Set());
+  const [expandedWorkItems, setExpandedWorkItems] = useState<Set<number>>(new Set());
+  const [organization, setOrganization] = useState('');
+  const [project, setProject] = useState('');
+
+  // Get Azure DevOps config from settings when dialog opens
+  useEffect(() => {
+    const loadConfig = async () => {
+      if (!open) return;
+
+      try {
+        const azureConfigResponse = await fetch(
+          'http://localhost:3008/api/azure-devops-wiki/config',
+          {
+            credentials: 'include',
+          }
+        );
+
+        if (azureConfigResponse.ok) {
+          const configData = await azureConfigResponse.json();
+          if (configData.success && configData.organization && configData.project) {
+            setOrganization(configData.organization);
+            setProject(configData.project);
+          } else if (configData.authenticated && !configData.organization) {
+            // User is authenticated but config not in settings - check localStorage
+            const localOrg = localStorage.getItem('azure_devops_organization');
+            const localProject = localStorage.getItem('azure_devops_project');
+            const localWikiId = localStorage.getItem('azure_devops_wikiId');
+
+            if (localOrg && localProject) {
+              setOrganization(localOrg);
+              setProject(localProject);
+            } else {
+              toast.error('Azure DevOps organization and project not configured');
+            }
+          } else if (!configData.authenticated) {
+            toast.error('Not authenticated with Azure DevOps');
+          } else {
+            toast.error('Azure DevOps organization and project not configured');
+          }
+        } else {
+          toast.error('Failed to load Azure DevOps configuration');
+        }
+      } catch (error) {
+        console.error('Failed to load Azure config:', error);
+        toast.error('Failed to load Azure DevOps configuration');
+      }
+    };
+
+    loadConfig();
+  }, [open]);
+
+  // Fetch work items when dialog opens
+  useEffect(() => {
+    const fetchWorkItems = async () => {
+      if (!open || !organization || !project) {
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const response = await fetch(
+          `http://localhost:3008/api/azure-devops-work-items/list?organization=${encodeURIComponent(organization)}&project=${encodeURIComponent(project)}`,
+          {
+            credentials: 'include',
+          }
+        );
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error(
+              'Not authenticated with Azure DevOps. Please authenticate in Settings → DevOps Resources.'
+            );
+          }
+          throw new Error('Failed to fetch work items');
+        }
+
+        const data = await response.json();
+        if (data.success && data.workItems) {
+          setWorkItems(data.workItems);
+          toast.success(`Found ${data.workItems.length} work items assigned to you`);
+        } else {
+          throw new Error(data.error || 'Failed to fetch work items');
+        }
+      } catch (error) {
+        console.error('Failed to fetch work items:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to fetch work items');
+        setWorkItems([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchWorkItems();
+  }, [open, organization, project]);
+
+  // Fetch child work items when a work item is expanded
+  const fetchChildWorkItems = useCallback(
+    async (parentId: number) => {
+      if (!organization || !project) {
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `http://localhost:3008/api/azure-devops-work-items/children?organization=${encodeURIComponent(organization)}&project=${encodeURIComponent(project)}&parentId=${parentId}`,
+          {
+            credentials: 'include',
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch child work items');
+        }
+
+        const data = await response.json();
+        if (data.success && data.childWorkItems) {
+          setChildWorkItems((prev) => new Map(prev).set(parentId, data.childWorkItems));
+        }
+      } catch (error) {
+        console.error('Failed to fetch child work items:', error);
+        toast.error('Failed to fetch child work items');
+      }
+    },
+    [organization, project]
+  );
+
+  const toggleWorkItemExpanded = useCallback(
+    (workItemId: number) => {
+      setExpandedWorkItems((prev) => {
+        const next = new Set(prev);
+        if (next.has(workItemId)) {
+          next.delete(workItemId);
+        } else {
+          next.add(workItemId);
+          // Fetch children if not already loaded
+          if (!childWorkItems.has(workItemId)) {
+            fetchChildWorkItems(workItemId);
+          }
+        }
+        return next;
+      });
+    },
+    [childWorkItems, fetchChildWorkItems]
+  );
+
+  const toggleWorkItemSelected = (workItemId: number) => {
+    setSelectedWorkItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(workItemId)) {
+        next.delete(workItemId);
+        // Also deselect children
+        const children = childWorkItems.get(workItemId);
+        if (children) {
+          children.forEach((child) => {
+            setSelectedChildren((prevChildren) => {
+              const nextChildren = new Set(prevChildren);
+              nextChildren.delete(child.id);
+              return nextChildren;
+            });
+          });
+        }
+      } else {
+        next.add(workItemId);
+      }
+      return next;
+    });
+  };
+
+  const toggleChildSelected = (childId: number) => {
+    setSelectedChildren((prev) => {
+      const next = new Set(prev);
+      if (next.has(childId)) {
+        next.delete(childId);
+      } else {
+        next.add(childId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedWorkItems.size === workItems.length) {
+      setSelectedWorkItems(new Set());
+      setSelectedChildren(new Set());
+    } else {
+      setSelectedWorkItems(new Set(workItems.map((wi) => wi.id)));
+      // Don't auto-select children
+    }
+  };
+
+  const handleImport = async () => {
+    if (selectedWorkItems.size === 0 && selectedChildren.size === 0) {
+      toast.error('Please select at least one work item to import');
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      // Get selected work items data
+      const selectedItems = workItems.filter((wi) => selectedWorkItems.has(wi.id));
+      const selectedChildItems: ChildWorkItem[] = [];
+
+      childWorkItems.forEach((children, parentId) => {
+        children.forEach((child) => {
+          if (selectedChildren.has(child.id)) {
+            selectedChildItems.push(child);
+          }
+        });
+      });
+
+      // Helper function to fetch and process comments
+      const getWorkItemComments = async (workItemId: number): Promise<string> => {
+        try {
+          const response = await fetch(
+            `http://localhost:3008/api/azure-devops-work-items/comments?organization=${encodeURIComponent(organization)}&project=${encodeURIComponent(project)}&workItemId=${workItemId}`,
+            { credentials: 'include' }
+          );
+
+          if (!response.ok) {
+            console.warn(`Failed to fetch comments for work item ${workItemId}`);
+            return '';
+          }
+
+          const data = await response.json();
+          if (!data.success || !data.comments || data.comments.length === 0) {
+            return '';
+          }
+
+          // Filter out our own "Imported to AutoMaker" comments
+          const relevantComments = data.comments.filter(
+            (comment: any) =>
+              !comment.text.includes('Imported to AutoMaker as feature') &&
+              !comment.text.includes('Linked to AutoMaker feature')
+          );
+
+          if (relevantComments.length === 0) {
+            return '';
+          }
+
+          // Format comments as markdown
+          const commentsText = relevantComments
+            .map((comment: any) => {
+              // Strip HTML tags for simple text extraction
+              const textContent = comment.text.replace(/<[^>]*>/g, '').trim();
+              return `**Comment by ${comment.createdBy} (${new Date(comment.createdDate).toLocaleDateString()}):**\n${textContent}`;
+            })
+            .join('\n\n---\n\n');
+
+          return `\n\n## Comments from Azure DevOps\n\n${commentsText}`;
+        } catch (error) {
+          console.warn(`Failed to fetch comments for work item ${workItemId}:`, error);
+          return '';
+        }
+      };
+
+      // Helper function to download comment attachments
+      const downloadCommentAttachments = async (
+        workItemId: number,
+        featureId: string
+      ): Promise<
+        Array<{ id: string; path: string; filename: string; mimeType: string; content: string }>
+      > => {
+        try {
+          const response = await fetch(
+            `http://localhost:3008/api/azure-devops-work-items/comments?organization=${encodeURIComponent(organization)}&project=${encodeURIComponent(project)}&workItemId=${workItemId}`,
+            { credentials: 'include' }
+          );
+
+          if (!response.ok) {
+            return [];
+          }
+
+          const data = await response.json();
+          if (!data.success || !data.comments) {
+            return [];
+          }
+
+          // Collect all attachments from comments
+          const allAttachments: Array<{ id: string; name: string; url: string }> = [];
+          for (const comment of data.comments) {
+            if (comment.attachments && comment.attachments.length > 0) {
+              allAttachments.push(...comment.attachments);
+            }
+          }
+
+          if (allAttachments.length === 0) {
+            return [];
+          }
+
+          console.log(
+            `Found ${allAttachments.length} attachments in comments for work item ${workItemId}`
+          );
+
+          // Download comment attachments using same logic as work item attachments
+          return await downloadAttachments(
+            { id: workItemId, attachments: allAttachments } as any,
+            featureId
+          );
+        } catch (error) {
+          console.warn(
+            `Failed to download comment attachments for work item ${workItemId}:`,
+            error
+          );
+          return [];
+        }
+      };
+
+      // Helper function to download and save attachments
+      const downloadAttachments = async (
+        workItem:
+          | AzureWorkItem
+          | ChildWorkItem
+          | { id: number; attachments: Array<{ id: string; name: string; url: string }> },
+        featureId: string
+      ): Promise<
+        Array<{ id: string; path: string; filename: string; mimeType: string; content: string }>
+      > => {
+        if (!workItem.attachments || workItem.attachments.length === 0) {
+          console.log(`No attachments found for work item ${workItem.id}`);
+          return [];
+        }
+
+        console.log(
+          `Downloading ${workItem.attachments.length} attachments for work item ${workItem.id}:`,
+          workItem.attachments.map((a) => a.name)
+        );
+
+        const api = getElectronAPI();
+        const attachmentFiles: Array<{
+          id: string;
+          path: string;
+          filename: string;
+          mimeType: string;
+          content: string;
+        }> = [];
+
+        for (const attachment of workItem.attachments) {
+          try {
+            console.log(`Processing attachment: ${attachment.name}`);
+
+            // Download attachment from server
+            const response = await fetch(
+              `http://localhost:3008/api/azure-devops-work-items/attachment/${attachment.id}?organization=${encodeURIComponent(organization)}&project=${encodeURIComponent(project)}`,
+              { credentials: 'include' }
+            );
+
+            if (!response.ok) {
+              console.warn(
+                `Failed to download attachment ${attachment.name}:`,
+                response.statusText
+              );
+              continue;
+            }
+
+            const blob = await response.blob();
+            console.log(
+              `Downloaded blob for ${attachment.name}, size: ${blob.size}, type: ${blob.type}`
+            );
+
+            const arrayBuffer = await blob.arrayBuffer();
+            const buffer = new Uint8Array(arrayBuffer);
+            console.log(`ArrayBuffer size: ${buffer.length}`);
+
+            // Convert to base64
+            const base64 = btoa(String.fromCharCode(...buffer));
+            const mimeType = blob.type || 'application/octet-stream';
+            console.log(`Base64 length: ${base64.length}, mimeType: ${mimeType}`);
+
+            // First save to temp location
+            if (!api.saveImageToTemp) {
+              console.warn('saveImageToTemp not available, skipping attachment:', attachment.name);
+              continue;
+            }
+
+            const tempResult = await api.saveImageToTemp(
+              base64,
+              attachment.name,
+              mimeType,
+              projectPath
+            );
+
+            console.log(`saveImageToTemp result:`, tempResult);
+
+            if (!tempResult.success || !tempResult.path) {
+              console.warn(`Failed to save attachment ${attachment.name}`);
+              continue;
+            }
+
+            // Save to context folder with base64 encoding
+            const contextPath = `${projectPath}/.automaker/features/${featureId}/context`;
+            const contextFilePath = `${contextPath}/${attachment.name}`;
+
+            console.log(`Saving to context: ${contextFilePath}`);
+
+            // Create context directory
+            await api.mkdir(contextPath);
+
+            // Write file with base64 encoding - server will decode and save as binary
+            const writeResult = await api.writeFile(contextFilePath, base64, 'base64');
+            console.log(`Write result:`, writeResult);
+
+            if (writeResult.success) {
+              console.log(`Successfully saved ${attachment.name} to ${contextFilePath}`);
+
+              attachmentFiles.push({
+                id: `attachment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                path: contextFilePath,
+                filename: attachment.name,
+                mimeType,
+                content: base64, // Keep base64 for preview
+              });
+            } else {
+              console.warn(`Failed to save file for ${attachment.name}`);
+            }
+          } catch (error) {
+            console.error(`Failed to save attachment ${attachment.name}:`, error);
+          }
+        }
+
+        return attachmentFiles;
+      };
+
+      // Convert work items to features and add to store
+      let importCount = 0;
+      const api = getElectronAPI();
+
+      if (!api.features) {
+        throw new Error('Features API not available');
+      }
+
+      // Convert parent work items
+      for (const item of selectedItems) {
+        // Get default model from phase models (same as Add Feature dialog)
+        const defaultPhaseModel = phaseModels.featureGenerationModel;
+        const defaultThinkingLevel = defaultPhaseModel?.thinkingLevel || 'none';
+
+        // Normalize the model to include provider prefix if needed
+        let normalizedModel: string;
+        if (defaultPhaseModel?.model) {
+          const modelString = defaultPhaseModel.model as string;
+          const provider = getModelProvider(modelString);
+          normalizedModel = addProviderPrefix(modelString, provider);
+        } else {
+          normalizedModel = 'opus'; // Claude models don't need prefix
+        }
+
+        const featureId = `feature-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        // Fetch comments and append to description
+        const commentsText = await getWorkItemComments(item.id);
+
+        const feature = {
+          id: featureId,
+          title: `[${item.workItemType}] ${item.title}`,
+          category: item.workItemType.toLowerCase().replace(' ', '-'),
+          description: buildDescription(item) + commentsText,
+          priority: item.priority || 2,
+          status: 'backlog' as const,
+          tags: item.tags ? item.tags.split(';').map((t) => t.trim()) : [],
+          steps: [],
+          model: normalizedModel,
+          thinkingLevel: defaultThinkingLevel,
+          planningMode: defaultPlanningMode,
+          requirePlanApproval: defaultRequirePlanApproval,
+          azureWorkItemId: item.id,
+          azureWorkItemUrl: item.url,
+        };
+
+        // Persist to backend
+        const result = await api.features.create(projectPath, feature);
+        if (result.success && result.feature) {
+          // Download and attach files from Azure DevOps work item
+          const attachmentFiles = await downloadAttachments(item, featureId);
+          console.log(
+            `Downloaded ${attachmentFiles.length} attachment files for feature ${featureId}:`,
+            attachmentFiles.map((f) => f.filename)
+          );
+
+          // Download and attach files from comments
+          const commentAttachments = await downloadCommentAttachments(item.id, featureId);
+          console.log(
+            `Downloaded ${commentAttachments.length} comment attachment files for feature ${featureId}:`,
+            commentAttachments.map((f) => f.filename)
+          );
+
+          const allAttachments = [...attachmentFiles, ...commentAttachments];
+
+          if (allAttachments.length > 0) {
+            // Categorize attachments: images go to imagePaths, others to textFilePaths
+            const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
+            const images = allAttachments
+              .filter((file) => {
+                const ext = file.filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+                return imageExtensions.includes(ext);
+              })
+              .map((file) => ({
+                id: file.id,
+                path: file.path,
+                filename: file.filename,
+                mimeType: file.mimeType,
+              }));
+
+            const docsWithoutText = allAttachments.filter((file) => {
+              const ext = file.filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+              return !imageExtensions.includes(ext);
+            });
+
+            // Extract text from DOCX and PDF files
+            const docs = await Promise.all(
+              docsWithoutText.map(async (file) => {
+                const ext = file.filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+                const filename = file.filename; // Capture filename in closure
+                const fileContent = file.content; // Capture content in closure to avoid race conditions
+                let description = '';
+
+                // Debug: Check what content we actually have
+                console.log(
+                  `[PARENT] Processing ${filename} (${ext}), content length: ${fileContent?.length}`
+                );
+                if (fileContent) {
+                  const firstBytes = atob(fileContent.substring(0, 20));
+                  const bytes = firstBytes.split('').map((c) => c.charCodeAt(0));
+                  console.log(
+                    `[PARENT] ${filename} first bytes:`,
+                    bytes.slice(0, 4),
+                    bytes[0] === 0x25 && bytes[1] === 0x50
+                      ? 'PDF'
+                      : bytes[0] === 0x50 && bytes[1] === 0x4b
+                        ? 'ZIP/DOCX'
+                        : 'Unknown'
+                  );
+                }
+
+                // Detect actual file type by magic bytes (first few bytes of base64-decoded content)
+                let actualFileType = ext;
+                if (fileContent) {
+                  try {
+                    // Decode first few bytes to check file signature
+                    const firstBytes = atob(fileContent.substring(0, 20));
+                    const bytes = firstBytes.split('').map((c) => c.charCodeAt(0));
+
+                    // Check for PDF signature (%PDF)
+                    if (
+                      bytes[0] === 0x25 &&
+                      bytes[1] === 0x50 &&
+                      bytes[2] === 0x44 &&
+                      bytes[3] === 0x46
+                    ) {
+                      actualFileType = '.pdf';
+                      console.log(`File ${filename} has extension ${ext} but is actually a PDF`);
+                    }
+                    // Check for ZIP/DOCX signature (PK)
+                    else if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+                      if (ext !== '.docx' && ext !== '.doc') {
+                        actualFileType = '.docx';
+                        console.log(
+                          `File ${filename} has extension ${ext} but is actually a ZIP/DOCX`
+                        );
+                      }
+                    }
+                  } catch (e) {
+                    console.warn(`Could not detect file type for ${filename}:`, e);
+                  }
+                }
+
+                if (actualFileType === '.docx' || actualFileType === '.doc') {
+                  // Try to extract text from DOCX
+                  try {
+                    console.log(`[PARENT] Extracting DOCX text from ${filename}...`);
+                    const extractResponse = await fetch(
+                      'http://localhost:3008/api/azure-devops-work-items/extract-docx-text',
+                      {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'X-Filename': filename, // Add filename to headers for debugging
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({ base64Content: fileContent }),
+                      }
+                    );
+
+                    if (extractResponse.ok) {
+                      const extractData = await extractResponse.json();
+                      if (extractData.success && extractData.text) {
+                        description = `[Word Document: ${file.filename}]\n\n## Extracted Content:\n\n${extractData.text}\n\n---\n\nFile location: ${file.path}`;
+                      } else {
+                        description = `[Word Document: ${file.filename}]\n\n⚠️ Could not extract text from this document.\n\nFile location: ${file.path}`;
+                      }
+                    } else {
+                      description = `[Word Document: ${file.filename}]\n\n⚠️ Could not extract text from this document.\n\nFile location: ${file.path}`;
+                    }
+                  } catch (error) {
+                    console.warn(`Failed to extract text from ${file.filename}:`, error);
+                    description = `[Word Document: ${file.filename}]\n\n⚠️ Could not extract text from this document.\n\nFile location: ${file.path}`;
+                  }
+                } else if (actualFileType === '.pdf') {
+                  // Try to extract text from PDF
+                  try {
+                    console.log(
+                      `[PARENT] Extracting PDF text from ${filename} (detected as PDF)...`
+                    );
+                    const extractResponse = await fetch(
+                      'http://localhost:3008/api/azure-devops-work-items/extract-pdf-text',
+                      {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ base64Content: fileContent }),
+                      }
+                    );
+
+                    if (extractResponse.ok) {
+                      const extractData = await extractResponse.json();
+                      console.log(`[PARENT] PDF extraction result:`, {
+                        success: extractData.success,
+                        textLength: extractData.text?.length,
+                        text: extractData.text?.substring(0, 100),
+                      });
+                      if (extractData.success && extractData.text) {
+                        description = `[PDF Document: ${file.filename}]\n\n## Extracted Content:\n\n${extractData.text}\n\n---\n\nFile location: ${file.path}`;
+                        console.log(`[PARENT] PDF description set, length:`, description.length);
+                      } else {
+                        console.warn(`[PARENT] PDF extraction returned no text`);
+                        description = `[PDF Document: ${file.filename}]\n\n⚠️ Could not extract text from this PDF.\n\nFile location: ${file.path}`;
+                      }
+                    } else {
+                      console.error(
+                        `[PARENT] PDF extraction failed with status:`,
+                        extractResponse.status
+                      );
+                      description = `[PDF Document: ${file.filename}]\n\n⚠️ Could not extract text from this PDF.\n\nFile location: ${file.path}`;
+                    }
+                  } catch (error) {
+                    console.warn(`Failed to extract text from ${file.filename}:`, error);
+                    description = `[PDF Document: ${file.filename}]\n\n⚠️ Could not extract text from this PDF.\n\nFile location: ${file.path}`;
+                  }
+                } else if (ext === '.xlsx' || ext === '.xls') {
+                  description = `[Excel Spreadsheet: ${file.filename}]\n\nThis spreadsheet was attached from Azure DevOps and may contain:\n- Data requirements or schemas\n- Test cases or scenarios\n- Calculations or formulas\n- Reference data\n\nRefer to the feature description for relevant data details. File location: ${file.path}`;
+                } else {
+                  description = `[Attachment: ${file.filename}]\n\nFile type: ${file.mimeType}\nFile location: ${file.path}\n\nThis file was attached from Azure DevOps. Review the feature description and comments for relevant details from this attachment.`;
+                }
+
+                return {
+                  id: file.id,
+                  path: file.path,
+                  filename: file.filename,
+                  mimeType: file.mimeType,
+                  content: description,
+                };
+              })
+            );
+
+            // Update feature with categorized attachments
+            if (images.length > 0) {
+              result.feature.imagePaths = images;
+            }
+            if (docs.length > 0) {
+              result.feature.textFilePaths = docs;
+            }
+
+            console.log(`Updating feature - Images: ${images.length}, Docs: ${docs.length}`);
+            const updateResult = await api.features.update(
+              projectPath,
+              result.feature.id,
+              result.feature
+            );
+            console.log(`Feature update result:`, updateResult);
+          }
+
+          addFeature(result.feature);
+          importCount++;
+
+          // Add two-way link: link the Azure DevOps work item back to this feature
+          try {
+            const featureUrl = `automaker://feature/${result.feature.id}`; // Deep link to feature
+            await fetch('http://localhost:3008/api/azure-devops-work-items/add-link', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                organization,
+                project,
+                workItemId: item.id,
+                linkUrl: featureUrl,
+                linkComment: `Imported to AutoMaker as feature: ${result.feature.title}`,
+              }),
+            });
+          } catch (linkError) {
+            console.warn('Failed to add link to Azure DevOps work item:', linkError);
+            // Don't fail the import if linking fails
+          }
+        }
+      }
+
+      // Convert child work items
+      for (const child of selectedChildItems) {
+        // Get default model from phase models (same as Add Feature dialog)
+        const defaultPhaseModel = phaseModels.featureGenerationModel;
+        const defaultThinkingLevel = defaultPhaseModel?.thinkingLevel || 'none';
+
+        // Normalize the model to include provider prefix if needed
+        let normalizedModel: string;
+        if (defaultPhaseModel?.model) {
+          const modelString = defaultPhaseModel.model as string;
+          const provider = getModelProvider(modelString);
+          normalizedModel = addProviderPrefix(modelString, provider);
+        } else {
+          normalizedModel = 'opus'; // Claude models don't need prefix
+        }
+
+        const childFeatureId = `feature-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        const feature = {
+          id: childFeatureId,
+          title: `[${child.workItemType}] ${child.title}`,
+          category: child.workItemType.toLowerCase().replace(' ', '-'),
+          description: `Azure DevOps Work Item: ${child.url}`,
+          status: 'backlog' as const,
+          steps: [],
+          model: normalizedModel,
+          thinkingLevel: defaultThinkingLevel,
+          planningMode: defaultPlanningMode,
+          requirePlanApproval: defaultRequirePlanApproval,
+          azureWorkItemId: child.id,
+          azureWorkItemUrl: child.url,
+        };
+
+        // Persist to backend
+        const result = await api.features.create(projectPath, feature);
+        if (result.success && result.feature) {
+          // Download and attach files from Azure DevOps
+          const attachmentFiles = await downloadAttachments(child, childFeatureId);
+          if (attachmentFiles.length > 0) {
+            // Categorize attachments: images go to imagePaths, others to textFilePaths
+            const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
+            const images = attachmentFiles
+              .filter((file) => {
+                const ext = file.filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+                return imageExtensions.includes(ext);
+              })
+              .map((file) => ({
+                id: file.id,
+                path: file.path,
+                filename: file.filename,
+                mimeType: file.mimeType,
+              }));
+
+            const docsWithoutText = attachmentFiles.filter((file) => {
+              const ext = file.filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+              return !imageExtensions.includes(ext);
+            });
+
+            // Extract text from DOCX and PDF files
+            const docs = await Promise.all(
+              docsWithoutText.map(async (file) => {
+                const ext = file.filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+                let description = '';
+
+                if (ext === '.docx' || ext === '.doc') {
+                  // Try to extract text from DOCX
+                  try {
+                    const extractResponse = await fetch(
+                      'http://localhost:3008/api/azure-devops-work-items/extract-docx-text',
+                      {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ base64Content: file.content }),
+                      }
+                    );
+
+                    if (extractResponse.ok) {
+                      const extractData = await extractResponse.json();
+                      if (extractData.success && extractData.text) {
+                        description = `[Word Document: ${file.filename}]\n\n## Extracted Content:\n\n${extractData.text}\n\n---\n\nFile location: ${file.path}`;
+                      } else {
+                        description = `[Word Document: ${file.filename}]\n\n⚠️ Could not extract text from this document.\n\nFile location: ${file.path}`;
+                      }
+                    } else {
+                      description = `[Word Document: ${file.filename}]\n\n⚠️ Could not extract text from this document.\n\nFile location: ${file.path}`;
+                    }
+                  } catch (error) {
+                    console.warn(`Failed to extract text from ${file.filename}:`, error);
+                    description = `[Word Document: ${file.filename}]\n\n⚠️ Could not extract text from this document.\n\nFile location: ${file.path}`;
+                  }
+                } else if (ext === '.pdf') {
+                  // Try to extract text from PDF
+                  try {
+                    const extractResponse = await fetch(
+                      'http://localhost:3008/api/azure-devops-work-items/extract-pdf-text',
+                      {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ base64Content: file.content }),
+                      }
+                    );
+
+                    if (extractResponse.ok) {
+                      const extractData = await extractResponse.json();
+                      if (extractData.success && extractData.text) {
+                        description = `[PDF Document: ${file.filename}]\n\n## Extracted Content:\n\n${extractData.text}\n\n---\n\nPages: ${extractData.pages || 'Unknown'}\nFile location: ${file.path}`;
+                      } else {
+                        description = `[PDF Document: ${file.filename}]\n\n⚠️ Could not extract text from this PDF.\n\nFile location: ${file.path}`;
+                      }
+                    } else {
+                      description = `[PDF Document: ${file.filename}]\n\n⚠️ Could not extract text from this PDF.\n\nFile location: ${file.path}`;
+                    }
+                  } catch (error) {
+                    console.warn(`Failed to extract text from ${file.filename}:`, error);
+                    description = `[PDF Document: ${file.filename}]\n\n⚠️ Could not extract text from this PDF.\n\nFile location: ${file.path}`;
+                  }
+                } else if (ext === '.xlsx' || ext === '.xls') {
+                  description = `[Excel Spreadsheet: ${file.filename}]\n\nThis spreadsheet was attached from Azure DevOps and may contain:\n- Data requirements or schemas\n- Test cases or scenarios\n- Calculations or formulas\n- Reference data\n\nRefer to the feature description for relevant data details. File location: ${file.path}`;
+                } else {
+                  description = `[Attachment: ${file.filename}]\n\nFile type: ${file.mimeType}\nFile location: ${file.path}\n\nThis file was attached from Azure DevOps. Review the feature description and comments for relevant details from this attachment.`;
+                }
+
+                return {
+                  id: file.id,
+                  path: file.path,
+                  filename: file.filename,
+                  mimeType: file.mimeType,
+                  content: description,
+                };
+              })
+            );
+
+            // Update feature with categorized attachments
+            if (images.length > 0) {
+              result.feature.imagePaths = images;
+            }
+            if (docs.length > 0) {
+              result.feature.textFilePaths = docs;
+            }
+
+            await api.features.update(projectPath, result.feature.id, result.feature);
+          }
+
+          addFeature(result.feature);
+          importCount++;
+
+          // Add two-way link: link the Azure DevOps work item back to this feature
+          try {
+            const featureUrl = `automaker://feature/${result.feature.id}`; // Deep link to feature
+            await fetch('http://localhost:3008/api/azure-devops-work-items/add-link', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                organization,
+                project,
+                workItemId: child.id,
+                linkUrl: featureUrl,
+                linkComment: `Imported to AutoMaker as feature: ${result.feature.title}`,
+              }),
+            });
+          } catch (linkError) {
+            console.warn('Failed to add link to Azure DevOps work item:', linkError);
+            // Don't fail the import if linking fails
+          }
+        }
+      }
+      toast.success(`Successfully imported ${importCount} work items to backlog`);
+      onImported?.();
+      onClose();
+    } catch (error) {
+      console.error('Failed to import work items:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to import work items');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const buildDescription = (item: AzureWorkItem): string => {
+    let description = '';
+
+    if (item.description) {
+      description += `## Description\n\n${stripHtml(item.description)}\n\n`;
+    }
+
+    if (item.acceptanceCriteria) {
+      description += `## Acceptance Criteria\n\n${stripHtml(item.acceptanceCriteria)}\n\n`;
+    }
+
+    description += `## Azure DevOps Details\n\n`;
+    description += `- Work Item ID: ${item.id}\n`;
+    description += `- Type: ${item.workItemType}\n`;
+    description += `- State: ${item.state}\n`;
+    description += `- URL: ${item.url}\n`;
+
+    if (item.tags) {
+      description += `- Tags: ${item.tags}\n`;
+    }
+
+    return description;
+  };
+
+  const stripHtml = (html: string): string => {
+    // Simple HTML stripping - in production you might want a more robust solution
+    return html
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<[^>]*>/g, '')
+      .trim();
+  };
+
+  const getWorkItemIcon = (type: string) => {
+    switch (type.toLowerCase()) {
+      case 'bug':
+        return '🐛';
+      case 'user story':
+        return '📖';
+      case 'feature':
+        return '✨';
+      case 'task':
+        return '✓';
+      default:
+        return '📝';
+    }
+  };
+
+  const getStateColor = (state: string) => {
+    const stateLower = state.toLowerCase();
+    if (stateLower.includes('new') || stateLower.includes('proposed')) return 'text-blue-500';
+    if (stateLower.includes('active') || stateLower.includes('committed')) return 'text-yellow-500';
+    if (stateLower.includes('resolved') || stateLower.includes('done')) return 'text-green-500';
+    if (stateLower.includes('closed')) return 'text-gray-500';
+    return 'text-gray-400';
+  };
+
+  const allSelected = selectedWorkItems.size === workItems.length && workItems.length > 0;
+  const someSelected = selectedWorkItems.size > 0 && selectedWorkItems.size < workItems.length;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Import Work Items from Azure DevOps</DialogTitle>
+          <DialogDescription>
+            Select bugs, user stories, or features assigned to you to add to your backlog
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto py-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              <span className="ml-3 text-muted-foreground">Loading work items...</span>
+            </div>
+          ) : workItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <AlertCircle className="w-12 h-12 text-muted-foreground mb-3" />
+              <p className="text-muted-foreground">No work items found assigned to you</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                in {organization}/{project}
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Looking for: Bugs, User Stories, and Features
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Select all header */}
+              <div className="flex items-center gap-2 pb-3 border-b mb-3">
+                <Checkbox
+                  id="select-all"
+                  checked={allSelected}
+                  // @ts-expect-error - indeterminate is valid but not in types
+                  indeterminate={someSelected}
+                  onCheckedChange={toggleSelectAll}
+                />
+                <label htmlFor="select-all" className="text-sm font-medium cursor-pointer">
+                  {allSelected ? 'Deselect all' : 'Select all'} (
+                  {selectedWorkItems.size + selectedChildren.size}/
+                  {workItems.length +
+                    Array.from(childWorkItems.values()).reduce(
+                      (acc, children) => acc + children.length,
+                      0
+                    )}
+                  )
+                </label>
+              </div>
+
+              {/* Work items list */}
+              <div className="space-y-2">
+                {workItems.map((workItem) => {
+                  const children = childWorkItems.get(workItem.id) || [];
+                  const isExpanded = expandedWorkItems.has(workItem.id);
+                  const hasChildren = workItem.workItemType === 'Feature';
+
+                  return (
+                    <div key={workItem.id}>
+                      <div
+                        className={cn(
+                          'rounded-lg border p-3 transition-colors',
+                          selectedWorkItems.has(workItem.id) && 'border-primary bg-primary/5'
+                        )}
+                      >
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            checked={selectedWorkItems.has(workItem.id)}
+                            onCheckedChange={() => toggleWorkItemSelected(workItem.id)}
+                            className="mt-1"
+                          />
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  {hasChildren && (
+                                    <button
+                                      onClick={() => toggleWorkItemExpanded(workItem.id)}
+                                      className="hover:bg-muted rounded p-0.5"
+                                    >
+                                      {isExpanded ? (
+                                        <ChevronDown className="w-4 h-4" />
+                                      ) : (
+                                        <ChevronRight className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                  )}
+                                  <span className="text-lg">
+                                    {getWorkItemIcon(workItem.workItemType)}
+                                  </span>
+                                  <h4 className="font-medium text-sm truncate">{workItem.title}</h4>
+                                </div>
+                                <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                                  <span className="font-mono">#{workItem.id}</span>
+                                  <span className="inline-flex items-center gap-1">
+                                    {workItem.workItemType}
+                                  </span>
+                                  <span
+                                    className={cn('font-medium', getStateColor(workItem.state))}
+                                  >
+                                    {workItem.state}
+                                  </span>
+                                  {workItem.priority !== undefined && (
+                                    <span>Priority: {workItem.priority}</span>
+                                  )}
+                                  {workItem.attachments && workItem.attachments.length > 0 && (
+                                    <span className="inline-flex items-center gap-1">
+                                      <Paperclip className="w-3 h-3" />
+                                      {workItem.attachments.length}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Child work items */}
+                      {isExpanded && children.length > 0 && (
+                        <div className="ml-8 mt-2 space-y-2">
+                          {children.map((child) => (
+                            <div
+                              key={child.id}
+                              className={cn(
+                                'rounded-lg border p-2 transition-colors',
+                                selectedChildren.has(child.id) && 'border-primary bg-primary/5'
+                              )}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  checked={selectedChildren.has(child.id)}
+                                  onCheckedChange={() => toggleChildSelected(child.id)}
+                                />
+                                <span className="text-sm">
+                                  {getWorkItemIcon(child.workItemType)}
+                                </span>
+                                <span className="text-sm font-medium flex-1">{child.title}</span>
+                                {child.attachments && child.attachments.length > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                    <Paperclip className="w-3 h-3" />
+                                    {child.attachments.length}
+                                  </span>
+                                )}
+                                <span className="text-xs font-mono text-muted-foreground">
+                                  #{child.id}
+                                </span>
+                                <span
+                                  className={cn('text-xs font-medium', getStateColor(child.state))}
+                                >
+                                  {child.state}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={isImporting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleImport}
+            disabled={
+              isLoading ||
+              isImporting ||
+              (selectedWorkItems.size === 0 && selectedChildren.size === 0)
+            }
+          >
+            {isImporting ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Importing...
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4 mr-2" />
+                Import Selected ({selectedWorkItems.size + selectedChildren.size})
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
