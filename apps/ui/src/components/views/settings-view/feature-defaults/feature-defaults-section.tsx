@@ -1,5 +1,6 @@
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import {
   FlaskConical,
   Settings2,
@@ -12,6 +13,7 @@ import {
   ScrollText,
   ShieldCheck,
   User,
+  Wallet,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -35,6 +37,7 @@ interface FeatureDefaultsSectionProps {
   defaultRequirePlanApproval: boolean;
   defaultAIProfileId: string | null;
   aiProfiles: AIProfile[];
+  maxBudget: number;
   onShowProfilesOnlyChange: (value: boolean) => void;
   onDefaultSkipTestsChange: (value: boolean) => void;
   onEnableDependencyBlockingChange: (value: boolean) => void;
@@ -43,6 +46,7 @@ interface FeatureDefaultsSectionProps {
   onDefaultPlanningModeChange: (value: PlanningMode) => void;
   onDefaultRequirePlanApprovalChange: (value: boolean) => void;
   onDefaultAIProfileIdChange: (value: string | null) => void;
+  onMaxBudgetChange: (value: number) => void;
 }
 
 export function FeatureDefaultsSection({
@@ -55,6 +59,7 @@ export function FeatureDefaultsSection({
   defaultRequirePlanApproval,
   defaultAIProfileId,
   aiProfiles,
+  maxBudget,
   onShowProfilesOnlyChange,
   onDefaultSkipTestsChange,
   onEnableDependencyBlockingChange,
@@ -63,6 +68,7 @@ export function FeatureDefaultsSection({
   onDefaultPlanningModeChange,
   onDefaultRequirePlanApprovalChange,
   onDefaultAIProfileIdChange,
+  onMaxBudgetChange,
 }: FeatureDefaultsSectionProps) {
   // Find the selected profile name for display
   const selectedProfile = defaultAIProfileId
@@ -224,6 +230,36 @@ export function FeatureDefaultsSection({
               {selectedProfile
                 ? `New features will use the "${selectedProfile.name}" profile (${selectedProfile.model}, ${selectedProfile.thinkingLevel} thinking).`
                 : 'Pre-select an AI profile when creating new features. Choose "None" to pick manually each time.'}
+            </p>
+          </div>
+        </div>
+
+        {/* Separator */}
+        <div className="border-t border-border/30" />
+
+        {/* Max Budget Setting */}
+        <div className="group flex items-start space-x-3 p-3 rounded-xl hover:bg-accent/30 transition-colors duration-200 -mx-3">
+          <div className="w-10 h-10 mt-0.5 rounded-xl flex items-center justify-center shrink-0 bg-amber-500/10">
+            <Wallet className="w-5 h-5 text-amber-500" />
+          </div>
+          <div className="flex-1 space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="max-budget" className="text-foreground font-medium">
+                Maximum Budget Limit (£)
+              </Label>
+              <Input
+                id="max-budget"
+                type="number"
+                min="1"
+                value={maxBudget}
+                onChange={(e) => onMaxBudgetChange(Number(e.target.value))}
+                className="w-[140px] h-8"
+                data-testid="max-budget-input"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground/80 leading-relaxed">
+              Maximum budget cap in pounds (£). Project budgets cannot exceed this limit. Set a
+              reasonable limit to control costs across all projects.
             </p>
           </div>
         </div>

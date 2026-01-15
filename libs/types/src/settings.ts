@@ -421,6 +421,16 @@ export interface KeyboardShortcuts {
   splitTerminalDown: string;
   /** Close current terminal */
   closeTerminal: string;
+  /** Open ideation view */
+  ideation: string;
+  /** Open GitHub issues */
+  githubIssues: string;
+  /** Open GitHub PRs */
+  githubPrs: string;
+  /** Open AI chat */
+  chat: string;
+  /** Open usage & costs */
+  usage: string;
 }
 
 /**
@@ -709,6 +719,10 @@ export interface GlobalSettings {
   /** ID of currently selected AI profile (null = use built-in) */
   defaultAIProfileId: string | null;
 
+  // Budget Configuration
+  /** Maximum budget limit in £ (pounds) that project budgets cannot exceed */
+  maxBudget: number;
+
   // Audio Preferences
   /** Mute completion notification sound */
   muteDoneSound: boolean;
@@ -939,6 +953,10 @@ export interface ProjectSettings {
   repositoryGraph?: RepositoryGraph;
   /** Project-specific impact analysis rules (overrides global) */
   impactAnalysisRules?: ImpactRule[];
+
+  // Budget Configuration
+  /** Project-specific budget in £ (pounds) - optional per-project budget */
+  budget?: number;
 }
 
 /**
@@ -992,6 +1010,11 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
   splitTerminalRight: 'Alt+D',
   splitTerminalDown: 'Alt+S',
   closeTerminal: 'Alt+W',
+  ideation: 'I',
+  githubIssues: 'G',
+  githubPrs: 'R',
+  chat: 'H',
+  usage: 'U',
 };
 
 /** Default impact analysis rules for gotcha detection */
@@ -1082,6 +1105,7 @@ export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   defaultPlanningMode: 'skip',
   defaultRequirePlanApproval: false,
   defaultAIProfileId: null,
+  maxBudget: 100,
   muteDoneSound: false,
   phaseModels: DEFAULT_PHASE_MODELS,
   enhancementModel: 'sonnet',

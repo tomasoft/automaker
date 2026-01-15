@@ -169,6 +169,12 @@ export type {
 export * from './cursor-models.js';
 export * from './cursor-cli.js';
 
+// Usage tracking types
+export * from './usage-tracking.js';
+
+// Chat types
+export * from './chat.js';
+
 // Provider utilities
 export {
   PROVIDER_PREFIXES,

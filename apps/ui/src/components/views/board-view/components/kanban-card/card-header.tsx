@@ -20,6 +20,7 @@ import {
   ChevronUp,
   Cpu,
   GitFork,
+  MessageSquare,
 } from 'lucide-react';
 import { CountUpTimer } from '@/components/ui/count-up-timer';
 import { formatModelName, DEFAULT_MODEL } from '@/lib/agent-context-parser';
@@ -34,6 +35,7 @@ interface CardHeaderProps {
   onDelete: () => void;
   onViewOutput?: () => void;
   onSpawnTask?: () => void;
+  onChat?: () => void;
 }
 
 export function CardHeaderSection({
@@ -45,6 +47,7 @@ export function CardHeaderSection({
   onDelete,
   onViewOutput,
   onSpawnTask,
+  onChat,
 }: CardHeaderProps) {
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -123,6 +126,22 @@ export function CardHeaderSection({
       {/* Backlog header */}
       {!isCurrentAutoTask && !isSelectionMode && feature.status === 'backlog' && (
         <div className="absolute top-2 right-2 flex items-center gap-1">
+          {onChat && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 hover:bg-white/10 text-muted-foreground hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChat();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              data-testid={`chat-backlog-${feature.id}`}
+              title="Chat / Refine Prompt"
+            >
+              <MessageSquare className="w-4 h-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"

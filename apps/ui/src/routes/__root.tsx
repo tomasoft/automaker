@@ -27,6 +27,7 @@ import { SandboxRiskDialog } from '@/components/dialogs/sandbox-risk-dialog';
 import { SandboxRejectionScreen } from '@/components/dialogs/sandbox-rejection-screen';
 import { LoadingState } from '@/components/ui/loading-state';
 import { useProjectSettingsLoader } from '@/hooks/use-project-settings-loader';
+import { ChatModal } from '@/components/modals/chat-modal';
 
 const logger = createLogger('RootLayout');
 
@@ -38,6 +39,8 @@ function RootLayoutContent() {
     getEffectiveTheme,
     skipSandboxWarning,
     setSkipSandboxWarning,
+    isChatModalOpen,
+    setIsChatModalOpen,
   } = useAppStore();
   const { setupComplete } = useSetupStore();
   const navigate = useNavigate();
@@ -424,6 +427,9 @@ function RootLayoutContent() {
         }`}
       />
       <Toaster richColors position="bottom-right" />
+
+      {/* Chat Modal */}
+      <ChatModal isOpen={isChatModalOpen} onClose={() => setIsChatModalOpen(false)} />
 
       {/* Show sandbox dialog if needed */}
       <SandboxRiskDialog

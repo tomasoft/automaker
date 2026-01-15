@@ -1176,7 +1176,7 @@ const getMockElectronAPI = (): ElectronAPI => {
           sonnetResetText: 'Resets Dec 27',
           costUsed: null,
           costLimit: null,
-          costCurrency: null,
+          costCurrency: 'GBP',
           lastUpdated: new Date().toISOString(),
           userTimezone: 'UTC',
         };

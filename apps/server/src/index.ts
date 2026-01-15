@@ -72,6 +72,10 @@ import { createAzureDevOpsWikiRoutes } from './routes/azure-devops-wiki/index.js
 import { createWebhookRoutes } from './routes/webhooks.js';
 import { createRepositoryRoutes } from './routes/repository/index.js';
 import { createSkillsRouter } from './routes/skills/index.js';
+import chatRoutes from './routes/chat/index.js';
+import usageRoutes from './routes/usage/index.js';
+import { getChatService } from './services/chat-service.js';
+import { getUsageTrackingService } from './services/usage-tracking-service.js';
 
 // Load environment variables
 dotenv.config();
@@ -178,10 +182,21 @@ const claudeUsageService = new ClaudeUsageService();
 const mcpTestService = new MCPTestService(settingsService);
 const ideationService = new IdeationService(events, settingsService, featureLoader);
 
+// Initialize chat and usage tracking services
+const chatService = getChatService(DATA_DIR);
+const usageTrackingService = getUsageTrackingService(DATA_DIR);
+
 // Initialize services
 (async () => {
   await agentService.initialize();
   logger.info('Agent service initialized');
+
+  // Initialize chat and usage tracking services
+  await chatService.initialize();
+  logger.info('Chat service initialized');
+
+  await usageTrackingService.initialize();
+  logger.info('Usage tracking service initialized');
 
   // Restore Azure DevOps auth sessions from persisted tokens
   try {
@@ -277,6 +292,8 @@ app.use('/api/ideation', createIdeationRoutes(events, ideationService, featureLo
 app.use('/api/copilot', createCopilotRoutes());
 app.use('/api/local-llm', createLocalLLMRoutes);
 app.use('/api/webhooks', createWebhookRoutes(settingsService));
+app.use('/api/chat', chatRoutes);
+app.use('/api/usage', usageRoutes);
 
 // Create HTTP server
 const server = createServer(app);

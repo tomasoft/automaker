@@ -814,7 +814,7 @@ export class AutoModeService {
             const projectSettings = await this.settingsService?.getProjectSettings(projectPath);
 
             if (projectSettings?.repositoryGraph && projectSettings?.repositoryFileTree) {
-              const impactConfig = globalSettings.impactAnalysis;
+              const impactConfig = globalSettings?.impactAnalysis;
               const projectRules = Array.isArray(projectSettings.impactAnalysisRules)
                 ? projectSettings.impactAnalysisRules
                 : [];
@@ -1049,10 +1049,12 @@ export class AutoModeService {
       // Automatically update wiki documentation if attached
       await this.updateWikiDocumentation(projectPath, featureId, workDir, feature);
 
-      // Determine final status based on testing mode:
+      // Determine final status based on testing mode and approval requirements:
+      // - requirePlanApproval=true: always go to 'waiting_approval' for manual implementation review
+      // - skipTests=true: go to 'waiting_approval' for manual verification
       // - skipTests=false (automated testing): go directly to 'verified' (no manual verify needed)
-      // - skipTests=true (manual verification): go to 'waiting_approval' for manual review
-      const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';
+      const requiresManualReview = feature.requirePlanApproval || feature.skipTests;
+      const finalStatus = requiresManualReview ? 'waiting_approval' : 'verified';
       await this.updateFeatureStatus(projectPath, featureId, finalStatus);
 
       // Record success to reset consecutive failure tracking
@@ -1505,10 +1507,12 @@ Address the follow-up instructions above. Review the previous work and make the 
         }
       );
 
-      // Determine final status based on testing mode:
+      // Determine final status based on testing mode and approval requirements:
+      // - requirePlanApproval=true: always go to 'waiting_approval' for manual implementation review
+      // - skipTests=true: go to 'waiting_approval' for manual verification
       // - skipTests=false (automated testing): go directly to 'verified' (no manual verify needed)
-      // - skipTests=true (manual verification): go to 'waiting_approval' for manual review
-      const finalStatus = feature?.skipTests ? 'waiting_approval' : 'verified';
+      const requiresManualReview = feature?.requirePlanApproval || feature?.skipTests;
+      const finalStatus = requiresManualReview ? 'waiting_approval' : 'verified';
       await this.updateFeatureStatus(projectPath, featureId, finalStatus);
 
       // Record success to reset consecutive failure tracking
@@ -1634,14 +1638,30 @@ Address the follow-up instructions above. Review the previous work and make the 
         );
       }
     } else {
-      // Fallback: try to find worktree at legacy location
-      const legacyWorktreePath = path.join(projectPath, '.worktrees', featureId);
-      try {
-        await secureFs.access(legacyWorktreePath);
-        workDir = legacyWorktreePath;
-        logger.info(`Committing in legacy worktree: ${workDir}`);
-      } catch {
-        logger.info(`No worktree found, committing in project path: ${workDir}`);
+      // Load feature to get branchName
+      const feature = await this.loadFeature(projectPath, featureId);
+      const branchName = feature?.branchName;
+
+      // Try to find existing worktree for this branch
+      if (branchName) {
+        const worktreePath = await this.findExistingWorktreeForBranch(projectPath, branchName);
+        if (worktreePath) {
+          workDir = worktreePath;
+          logger.info(`Committing in worktree for branch "${branchName}": ${workDir}`);
+        } else {
+          logger.warn(`Worktree for branch "${branchName}" not found, trying legacy location...`);
+          // Fallback: try legacy location
+          const legacyWorktreePath = path.join(projectPath, '.worktrees', featureId);
+          try {
+            await secureFs.access(legacyWorktreePath);
+            workDir = legacyWorktreePath;
+            logger.info(`Committing in legacy worktree: ${workDir}`);
+          } catch {
+            logger.info(`No worktree found, committing in project path: ${workDir}`);
+          }
+        }
+      } else {
+        logger.info(`No branchName set for feature ${featureId}, committing in project path`);
       }
     }
 

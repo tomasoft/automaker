@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import type { NavigateOptions } from '@tanstack/react-router';
+import type { NavigateOptions } from '@tantml:react-router';
 import {
   FileText,
   LayoutGrid,
@@ -11,6 +11,8 @@ import {
   GitPullRequest,
   Zap,
   Lightbulb,
+  MessageCircle,
+  BarChart3,
 } from 'lucide-react';
 import type { NavSection, NavItem } from '../types';
 import type { KeyboardShortcut } from '@/hooks/use-keyboard-shortcuts';
@@ -34,6 +36,8 @@ interface UseNavigationProps {
     ideation: string;
     githubIssues: string;
     githubPrs: string;
+    chat: string;
+    usage: string;
   };
   hideSpecEditor: boolean;
   hideContext: boolean;
@@ -50,6 +54,8 @@ interface UseNavigationProps {
   cycleNextProject: () => void;
   /** Count of unviewed validations to show on GitHub Issues nav item */
   unviewedValidationsCount?: number;
+  /** Function to toggle chat modal */
+  setIsChatModalOpen: (open: boolean) => void;
 }
 
 export function useNavigation({
@@ -68,6 +74,7 @@ export function useNavigation({
   cyclePrevProject,
   cycleNextProject,
   unviewedValidationsCount,
+  setIsChatModalOpen,
 }: UseNavigationProps) {
   // Track if current project has a GitHub remote
   const [hasGitHubRemote, setHasGitHubRemote] = useState(false);
@@ -119,6 +126,19 @@ export function useNavigation({
         label: 'AI Profiles',
         icon: UserCircle,
         shortcut: shortcuts.profiles,
+      },
+      {
+        id: 'chat',
+        label: 'AI Chat',
+        icon: MessageCircle,
+        shortcut: shortcuts.chat,
+        onClick: () => setIsChatModalOpen(true),
+      },
+      {
+        id: 'usage',
+        label: 'Usage & Costs',
+        icon: BarChart3,
+        shortcut: shortcuts.usage,
       },
     ];
 
@@ -204,6 +224,7 @@ export function useNavigation({
     hideAiProfiles,
     hasGitHubRemote,
     unviewedValidationsCount,
+    setIsChatModalOpen,
   ]);
 
   // Build keyboard shortcuts for navigation
@@ -254,7 +275,13 @@ export function useNavigation({
           if (item.shortcut) {
             shortcutsList.push({
               key: item.shortcut,
-              action: () => navigate({ to: `/${item.id}` as const }),
+              action: () => {
+                if (item.onClick) {
+                  item.onClick();
+                } else {
+                  navigate({ to: `/${item.id}` as const });
+                }
+              },
               description: `Navigate to ${item.label}`,
             });
           }

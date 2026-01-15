@@ -60,6 +60,8 @@ export function SettingsView() {
     setSkipSandboxWarning,
     promptCustomization,
     setPromptCustomization,
+    maxBudget,
+    setMaxBudget,
     targetSettingsTab,
     setCurrentView,
   } = useAppStore();
@@ -159,6 +161,7 @@ export function SettingsView() {
             defaultRequirePlanApproval={defaultRequirePlanApproval}
             defaultAIProfileId={defaultAIProfileId}
             aiProfiles={aiProfiles}
+            maxBudget={maxBudget}
             onShowProfilesOnlyChange={setShowProfilesOnly}
             onDefaultSkipTestsChange={setDefaultSkipTests}
             onEnableDependencyBlockingChange={setEnableDependencyBlocking}
@@ -167,6 +170,7 @@ export function SettingsView() {
             onDefaultPlanningModeChange={setDefaultPlanningMode}
             onDefaultRequirePlanApprovalChange={setDefaultRequirePlanApproval}
             onDefaultAIProfileIdChange={setDefaultAIProfileId}
+            onMaxBudgetChange={setMaxBudget}
           />
         );
       case 'danger':

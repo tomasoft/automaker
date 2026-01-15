@@ -21,7 +21,7 @@ export type ClaudeUsage = {
 
   costUsed: number | null;
   costLimit: number | null;
-  costCurrency: string | null;
+  costCurrency: string | null; // Defaults to 'GBP' to match budget settings
 
   lastUpdated: string; // ISO date string
   userTimezone: string;

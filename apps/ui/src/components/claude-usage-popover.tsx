@@ -306,7 +306,7 @@ export function ClaudeUsagePopover() {
               {claudeUsage.costLimit && claudeUsage.costLimit > 0 && (
                 <UsageCard
                   title="Extra Usage"
-                  subtitle={`${claudeUsage.costUsed ?? 0} / ${claudeUsage.costLimit} ${claudeUsage.costCurrency ?? ''}`}
+                  subtitle={`£${claudeUsage.costUsed ?? 0} / £${claudeUsage.costLimit}`}
                   percentage={
                     claudeUsage.costLimit > 0
                       ? ((claudeUsage.costUsed ?? 0) / claudeUsage.costLimit) * 100

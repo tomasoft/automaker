@@ -52,7 +52,11 @@ export function SidebarNavigation({
                   <button
                     key={item.id}
                     onClick={() => {
-                      navigate({ to: `/${item.id}` as const });
+                      if (item.onClick) {
+                        item.onClick();
+                      } else {
+                        navigate({ to: `/${item.id}` as const });
+                      }
                     }}
                     className={cn(
                       'group flex items-center w-full px-3 py-2.5 rounded-xl relative overflow-hidden titlebar-no-drag',

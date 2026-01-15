@@ -27,6 +27,7 @@ interface KanbanBoardProps {
     cardBorderOpacity: number;
   };
   onEdit: (feature: Feature) => void;
+  onChat?: (feature: Feature) => void;
   onDelete: (featureId: string) => void;
   onViewOutput: (feature: Feature) => void;
   onVerify: (feature: Feature) => void;
@@ -35,6 +36,7 @@ interface KanbanBoardProps {
   onManualVerify: (feature: Feature) => void;
   onMoveBackToInProgress: (feature: Feature) => void;
   onFollowUp: (feature: Feature) => void;
+  onCommit: (feature: Feature) => void;
   onComplete: (feature: Feature) => void;
   onImplement: (feature: Feature) => void;
   onViewPlan: (feature: Feature) => void;
@@ -62,6 +64,7 @@ export function KanbanBoard({
   backgroundImageStyle,
   backgroundSettings,
   onEdit,
+  onChat,
   onDelete,
   onViewOutput,
   onVerify,
@@ -70,6 +73,7 @@ export function KanbanBoard({
   onManualVerify,
   onMoveBackToInProgress,
   onFollowUp,
+  onCommit,
   onComplete,
   onImplement,
   onViewPlan,
@@ -195,11 +199,13 @@ export function KanbanBoard({
                         onManualVerify={() => onManualVerify(feature)}
                         onMoveBackToInProgress={() => onMoveBackToInProgress(feature)}
                         onFollowUp={() => onFollowUp(feature)}
+                        onCommit={() => onCommit(feature)}
                         onComplete={() => onComplete(feature)}
                         onImplement={() => onImplement(feature)}
                         onViewPlan={() => onViewPlan(feature)}
                         onApprovePlan={() => onApprovePlan(feature)}
                         onSpawnTask={() => onSpawnTask?.(feature)}
+                        onChat={() => onChat?.(feature)}
                         hasContext={featuresWithContext.has(feature.id)}
                         isCurrentAutoTask={runningAutoTasks.includes(feature.id)}
                         shortcutKey={shortcutKey}
@@ -239,6 +245,7 @@ export function KanbanBoard({
                 onManualVerify={() => {}}
                 onMoveBackToInProgress={() => {}}
                 onFollowUp={() => {}}
+                onCommit={() => {}}
                 onImplement={() => {}}
                 onComplete={() => {}}
                 onViewPlan={() => {}}

@@ -38,7 +38,7 @@ import type {
 import type { Message, SessionListItem } from '@/types/electron';
 import type { Feature, ClaudeUsageResponse } from '@/store/app-store';
 import type { WorktreeAPI, GitAPI, ModelDefinition, ProviderStatus } from '@/types/electron';
-import type { ProjectSettings, GlobalSettings } from '@automaker/types';
+import type { ProjectSettings, GlobalSettings, ChatSessionListItem } from '@automaker/types';
 import { getGlobalFileBrowser } from '@/contexts/file-browser-context';
 
 const logger = createLogger('HttpClient');
@@ -699,6 +699,32 @@ export class HttpApiClient implements ElectronAPI {
     await waitForApiKeyInit();
     const response = await fetch(`${this.serverUrl}${endpoint}`, {
       method: 'PUT',
+      headers: this.getHeaders(),
+      credentials: 'include', // Include cookies for session auth
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.error) {
+          errorMessage = errorData.error;
+        }
+      } catch {
+        // If parsing JSON fails, use status text
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  }
+
+  private async patch<T>(endpoint: string, body?: unknown): Promise<T> {
+    // Ensure API key is initialized before making request
+    await waitForApiKeyInit();
+    const response = await fetch(`${this.serverUrl}${endpoint}`, {
+      method: 'PATCH',
       headers: this.getHeaders(),
       credentials: 'include', // Include cookies for session auth
       body: body ? JSON.stringify(body) : undefined,
@@ -2168,6 +2194,184 @@ export class HttpApiClient implements ElectronAPI {
         body: JSON.stringify({ message, projectPath }),
       });
       return response.json();
+    },
+  };
+
+  // Chat API
+  chat = {
+    getSessions: (): Promise<{
+      success: boolean;
+      sessions?: Array<{
+        id: string;
+        type: string;
+        title: string;
+        model: string;
+        createdAt: string;
+        updatedAt: string;
+        messageCount: number;
+      }>;
+      error?: string;
+    }> => this.get('/api/chat/sessions'),
+
+    listSessions: (
+      projectPath: string
+    ): Promise<{
+      success: boolean;
+      sessions?: ChatSessionListItem[];
+      error?: string;
+    }> => this.get(`/api/chat/sessions/${encodeURIComponent(projectPath)}`),
+
+    createSession: (data: {
+      type: string;
+      title?: string;
+      model: string;
+      projectPath?: string;
+    }): Promise<{
+      success: boolean;
+      session?: any;
+      error?: string;
+    }> => this.post('/api/chat/sessions', data),
+
+    getSession: (
+      sessionId: string
+    ): Promise<{
+      success: boolean;
+      session?: any;
+      error?: string;
+    }> => this.get(`/api/chat/sessions/detail/${sessionId}`),
+
+    deleteSession: (
+      sessionId: string
+    ): Promise<{
+      success: boolean;
+      error?: string;
+    }> => this.httpDelete(`/api/chat/sessions/${sessionId}`),
+
+    updateSessionTitle: (
+      sessionId: string,
+      title: string
+    ): Promise<{
+      success: boolean;
+      session?: any;
+      error?: string;
+    }> => this.patch(`/api/chat/sessions/${sessionId}/title`, { title }),
+
+    sendMessage: (
+      sessionId: string,
+      content: string
+    ): Promise<{
+      success: boolean;
+      message?: any;
+      error?: string;
+    }> => this.post(`/api/chat/sessions/${sessionId}/messages`, { content }),
+
+    createFeature: (
+      sessionId: string,
+      data: {
+        messageIds: string[];
+        title: string;
+        description: string;
+        acceptanceCriteria: string[];
+      }
+    ): Promise<{
+      success: boolean;
+      featureId?: string;
+      error?: string;
+    }> => this.post(`/api/chat/sessions/${sessionId}/features`, data),
+
+    linkFeature: (
+      sessionId: string,
+      featureId: string,
+      featureName: string
+    ): Promise<{
+      success: boolean;
+      session?: any;
+      error?: string;
+    }> => this.post('/api/chat/link-feature', { sessionId, featureId, featureName }),
+
+    unlinkFeature: (
+      sessionId: string
+    ): Promise<{
+      success: boolean;
+      session?: any;
+      error?: string;
+    }> => this.post('/api/chat/unlink-feature', { sessionId }),
+
+    loadFeatureContext: (
+      sessionId: string,
+      featureId: string,
+      projectPath: string
+    ): Promise<{
+      success: boolean;
+      feature?: any;
+      contextMessage?: any;
+      session?: any;
+      error?: string;
+    }> => this.post('/api/chat/load-feature-context', { sessionId, featureId, projectPath }),
+
+    updateFeatureSpec: (
+      sessionId: string,
+      featureId: string,
+      newSpec: string | undefined,
+      projectPath: string,
+      extra?: { title?: string; description?: string }
+    ): Promise<{
+      success: boolean;
+      feature?: any;
+      session?: any;
+      error?: string;
+    }> =>
+      this.post('/api/chat/update-feature-spec', {
+        sessionId,
+        featureId,
+        newSpec,
+        projectPath,
+        ...extra,
+      }),
+  };
+
+  // Usage Tracking API
+  usage = {
+    getStats: (params?: {
+      featureId?: string;
+      projectPath?: string;
+    }): Promise<{
+      success: boolean;
+      stats?: any;
+      error?: string;
+    }> => {
+      const query = new URLSearchParams();
+      if (params?.featureId) query.set('featureId', params.featureId);
+      if (params?.projectPath) query.set('projectPath', params.projectPath);
+      const queryString = query.toString();
+      return this.get(`/api/usage/stats${queryString ? `?${queryString}` : ''}`);
+    },
+
+    getProjectStats: (
+      projectPath: string
+    ): Promise<{
+      success: boolean;
+      stats?: any;
+      error?: string;
+    }> => this.get(`/api/usage/project/${encodeURIComponent(projectPath)}`),
+
+    exportLogs: (params?: {
+      featureId?: string;
+      projectPath?: string;
+      startDate?: string;
+      endDate?: string;
+    }): Promise<{
+      success: boolean;
+      logs?: any[];
+      error?: string;
+    }> => {
+      const query = new URLSearchParams();
+      if (params?.featureId) query.set('featureId', params.featureId);
+      if (params?.projectPath) query.set('projectPath', params.projectPath);
+      if (params?.startDate) query.set('startDate', params.startDate);
+      if (params?.endDate) query.set('endDate', params.endDate);
+      const queryString = query.toString();
+      return this.get(`/api/usage/export${queryString ? `?${queryString}` : ''}`);
     },
   };
 }

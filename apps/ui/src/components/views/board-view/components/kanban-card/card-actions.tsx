@@ -10,6 +10,7 @@ import {
   Eye,
   Wand2,
   Archive,
+  MessageSquare,
 } from 'lucide-react';
 
 interface CardActionsProps {
@@ -25,10 +26,12 @@ interface CardActionsProps {
   onForceStop?: () => void;
   onManualVerify?: () => void;
   onFollowUp?: () => void;
+  onCommit?: () => void;
   onImplement?: () => void;
   onComplete?: () => void;
   onViewPlan?: () => void;
   onApprovePlan?: () => void;
+  onChat?: () => void;
 }
 
 export function CardActions({
@@ -44,10 +47,12 @@ export function CardActions({
   onForceStop,
   onManualVerify,
   onFollowUp,
+  onCommit,
   onImplement,
   onComplete,
   onViewPlan,
   onApprovePlan,
+  onChat,
 }: CardActionsProps) {
   // Hide all actions when in selection mode
   if (isSelectionMode) {
@@ -202,8 +207,25 @@ export function CardActions({
               <span className="truncate">Logs</span>
             </Button>
           )}
-          {/* Complete button */}
-          {onComplete && (
+          {/* Commit button - show if changes haven't been committed yet */}
+          {!feature.commitHash && onCommit && (
+            <Button
+              variant="default"
+              size="sm"
+              className="flex-1 h-7 text-xs min-w-0 bg-green-600 hover:bg-green-700 text-white"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCommit();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              data-testid={`commit-${feature.id}`}
+            >
+              <CheckCircle2 className="w-3 h-3 mr-1 shrink-0" />
+              <span className="truncate">Commit</span>
+            </Button>
+          )}
+          {/* Complete button - only show after changes have been committed */}
+          {feature.commitHash && onComplete && (
             <Button
               variant="default"
               size="sm"

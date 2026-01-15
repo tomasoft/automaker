@@ -399,7 +399,7 @@ Resets Jan 15, 3pm
       expect(result.sessionLimit).toBe(0);
       expect(result.costUsed).toBeNull();
       expect(result.costLimit).toBeNull();
-      expect(result.costCurrency).toBeNull();
+      expect(result.costCurrency).toBe('GBP');
     });
   });
 

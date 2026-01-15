@@ -609,11 +609,22 @@ export function useBoardActions({
         );
 
         if (result.success) {
-          moveFeature(feature.id, 'verified');
-          persistFeatureUpdate(feature.id, { status: 'verified' });
+          logger.info('Commit result:', result);
+          // Store commit hash if returned
+          const updates: Partial<Feature> = { status: 'verified' };
+          if (result.commitHash) {
+            logger.info('Storing commitHash:', result.commitHash);
+            updates.commitHash = result.commitHash;
+          } else {
+            logger.warn('No commitHash returned from commit API');
+          }
+          // Persist to file first, then reload to ensure consistency
+          await persistFeatureUpdate(feature.id, updates);
           toast.success('Feature committed', {
             description: `Committed and verified: ${truncateDescription(feature.description)}`,
           });
+          // Reload features to ensure UI shows committed state
+          await loadFeatures();
           // Refresh worktree selector to update commit counts
           onWorktreeCreated?.();
         } else {

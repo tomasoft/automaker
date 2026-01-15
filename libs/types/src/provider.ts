@@ -120,6 +120,10 @@ export interface ProviderMessage {
   result?: string;
   error?: string;
   parent_tool_use_id?: string | null;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
 }
 
 /**

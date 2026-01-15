@@ -37,7 +37,8 @@ export type ViewMode =
   | 'running-agents'
   | 'terminal'
   | 'wiki'
-  | 'ideation';
+  | 'ideation'
+  | 'usage';
 
 export type KanbanCardDetailLevel = 'minimal' | 'standard' | 'detailed';
 
@@ -146,6 +147,8 @@ export interface KeyboardShortcuts {
   ideation: string;
   githubIssues: string;
   githubPrs: string;
+  chat: string;
+  usage: string;
 
   // UI shortcuts
   toggleSidebar: string;
@@ -181,6 +184,8 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
   ideation: 'I',
   githubIssues: 'G',
   githubPrs: 'R',
+  chat: 'H',
+  usage: 'U',
 
   // UI
   toggleSidebar: '`',
@@ -269,6 +274,7 @@ export interface Feature extends Omit<
   textFilePaths?: FeatureTextFilePath[]; // Text file attachments for context
   justFinishedAt?: string; // UI-specific: ISO timestamp when agent just finished
   prUrl?: string; // UI-specific: Pull request URL
+  commitHash?: string; // UI-specific: Git commit hash after committing changes
 }
 
 // Parsed task from spec (for spec and full planning modes)
@@ -426,6 +432,10 @@ export interface AppState {
   currentChatSession: ChatSession | null;
   chatHistoryOpen: boolean;
 
+  // Chat Modal
+  isChatModalOpen: boolean;
+  pendingFeatureIdToLoad: string | null;
+
   // Auto Mode (per-project state, keyed by project ID)
   autoModeByProject: Record<
     string,
@@ -449,6 +459,10 @@ export interface AppState {
   // Feature Default Settings
   defaultSkipTests: boolean; // Default value for skip tests when creating new features
   enableDependencyBlocking: boolean; // When true, show blocked badges and warnings for features with incomplete dependencies (default: true)
+
+  // Budget Settings
+  maxBudget: number; // Maximum budget limit in £ that project budgets cannot exceed (default: 100)
+  projectBudgetByPath: Record<string, number>; // Project-specific budgets in £ (projectPath -> budget)
 
   // Worktree Settings
   useWorktrees: boolean; // Whether to use git worktree isolation for features (default: false)
@@ -742,6 +756,13 @@ export interface AppActions {
   setChatHistoryOpen: (open: boolean) => void;
   toggleChatHistory: () => void;
 
+  // Chat Modal actions
+  setIsChatModalOpen: (open: boolean) => void;
+  toggleChatModal: () => void;
+  openChatWithFeature: (featureId: string) => void;
+  pendingFeatureIdToLoad: string | null;
+  resetPendingFeatureId: () => void;
+
   // Auto Mode actions (per-project)
   setAutoModeRunning: (projectId: string, running: boolean) => void;
   addRunningTask: (projectId: string, taskId: string) => void;
@@ -762,6 +783,11 @@ export interface AppActions {
   // Feature Default Settings actions
   setDefaultSkipTests: (skip: boolean) => void;
   setEnableDependencyBlocking: (enabled: boolean) => void;
+
+  // Budget Settings actions
+  setMaxBudget: (maxBudget: number) => void;
+  setProjectBudget: (projectPath: string, budget: number) => void;
+  getProjectBudget: (projectPath: string) => number | undefined;
 
   // Worktree Settings actions
   setUseWorktrees: (enabled: boolean) => void;
@@ -1040,6 +1066,8 @@ const initialState: AppState = {
   chatSessions: [],
   currentChatSession: null,
   chatHistoryOpen: false,
+  isChatModalOpen: false,
+  pendingFeatureIdToLoad: null,
   autoModeByProject: {},
   autoModeActivityLog: [],
   maxConcurrency: 3, // Default to 3 concurrent agents
@@ -1053,6 +1081,8 @@ const initialState: AppState = {
   boardViewMode: 'kanban', // Default to kanban view
   defaultSkipTests: true, // Default to manual verification (tests disabled)
   enableDependencyBlocking: true, // Default to enabled (show dependency blocking UI)
+  maxBudget: 100, // Default maximum budget limit in £
+  projectBudgetByPath: {}, // No project budgets set by default
   useWorktrees: true, // Git worktree isolation for safe parallel feature development
   currentWorktreeByProject: {},
   worktreesByProject: {},
@@ -1546,6 +1576,16 @@ export const useAppStore = create<AppState & AppActions>()(
 
       toggleChatHistory: () => set({ chatHistoryOpen: !get().chatHistoryOpen }),
 
+      // Chat Modal actions
+      setIsChatModalOpen: (open) => set({ isChatModalOpen: open }),
+      toggleChatModal: () => set({ isChatModalOpen: !get().isChatModalOpen }),
+      openChatWithFeature: (featureId) =>
+        set({
+          isChatModalOpen: true,
+          pendingFeatureIdToLoad: featureId,
+        }),
+      resetPendingFeatureId: () => set({ pendingFeatureIdToLoad: null }),
+
       // Auto Mode actions (per-project)
       setAutoModeRunning: (projectId, running) => {
         const current = get().autoModeByProject;
@@ -1642,6 +1682,21 @@ export const useAppStore = create<AppState & AppActions>()(
       // Feature Default Settings actions
       setDefaultSkipTests: (skip) => set({ defaultSkipTests: skip }),
       setEnableDependencyBlocking: (enabled) => set({ enableDependencyBlocking: enabled }),
+
+      // Budget Settings actions
+      setMaxBudget: (maxBudget) => set({ maxBudget }),
+      setProjectBudget: (projectPath, budget) => {
+        const current = get().projectBudgetByPath;
+        set({
+          projectBudgetByPath: {
+            ...current,
+            [projectPath]: budget,
+          },
+        });
+      },
+      getProjectBudget: (projectPath) => {
+        return get().projectBudgetByPath[projectPath];
+      },
 
       // Worktree Settings actions
       setUseWorktrees: (enabled) => set({ useWorktrees: enabled }),
@@ -3132,6 +3187,8 @@ export const useAppStore = create<AppState & AppActions>()(
           defaultSkipTests: state.defaultSkipTests,
           enableDependencyBlocking: state.enableDependencyBlocking,
           useWorktrees: state.useWorktrees,
+          maxBudget: state.maxBudget,
+          projectBudgetByPath: state.projectBudgetByPath,
           currentWorktreeByProject: state.currentWorktreeByProject,
           worktreesByProject: state.worktreesByProject,
           showProfilesOnly: state.showProfilesOnly,

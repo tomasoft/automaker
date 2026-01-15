@@ -318,6 +318,15 @@ function checkAuthentication(
     return { authenticated: false, errorType: 'invalid_api_key' };
   }
 
+  // Check for session token in query parameter (for SSE/EventSource)
+  const querySessionToken = query.sessionToken;
+  if (querySessionToken) {
+    if (validateSession(querySessionToken)) {
+      return { authenticated: true };
+    }
+    return { authenticated: false, errorType: 'invalid_session' };
+  }
+
   // Check for session cookie (web mode)
   const sessionToken = cookies[SESSION_COOKIE_NAME];
   if (sessionToken && validateSession(sessionToken)) {

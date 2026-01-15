@@ -44,6 +44,11 @@ interface CopilotStreamChunk {
     index: number;
     finish_reason?: string | null;
   }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 /**
@@ -178,6 +183,7 @@ export class GitHubCopilotProvider extends BaseProvider {
     const decoder = new TextDecoder();
     let buffer = '';
     let accumulatedText = '';
+    let usageData: { inputTokens: number; outputTokens: number } | undefined;
 
     try {
       while (true) {
@@ -197,6 +203,14 @@ export class GitHubCopilotProvider extends BaseProvider {
 
             try {
               const chunk: CopilotStreamChunk = JSON.parse(data);
+
+              // Extract usage information if present
+              if (chunk.usage) {
+                usageData = {
+                  inputTokens: chunk.usage.prompt_tokens,
+                  outputTokens: chunk.usage.completion_tokens,
+                };
+              }
 
               for (const choice of chunk.choices) {
                 if (choice.delta.content) {
@@ -218,12 +232,13 @@ export class GitHubCopilotProvider extends BaseProvider {
                   };
                 }
 
-                // Check for finish - yield the final accumulated result
+                // Check for finish - yield the final accumulated result with usage
                 if (choice.finish_reason === 'stop') {
                   yield {
                     type: 'result',
                     subtype: 'success',
                     result: accumulatedText,
+                    usage: usageData,
                   };
                 }
               }

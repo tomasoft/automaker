@@ -92,6 +92,7 @@ export function BoardView() {
     isPrimaryWorktreeBranch,
     getPrimaryWorktreeBranch,
     setPipelineConfig,
+    openChatWithFeature,
   } = useAppStore();
   // Subscribe to pipelineConfigByProject to trigger re-renders when it changes
   const pipelineConfigByProject = useAppStore((state) => state.pipelineConfigByProject);
@@ -1190,6 +1191,7 @@ export function BoardView() {
             onManualVerify={handleManualVerify}
             onMoveBackToInProgress={handleMoveBackToInProgress}
             onFollowUp={handleOpenFollowUp}
+            onCommit={handleCommitFeature}
             onComplete={handleCompleteFeature}
             onImplement={handleStartImplementation}
             onViewPlan={(feature) => setViewPlanFeature(feature)}
@@ -1198,6 +1200,7 @@ export function BoardView() {
               setSpawnParentFeature(feature);
               setShowAddDialog(true);
             }}
+            onChat={(feature) => openChatWithFeature(feature.id)}
             featuresWithContext={featuresWithContext}
             runningAutoTasks={runningAutoTasks}
             onArchiveAllVerified={() => setShowArchiveAllVerifiedDialog(true)}

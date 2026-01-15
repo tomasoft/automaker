@@ -45,11 +45,13 @@ interface KanbanCardProps {
   onManualVerify?: () => void;
   onMoveBackToInProgress?: () => void;
   onFollowUp?: () => void;
+  onCommit?: () => void;
   onImplement?: () => void;
   onComplete?: () => void;
   onViewPlan?: () => void;
   onApprovePlan?: () => void;
   onSpawnTask?: () => void;
+  onChat?: () => void;
   hasContext?: boolean;
   isCurrentAutoTask?: boolean;
   shortcutKey?: string;
@@ -77,11 +79,13 @@ export const KanbanCard = memo(function KanbanCard({
   onManualVerify,
   onMoveBackToInProgress: _onMoveBackToInProgress,
   onFollowUp,
+  onCommit,
   onImplement,
   onComplete,
   onViewPlan,
   onApprovePlan,
   onSpawnTask,
+  onChat,
   hasContext,
   isCurrentAutoTask,
   shortcutKey,
@@ -203,6 +207,7 @@ export const KanbanCard = memo(function KanbanCard({
         onDelete={onDelete}
         onViewOutput={onViewOutput}
         onSpawnTask={onSpawnTask}
+        onChat={onChat}
       />
 
       <CardContent className="px-3 pt-0 pb-0">
@@ -231,10 +236,12 @@ export const KanbanCard = memo(function KanbanCard({
           onForceStop={onForceStop}
           onManualVerify={onManualVerify}
           onFollowUp={onFollowUp}
+          onCommit={onCommit}
           onImplement={onImplement}
           onComplete={onComplete}
           onViewPlan={onViewPlan}
           onApprovePlan={onApprovePlan}
+          onChat={onChat}
         />
       </CardContent>
     </Card>

@@ -13,6 +13,8 @@ export interface NavItem {
   shortcut?: string;
   /** Optional count badge to display next to the nav item */
   count?: number;
+  /** Optional click handler - if provided, this will be called instead of navigation */
+  onClick?: () => void;
 }
 
 export interface SortableProjectItemProps {

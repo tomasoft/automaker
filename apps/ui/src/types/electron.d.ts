@@ -612,6 +612,12 @@ export interface ElectronAPI {
 
   // Spec Regeneration APIs
   specRegeneration: SpecRegenerationAPI;
+
+  // Chat API
+  chat: ChatAPI;
+
+  // Usage Tracking API
+  usage: UsageAPI;
 }
 
 export interface WorktreeInfo {
@@ -997,6 +1003,87 @@ export interface GitAPI {
 
   // Get diff for a specific file in the main project
   getFileDiff: (projectPath: string, filePath: string) => Promise<FileDiffResult>;
+}
+
+export interface ChatAPI {
+  getSessions: () => Promise<{
+    success: boolean;
+    sessions?: Array<{
+      id: string;
+      type: string;
+      title: string;
+      model: string;
+      createdAt: string;
+      updatedAt: string;
+      messageCount: number;
+    }>;
+    error?: string;
+  }>;
+
+  createSession: (data: { type: string; title?: string; model: string }) => Promise<{
+    success: boolean;
+    session?: any;
+    error?: string;
+  }>;
+
+  getSession: (sessionId: string) => Promise<{
+    success: boolean;
+    session?: any;
+    error?: string;
+  }>;
+
+  deleteSession: (sessionId: string) => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  sendMessage: (
+    sessionId: string,
+    content: string
+  ) => Promise<{
+    success: boolean;
+    message?: any;
+    error?: string;
+  }>;
+
+  createFeature: (
+    sessionId: string,
+    data: {
+      messageIds: string[];
+      title: string;
+      description: string;
+      acceptanceCriteria: string[];
+    }
+  ) => Promise<{
+    success: boolean;
+    featureId?: string;
+    error?: string;
+  }>;
+}
+
+export interface UsageAPI {
+  getStats: (params?: { featureId?: string; projectPath?: string }) => Promise<{
+    success: boolean;
+    stats?: any;
+    error?: string;
+  }>;
+
+  getProjectStats: (projectPath: string) => Promise<{
+    success: boolean;
+    stats?: any;
+    error?: string;
+  }>;
+
+  exportLogs: (params?: {
+    featureId?: string;
+    projectPath?: string;
+    startDate?: string;
+    endDate?: string;
+  }) => Promise<{
+    success: boolean;
+    logs?: any[];
+    error?: string;
+  }>;
 }
 
 // Model definition type

@@ -310,7 +310,7 @@ export class ClaudeUsageService {
 
       costUsed: null, // Not available from CLI
       costLimit: null,
-      costCurrency: null,
+      costCurrency: 'GBP', // Default to GBP to match budget settings
 
       lastUpdated: new Date().toISOString(),
       userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,

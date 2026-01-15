@@ -224,6 +224,7 @@ export async function syncSettingsToServer(): Promise<boolean> {
       defaultPlanningMode: state.defaultPlanningMode,
       defaultRequirePlanApproval: state.defaultRequirePlanApproval,
       defaultAIProfileId: state.defaultAIProfileId,
+      maxBudget: state.maxBudget,
       muteDoneSound: state.muteDoneSound,
       enhancementModel: state.enhancementModel,
       validationModel: state.validationModel,

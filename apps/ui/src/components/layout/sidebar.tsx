@@ -56,6 +56,7 @@ export function Sidebar() {
     moveProjectToTrash,
     specCreatingForProject,
     setSpecCreatingForProject,
+    setIsChatModalOpen,
   } = useAppStore();
 
   // Environment variable flags for hiding sidebar items
@@ -243,6 +244,7 @@ export function Sidebar() {
     cyclePrevProject,
     cycleNextProject,
     unviewedValidationsCount,
+    setIsChatModalOpen,
   });
 
   // Register keyboard shortcuts
