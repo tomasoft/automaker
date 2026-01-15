@@ -3258,6 +3258,8 @@ export const useAppStore = create<AppState & AppActions>()(
           defaultPlanningMode: state.defaultPlanningMode,
           defaultRequirePlanApproval: state.defaultRequirePlanApproval,
           defaultAIProfileId: state.defaultAIProfileId,
+          // Pipeline configuration
+          pipelineConfigByProject: state.pipelineConfigByProject,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         }) as any,
     }

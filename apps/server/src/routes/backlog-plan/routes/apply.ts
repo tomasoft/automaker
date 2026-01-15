@@ -4,12 +4,15 @@
 
 import type { Request, Response } from 'express';
 import type { BacklogPlanResult, BacklogChange, Feature } from '@automaker/types';
+import { getModelProvider, addProviderPrefix, DEFAULT_PHASE_MODELS } from '@automaker/types';
+import { resolvePhaseModel } from '@automaker/model-resolver';
 import { FeatureLoader } from '../../../services/feature-loader.js';
 import { getErrorMessage, logError, logger } from '../common.js';
+import type { SettingsService } from '../../../services/settings-service.js';
 
 const featureLoader = new FeatureLoader();
 
-export function createApplyHandler() {
+export function createApplyHandler(settingsService?: SettingsService) {
   return async (req: Request, res: Response): Promise<void> => {
     try {
       const { projectPath, plan } = req.body as {
@@ -28,6 +31,26 @@ export function createApplyHandler() {
       }
 
       const appliedChanges: string[] = [];
+
+      // Load settings to get default model configuration
+      const settings = await settingsService?.getGlobalSettings();
+      const defaultPhaseModel =
+        settings?.phaseModels?.featureGenerationModel ||
+        DEFAULT_PHASE_MODELS.featureGenerationModel;
+      const resolvedDefaults = resolvePhaseModel(defaultPhaseModel);
+
+      // Normalize the default model to include provider prefix
+      const defaultProvider = getModelProvider(resolvedDefaults.model);
+      const defaultModel = addProviderPrefix(resolvedDefaults.model, defaultProvider);
+      const defaultThinkingLevel = resolvedDefaults.thinkingLevel || 'none';
+
+      // Get default planning settings
+      const defaultPlanningMode = settings?.defaultPlanningMode || 'skip';
+      const defaultRequirePlanApproval = settings?.defaultRequirePlanApproval || false;
+
+      logger.info(
+        `[BacklogPlan] Using defaults - model: ${defaultModel}, thinking: ${defaultThinkingLevel}, planning: ${defaultPlanningMode}`
+      );
 
       // Load current features for dependency validation
       const allFeatures = await featureLoader.getAll(projectPath);
@@ -74,6 +97,18 @@ export function createApplyHandler() {
         if (!change.feature) continue;
 
         try {
+          // Use AI-provided values or fall back to defaults from global settings
+          let normalizedModel = change.feature.model || defaultModel;
+          if (normalizedModel) {
+            const provider = getModelProvider(normalizedModel);
+            normalizedModel = addProviderPrefix(normalizedModel, provider);
+          }
+
+          const thinkingLevel = change.feature.thinkingLevel ?? defaultThinkingLevel;
+          const planningMode = change.feature.planningMode ?? defaultPlanningMode;
+          const requirePlanApproval =
+            change.feature.requirePlanApproval ?? defaultRequirePlanApproval;
+
           // Create the new feature
           const newFeature = await featureLoader.create(projectPath, {
             title: change.feature.title,
@@ -82,6 +117,11 @@ export function createApplyHandler() {
             dependencies: change.feature.dependencies,
             priority: change.feature.priority,
             status: 'backlog',
+            // Include AI provider/model settings with defaults applied
+            model: normalizedModel,
+            thinkingLevel,
+            planningMode,
+            requirePlanApproval,
           });
 
           appliedChanges.push(`added:${newFeature.id}`);
