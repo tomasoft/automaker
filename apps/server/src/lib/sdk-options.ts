@@ -267,9 +267,9 @@ export function getModelForUseCase(
     spec: CLAUDE_MODEL_MAP['haiku'], // used to generate app specs
     features: CLAUDE_MODEL_MAP['haiku'], // used to generate features from app specs
     suggestions: CLAUDE_MODEL_MAP['haiku'], // used for suggestions
-    chat: CLAUDE_MODEL_MAP['haiku'], // used for chat
+    chat: DEFAULT_MODELS.claude, // used for chat (agent runner)
     auto: CLAUDE_MODEL_MAP['opus'], // used to implement kanban cards
-    default: CLAUDE_MODEL_MAP['opus'],
+    default: DEFAULT_MODELS.claude,
   };
 
   return resolveModelString(defaultModels[useCase] || DEFAULT_MODELS.claude);
