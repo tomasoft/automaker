@@ -17,7 +17,8 @@ import { NoProjectState, AgentHeader, ChatArea } from './agent-view/components';
 import { AgentInputArea } from './agent-view/input-area';
 
 export function AgentView() {
-  const { currentProject } = useAppStore();
+  const { currentProject, getAgentModelForSession, setAgentModelForSession, phaseModels } =
+    useAppStore();
   const [input, setInput] = useState('');
   const [currentTool, setCurrentTool] = useState<string | null>(null);
   const [showSessionManager, setShowSessionManager] = useState(true);
@@ -33,6 +34,31 @@ export function AgentView() {
   const { currentSessionId, handleSelectSession } = useAgentSession({
     projectPath: currentProject?.path,
   });
+
+  // Restore model selection when session changes
+  useEffect(() => {
+    if (currentSessionId) {
+      const savedModel = getAgentModelForSession(currentSessionId);
+      if (savedModel) {
+        setModelSelection(savedModel);
+      } else {
+        // Use AI Suggestions model from settings as default for new sessions
+        const defaultModel = phaseModels.suggestionsModel || { model: 'sonnet' };
+        setModelSelection(defaultModel);
+      }
+    }
+  }, [currentSessionId, getAgentModelForSession, phaseModels.suggestionsModel]);
+
+  // Persist model selection when it changes
+  const handleModelSelect = useCallback(
+    (entry: PhaseModelEntry) => {
+      setModelSelection(entry);
+      if (currentSessionId) {
+        setAgentModelForSession(currentSessionId, entry);
+      }
+    },
+    [currentSessionId, setAgentModelForSession]
+  );
 
   // Use the Electron agent hook (only if we have a session)
   const {
@@ -187,7 +213,7 @@ export function AgentView() {
             onSend={handleSend}
             onStop={stopExecution}
             modelSelection={modelSelection}
-            onModelSelect={setModelSelection}
+            onModelSelect={handleModelSelect}
             isProcessing={isProcessing}
             isConnected={isConnected}
             selectedImages={fileAttachments.selectedImages}

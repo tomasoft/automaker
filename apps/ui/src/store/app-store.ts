@@ -411,6 +411,8 @@ export interface AppState {
 
   // Agent Session state (per-project, keyed by project path)
   lastSelectedSessionByProject: Record<string, string>; // projectPath -> sessionId
+  // Agent model selection per session (sessionId -> PhaseModelEntry)
+  agentModelBySession: Record<string, PhaseModelEntry>; // sessionId -> model selection
 
   // Theme
   theme: ThemeMode;
@@ -897,6 +899,8 @@ export interface AppActions {
   // Agent Session actions
   setLastSelectedSession: (projectPath: string, sessionId: string | null) => void;
   getLastSelectedSession: (projectPath: string) => string | null;
+  setAgentModelForSession: (sessionId: string, model: PhaseModelEntry) => void;
+  getAgentModelForSession: (sessionId: string) => PhaseModelEntry | null;
 
   // Board Background actions
   setBoardBackground: (projectPath: string, imagePath: string | null) => void;
@@ -1054,6 +1058,7 @@ const initialState: AppState = {
   sidebarOpen: true,
   targetSettingsTab: undefined,
   lastSelectedSessionByProject: {},
+  agentModelBySession: {},
   theme: 'dark',
   features: [],
   appSpec: '',
@@ -2005,6 +2010,20 @@ export const useAppStore = create<AppState & AppActions>()(
 
       getLastSelectedSession: (projectPath) => {
         return get().lastSelectedSessionByProject[projectPath] || null;
+      },
+
+      setAgentModelForSession: (sessionId, model) => {
+        const current = get().agentModelBySession;
+        set({
+          agentModelBySession: {
+            ...current,
+            [sessionId]: model,
+          },
+        });
+      },
+
+      getAgentModelForSession: (sessionId) => {
+        return get().agentModelBySession[sessionId] || null;
       },
 
       // Board Background actions
@@ -3221,6 +3240,7 @@ export const useAppStore = create<AppState & AppActions>()(
           aiProfiles: state.aiProfiles,
           chatSessions: state.chatSessions,
           lastSelectedSessionByProject: state.lastSelectedSessionByProject,
+          agentModelBySession: state.agentModelBySession,
           // Board background settings
           boardBackgroundByProject: state.boardBackgroundByProject,
           // Terminal layout persistence (per-project)
