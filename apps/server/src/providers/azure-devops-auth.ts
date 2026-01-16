@@ -745,6 +745,8 @@ export class AzureDevOpsAuthManager {
       title: string;
       workItemType: string;
       state: string;
+      description?: string;
+      acceptanceCriteria?: string;
       url: string;
     }>
   > {
@@ -805,9 +807,9 @@ export class AzureDevOpsAuthManager {
       return [];
     }
 
-    // Fetch details for child work items
+    // Fetch details for child work items with all fields expanded
     const batchResponse = await fetch(
-      `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${childIds.join(',')}&api-version=7.1`,
+      `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems?ids=${childIds.join(',')}&$expand=all&api-version=7.1`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -832,6 +834,8 @@ export class AzureDevOpsAuthManager {
           'System.Title': string;
           'System.WorkItemType': string;
           'System.State': string;
+          'System.Description'?: string;
+          'Microsoft.VSTS.Common.AcceptanceCriteria'?: string;
         };
       }>;
     };
@@ -840,13 +844,25 @@ export class AzureDevOpsAuthManager {
       return [];
     }
 
-    return batchData.value.map((wi) => ({
-      id: wi.id,
-      title: wi.fields['System.Title'],
-      workItemType: wi.fields['System.WorkItemType'],
-      state: wi.fields['System.State'],
-      url: wi.url,
-    }));
+    logger.info(
+      `[getChildWorkItems] Returning ${batchData.value.length} child work items with fields`
+    );
+
+    return batchData.value.map((wi) => {
+      const result = {
+        id: wi.id,
+        title: wi.fields['System.Title'],
+        workItemType: wi.fields['System.WorkItemType'],
+        state: wi.fields['System.State'],
+        description: wi.fields['System.Description'],
+        acceptanceCriteria: wi.fields['Microsoft.VSTS.Common.AcceptanceCriteria'],
+        url: wi.url,
+      };
+      logger.info(
+        `[getChildWorkItems] Work item ${wi.id}: description=${!!result.description}, acceptanceCriteria=${!!result.acceptanceCriteria}`
+      );
+      return result;
+    });
   }
 
   /**

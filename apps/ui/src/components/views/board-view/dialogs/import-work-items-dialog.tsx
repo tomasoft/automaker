@@ -48,6 +48,8 @@ interface ChildWorkItem {
   title: string;
   workItemType: string;
   state: string;
+  description?: string;
+  acceptanceCriteria?: string;
   url: string;
   attachments?: Array<{
     id: string;
@@ -336,6 +338,8 @@ export function ImportWorkItemsDialog({
             title: item.title,
             workItemType: item.workItemType,
             state: item.state,
+            description: item.description,
+            acceptanceCriteria: item.acceptanceCriteria,
             url: item.url,
             attachments: item.attachments,
           });
@@ -592,11 +596,18 @@ export function ImportWorkItemsDialog({
         // Fetch comments for the work item
         const commentsText = await getWorkItemComments(child.id);
 
+        // Build comprehensive description including description and acceptance criteria
+        console.log('Child work item data:', child);
+        console.log('Description:', child.description);
+        console.log('Acceptance Criteria:', child.acceptanceCriteria);
+        const baseDescription = buildDescription(child);
+        console.log('Built description:', baseDescription);
+
         const feature = {
           id: featureId,
           title: `[${child.workItemType}] ${child.title}`,
           category: child.workItemType.toLowerCase().replace(' ', '-'),
-          description: `Azure DevOps Work Item: ${child.url}` + commentsText,
+          description: baseDescription + commentsText,
           status: 'backlog' as const,
           steps: [],
           model: normalizedModel,
@@ -812,6 +823,24 @@ export function ImportWorkItemsDialog({
           addFeature(result.feature);
           importCount++;
 
+          // Update Azure DevOps work item status to Active
+          try {
+            await fetch('http://localhost:3008/api/azure-devops-work-items/update-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                organization,
+                project,
+                workItemId: child.id,
+                status: 'Active',
+              }),
+            });
+          } catch (statusError) {
+            console.warn('Failed to update Azure DevOps work item status:', statusError);
+            // Don't fail the import if status update fails
+          }
+
           // Add two-way link: link the Azure DevOps work item back to this feature
           try {
             const featureUrl = `automaker://feature/${result.feature.id}`; // Deep link to feature
@@ -845,7 +874,7 @@ export function ImportWorkItemsDialog({
     }
   };
 
-  const buildDescription = (item: AzureWorkItem): string => {
+  const buildDescription = (item: AzureWorkItem | ChildWorkItem): string => {
     let description = '';
 
     if (item.description) {
@@ -862,7 +891,7 @@ export function ImportWorkItemsDialog({
     description += `- State: ${item.state}\n`;
     description += `- URL: ${item.url}\n`;
 
-    if (item.tags) {
+    if ('tags' in item && item.tags) {
       description += `- Tags: ${item.tags}\n`;
     }
 
