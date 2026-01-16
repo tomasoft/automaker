@@ -799,6 +799,24 @@ export function ImportWorkItemsDialog({
                   }
                 } else if (ext === '.xlsx' || ext === '.xls') {
                   description = `[Excel Spreadsheet: ${file.filename}]\n\nThis spreadsheet was attached from Azure DevOps and may contain:\n- Data requirements or schemas\n- Test cases or scenarios\n- Calculations or formulas\n- Reference data\n\nRefer to the feature description for relevant data details. File location: ${file.path}`;
+                } else if (
+                  ext === '.txt' ||
+                  ext === '.md' ||
+                  actualFileType === '.txt' ||
+                  actualFileType === '.md'
+                ) {
+                  // Read text file content
+                  try {
+                    if (fileContent) {
+                      const textContent = atob(fileContent);
+                      description = `[Text File: ${file.filename}]\n\n## Content:\n\n${textContent}\n\n---\n\nFile location: ${file.path}`;
+                    } else {
+                      description = `[Text File: ${file.filename}]\n\n⚠️ Could not read text file content.\n\nFile location: ${file.path}`;
+                    }
+                  } catch (error) {
+                    console.warn(`Failed to read text from ${file.filename}:`, error);
+                    description = `[Text File: ${file.filename}]\n\n⚠️ Could not read text file content.\n\nFile location: ${file.path}`;
+                  }
                 } else {
                   description = `[Attachment: ${file.filename}]\n\nFile type: ${file.mimeType}\nFile location: ${file.path}\n\nThis file was attached from Azure DevOps. Review the feature description and comments for relevant details from this attachment.`;
                 }
