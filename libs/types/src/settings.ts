@@ -431,6 +431,8 @@ export interface KeyboardShortcuts {
   chat: string;
   /** Open usage & costs */
   usage: string;
+  /** Import from Azure DevOps */
+  importAzureDevOps: string;
 }
 
 /**
@@ -1015,6 +1017,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
   githubPrs: 'R',
   chat: 'H',
   usage: 'U',
+  importAzureDevOps: 'Shift+O',
 };
 
 /** Default impact analysis rules for gotcha detection */

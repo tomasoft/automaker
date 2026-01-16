@@ -107,6 +107,7 @@ const SHORTCUT_LABELS: Record<keyof KeyboardShortcuts, string> = {
   splitTerminalDown: 'Split Down',
   closeTerminal: 'Close Terminal',
   newTerminalTab: 'New Tab',
+  importAzureDevOps: 'Import Azure DevOps',
 };
 
 // Categorize shortcuts for color coding
@@ -135,6 +136,7 @@ const SHORTCUT_CATEGORIES: Record<keyof KeyboardShortcuts, 'navigation' | 'ui' |
   splitTerminalDown: 'action',
   closeTerminal: 'action',
   newTerminalTab: 'action',
+  importAzureDevOps: 'action',
 };
 
 // Category colors

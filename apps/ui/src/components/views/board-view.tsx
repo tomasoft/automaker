@@ -940,6 +940,7 @@ export function BoardView() {
     onAddFeature: () => setShowAddDialog(true),
     onStartNextFeatures: handleStartNextFeatures,
     onPlanBacklog: () => setShowPlanDialog(true),
+    onImportAzureDevOps: () => setShowImportWorkItemsDialog(true),
     onViewOutput: handleViewOutput,
   });
 
@@ -1186,6 +1187,11 @@ export function BoardView() {
           key: shortcuts.planBacklog,
           action: () => setShowPlanDialog(true),
           description: 'Backlog planning',
+        }}
+        importAzureDevOpsShortcut={{
+          key: shortcuts.importAzureDevOps,
+          action: () => setShowImportWorkItemsDialog(true),
+          description: 'Import from Azure DevOps',
         }}
         isMounted={isMounted}
       />

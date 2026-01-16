@@ -35,6 +35,7 @@ interface AzureWorkItem {
   tags?: string;
   priority?: number;
   url: string;
+  parentId?: number;
   attachments?: Array<{
     id: string;
     name: string;
@@ -156,8 +157,23 @@ export function ImportWorkItemsDialog({
 
         const data = await response.json();
         if (data.success && data.workItems) {
-          setWorkItems(data.workItems);
-          toast.success(`Found ${data.workItems.length} work items assigned to you`);
+          // Filter out work items that have a parent in the current result set
+          // This prevents showing tasks both at the top level and as children of their feature
+          const allWorkItemIds = new Set(data.workItems.map((wi: AzureWorkItem) => wi.id));
+          const topLevelWorkItems = data.workItems.filter((wi: AzureWorkItem) => {
+            // Include the work item if it has no parent, or if its parent is not in this result set
+            return !wi.parentId || !allWorkItemIds.has(wi.parentId);
+          });
+
+          setWorkItems(topLevelWorkItems);
+          const filteredCount = data.workItems.length - topLevelWorkItems.length;
+          if (filteredCount > 0) {
+            toast.success(
+              `Found ${data.workItems.length} work items (${filteredCount} shown as children)`
+            );
+          } else {
+            toast.success(`Found ${topLevelWorkItems.length} work items assigned to you`);
+          }
         } else {
           throw new Error(data.error || 'Failed to fetch work items');
         }
@@ -224,23 +240,36 @@ export function ImportWorkItemsDialog({
   );
 
   const toggleWorkItemSelected = (workItemId: number) => {
+    const workItem = workItems.find((wi) => wi.id === workItemId);
+
     setSelectedWorkItems((prev) => {
       const next = new Set(prev);
       if (next.has(workItemId)) {
         next.delete(workItemId);
-        // Also deselect children
-        const children = childWorkItems.get(workItemId);
-        if (children) {
-          children.forEach((child) => {
+        // Also deselect children when deselecting a Feature
+        if (workItem?.workItemType === 'Feature') {
+          const children = childWorkItems.get(workItemId);
+          if (children) {
             setSelectedChildren((prevChildren) => {
               const nextChildren = new Set(prevChildren);
-              nextChildren.delete(child.id);
+              children.forEach((child) => nextChildren.delete(child.id));
               return nextChildren;
             });
-          });
+          }
         }
       } else {
         next.add(workItemId);
+        // Auto-select children when selecting a Feature
+        if (workItem?.workItemType === 'Feature') {
+          const children = childWorkItems.get(workItemId);
+          if (children) {
+            setSelectedChildren((prevChildren) => {
+              const nextChildren = new Set(prevChildren);
+              children.forEach((child) => nextChildren.add(child.id));
+              return nextChildren;
+            });
+          }
+        }
       }
       return next;
     });
@@ -276,14 +305,48 @@ export function ImportWorkItemsDialog({
 
     setIsImporting(true);
     try {
-      // Get selected work items data
+      // When a Feature is selected, we import its children (User Stories/Bugs) instead
+      // of the Feature itself. Non-Feature work items are imported directly.
       const selectedItems = workItems.filter((wi) => selectedWorkItems.has(wi.id));
-      const selectedChildItems: ChildWorkItem[] = [];
+      const itemsToImport: ChildWorkItem[] = [];
 
+      // For each selected work item:
+      // - If it's a Feature, import all its children
+      // - If it's not a Feature (Bug, User Story, etc.), import it directly
+      for (const item of selectedItems) {
+        if (item.workItemType === 'Feature') {
+          // Import children of this Feature
+          let children = childWorkItems.get(item.id);
+
+          // If children haven't been loaded yet, fetch them
+          if (!children) {
+            await fetchChildWorkItems(item.id);
+            children = childWorkItems.get(item.id);
+          }
+
+          if (children && children.length > 0) {
+            itemsToImport.push(...children);
+          } else {
+            toast.warning(`Feature "${item.title}" has no child work items to import`);
+          }
+        } else {
+          // Import non-Feature work items directly
+          itemsToImport.push({
+            id: item.id,
+            title: item.title,
+            workItemType: item.workItemType,
+            state: item.state,
+            url: item.url,
+            attachments: item.attachments,
+          });
+        }
+      }
+
+      // Also include manually selected children
       childWorkItems.forEach((children, parentId) => {
         children.forEach((child) => {
-          if (selectedChildren.has(child.id)) {
-            selectedChildItems.push(child);
+          if (selectedChildren.has(child.id) && !itemsToImport.find((i) => i.id === child.id)) {
+            itemsToImport.push(child);
           }
         });
       });
@@ -508,8 +571,8 @@ export function ImportWorkItemsDialog({
         throw new Error('Features API not available');
       }
 
-      // Convert parent work items
-      for (const item of selectedItems) {
+      // Import all items (children of Features or directly selected non-Feature items)
+      for (const child of itemsToImport) {
         // Get default model from phase models (same as Add Feature dialog)
         const defaultPhaseModel = phaseModels.featureGenerationModel;
         const defaultThinkingLevel = defaultPhaseModel?.thinkingLevel || 'none';
@@ -526,38 +589,36 @@ export function ImportWorkItemsDialog({
 
         const featureId = `feature-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-        // Fetch comments and append to description
-        const commentsText = await getWorkItemComments(item.id);
+        // Fetch comments for the work item
+        const commentsText = await getWorkItemComments(child.id);
 
         const feature = {
           id: featureId,
-          title: `[${item.workItemType}] ${item.title}`,
-          category: item.workItemType.toLowerCase().replace(' ', '-'),
-          description: buildDescription(item) + commentsText,
-          priority: item.priority || 2,
+          title: `[${child.workItemType}] ${child.title}`,
+          category: child.workItemType.toLowerCase().replace(' ', '-'),
+          description: `Azure DevOps Work Item: ${child.url}` + commentsText,
           status: 'backlog' as const,
-          tags: item.tags ? item.tags.split(';').map((t) => t.trim()) : [],
           steps: [],
           model: normalizedModel,
           thinkingLevel: defaultThinkingLevel,
           planningMode: defaultPlanningMode,
           requirePlanApproval: defaultRequirePlanApproval,
-          azureWorkItemId: item.id,
-          azureWorkItemUrl: item.url,
+          azureWorkItemId: child.id,
+          azureWorkItemUrl: child.url,
         };
 
         // Persist to backend
         const result = await api.features.create(projectPath, feature);
         if (result.success && result.feature) {
           // Download and attach files from Azure DevOps work item
-          const attachmentFiles = await downloadAttachments(item, featureId);
+          const attachmentFiles = await downloadAttachments(child, featureId);
           console.log(
             `Downloaded ${attachmentFiles.length} attachment files for feature ${featureId}:`,
             attachmentFiles.map((f) => f.filename)
           );
 
           // Download and attach files from comments
-          const commentAttachments = await downloadCommentAttachments(item.id, featureId);
+          const commentAttachments = await downloadCommentAttachments(child.id, featureId);
           console.log(
             `Downloaded ${commentAttachments.length} comment attachment files for feature ${featureId}:`,
             commentAttachments.map((f) => f.filename)
@@ -761,176 +822,6 @@ export function ImportWorkItemsDialog({
               body: JSON.stringify({
                 organization,
                 project,
-                workItemId: item.id,
-                linkUrl: featureUrl,
-                linkComment: `Imported to AutoMaker as feature: ${result.feature.title}`,
-              }),
-            });
-          } catch (linkError) {
-            console.warn('Failed to add link to Azure DevOps work item:', linkError);
-            // Don't fail the import if linking fails
-          }
-        }
-      }
-
-      // Convert child work items
-      for (const child of selectedChildItems) {
-        // Get default model from phase models (same as Add Feature dialog)
-        const defaultPhaseModel = phaseModels.featureGenerationModel;
-        const defaultThinkingLevel = defaultPhaseModel?.thinkingLevel || 'none';
-
-        // Normalize the model to include provider prefix if needed
-        let normalizedModel: string;
-        if (defaultPhaseModel?.model) {
-          const modelString = defaultPhaseModel.model as string;
-          const provider = getModelProvider(modelString);
-          normalizedModel = addProviderPrefix(modelString, provider);
-        } else {
-          normalizedModel = 'opus'; // Claude models don't need prefix
-        }
-
-        const childFeatureId = `feature-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-        const feature = {
-          id: childFeatureId,
-          title: `[${child.workItemType}] ${child.title}`,
-          category: child.workItemType.toLowerCase().replace(' ', '-'),
-          description: `Azure DevOps Work Item: ${child.url}`,
-          status: 'backlog' as const,
-          steps: [],
-          model: normalizedModel,
-          thinkingLevel: defaultThinkingLevel,
-          planningMode: defaultPlanningMode,
-          requirePlanApproval: defaultRequirePlanApproval,
-          azureWorkItemId: child.id,
-          azureWorkItemUrl: child.url,
-        };
-
-        // Persist to backend
-        const result = await api.features.create(projectPath, feature);
-        if (result.success && result.feature) {
-          // Download and attach files from Azure DevOps
-          const attachmentFiles = await downloadAttachments(child, childFeatureId);
-          if (attachmentFiles.length > 0) {
-            // Categorize attachments: images go to imagePaths, others to textFilePaths
-            const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
-            const images = attachmentFiles
-              .filter((file) => {
-                const ext = file.filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
-                return imageExtensions.includes(ext);
-              })
-              .map((file) => ({
-                id: file.id,
-                path: file.path,
-                filename: file.filename,
-                mimeType: file.mimeType,
-              }));
-
-            const docsWithoutText = attachmentFiles.filter((file) => {
-              const ext = file.filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
-              return !imageExtensions.includes(ext);
-            });
-
-            // Extract text from DOCX and PDF files
-            const docs = await Promise.all(
-              docsWithoutText.map(async (file) => {
-                const ext = file.filename.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
-                let description = '';
-
-                if (ext === '.docx' || ext === '.doc') {
-                  // Try to extract text from DOCX
-                  try {
-                    const extractResponse = await fetch(
-                      'http://localhost:3008/api/azure-devops-work-items/extract-docx-text',
-                      {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({ base64Content: file.content }),
-                      }
-                    );
-
-                    if (extractResponse.ok) {
-                      const extractData = await extractResponse.json();
-                      if (extractData.success && extractData.text) {
-                        description = `[Word Document: ${file.filename}]\n\n## Extracted Content:\n\n${extractData.text}\n\n---\n\nFile location: ${file.path}`;
-                      } else {
-                        description = `[Word Document: ${file.filename}]\n\n⚠️ Could not extract text from this document.\n\nFile location: ${file.path}`;
-                      }
-                    } else {
-                      description = `[Word Document: ${file.filename}]\n\n⚠️ Could not extract text from this document.\n\nFile location: ${file.path}`;
-                    }
-                  } catch (error) {
-                    console.warn(`Failed to extract text from ${file.filename}:`, error);
-                    description = `[Word Document: ${file.filename}]\n\n⚠️ Could not extract text from this document.\n\nFile location: ${file.path}`;
-                  }
-                } else if (ext === '.pdf') {
-                  // Try to extract text from PDF
-                  try {
-                    const extractResponse = await fetch(
-                      'http://localhost:3008/api/azure-devops-work-items/extract-pdf-text',
-                      {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({ base64Content: file.content }),
-                      }
-                    );
-
-                    if (extractResponse.ok) {
-                      const extractData = await extractResponse.json();
-                      if (extractData.success && extractData.text) {
-                        description = `[PDF Document: ${file.filename}]\n\n## Extracted Content:\n\n${extractData.text}\n\n---\n\nPages: ${extractData.pages || 'Unknown'}\nFile location: ${file.path}`;
-                      } else {
-                        description = `[PDF Document: ${file.filename}]\n\n⚠️ Could not extract text from this PDF.\n\nFile location: ${file.path}`;
-                      }
-                    } else {
-                      description = `[PDF Document: ${file.filename}]\n\n⚠️ Could not extract text from this PDF.\n\nFile location: ${file.path}`;
-                    }
-                  } catch (error) {
-                    console.warn(`Failed to extract text from ${file.filename}:`, error);
-                    description = `[PDF Document: ${file.filename}]\n\n⚠️ Could not extract text from this PDF.\n\nFile location: ${file.path}`;
-                  }
-                } else if (ext === '.xlsx' || ext === '.xls') {
-                  description = `[Excel Spreadsheet: ${file.filename}]\n\nThis spreadsheet was attached from Azure DevOps and may contain:\n- Data requirements or schemas\n- Test cases or scenarios\n- Calculations or formulas\n- Reference data\n\nRefer to the feature description for relevant data details. File location: ${file.path}`;
-                } else {
-                  description = `[Attachment: ${file.filename}]\n\nFile type: ${file.mimeType}\nFile location: ${file.path}\n\nThis file was attached from Azure DevOps. Review the feature description and comments for relevant details from this attachment.`;
-                }
-
-                return {
-                  id: file.id,
-                  path: file.path,
-                  filename: file.filename,
-                  mimeType: file.mimeType,
-                  content: description,
-                };
-              })
-            );
-
-            // Update feature with categorized attachments
-            if (images.length > 0) {
-              result.feature.imagePaths = images;
-            }
-            if (docs.length > 0) {
-              result.feature.textFilePaths = docs;
-            }
-
-            await api.features.update(projectPath, result.feature.id, result.feature);
-          }
-
-          addFeature(result.feature);
-          importCount++;
-
-          // Add two-way link: link the Azure DevOps work item back to this feature
-          try {
-            const featureUrl = `automaker://feature/${result.feature.id}`; // Deep link to feature
-            await fetch('http://localhost:3008/api/azure-devops-work-items/add-link', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({
-                organization,
-                project,
                 workItemId: child.id,
                 linkUrl: featureUrl,
                 linkComment: `Imported to AutoMaker as feature: ${result.feature.title}`,
@@ -942,6 +833,7 @@ export function ImportWorkItemsDialog({
           }
         }
       }
+
       toast.success(`Successfully imported ${importCount} work items to backlog`);
       onImported?.();
       onClose();
@@ -1013,6 +905,58 @@ export function ImportWorkItemsDialog({
   const allSelected = selectedWorkItems.size === workItems.length && workItems.length > 0;
   const someSelected = selectedWorkItems.size > 0 && selectedWorkItems.size < workItems.length;
 
+  // Calculate actual items to import (excluding Features, only counting their children + non-Feature items)
+  const getActualImportCount = () => {
+    let count = 0;
+    const countedChildren = new Set<number>();
+
+    // Count children of selected Features (from selectedChildren)
+    selectedWorkItems.forEach((workItemId) => {
+      const workItem = workItems.find((wi) => wi.id === workItemId);
+      if (workItem?.workItemType === 'Feature') {
+        const children = childWorkItems.get(workItemId);
+        if (children) {
+          children.forEach((child) => {
+            if (selectedChildren.has(child.id)) {
+              count += 1;
+              countedChildren.add(child.id);
+            }
+          });
+        }
+      } else {
+        // Count non-Feature items directly
+        count += 1;
+      }
+    });
+
+    // Add any manually selected children that weren't part of a selected Feature
+    selectedChildren.forEach((childId) => {
+      if (!countedChildren.has(childId)) {
+        count += 1;
+      }
+    });
+
+    return count;
+  };
+
+  // Calculate total available items to import (all children + non-Feature top-level items)
+  const getTotalAvailableCount = () => {
+    let count = 0;
+
+    workItems.forEach((workItem) => {
+      if (workItem.workItemType === 'Feature') {
+        const children = childWorkItems.get(workItem.id);
+        if (children) {
+          count += children.length;
+        }
+      } else {
+        count += 1;
+      }
+    });
+
+    return count;
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
@@ -1052,14 +996,8 @@ export function ImportWorkItemsDialog({
                   onCheckedChange={toggleSelectAll}
                 />
                 <label htmlFor="select-all" className="text-sm font-medium cursor-pointer">
-                  {allSelected ? 'Deselect all' : 'Select all'} (
-                  {selectedWorkItems.size + selectedChildren.size}/
-                  {workItems.length +
-                    Array.from(childWorkItems.values()).reduce(
-                      (acc, children) => acc + children.length,
-                      0
-                    )}
-                  )
+                  {allSelected ? 'Deselect all' : 'Select all'} ({getActualImportCount()}/
+                  {getTotalAvailableCount()})
                 </label>
               </div>
 
@@ -1135,40 +1073,46 @@ export function ImportWorkItemsDialog({
                       {/* Child work items */}
                       {isExpanded && children.length > 0 && (
                         <div className="ml-8 mt-2 space-y-2">
-                          {children.map((child) => (
-                            <div
-                              key={child.id}
-                              className={cn(
-                                'rounded-lg border p-2 transition-colors',
-                                selectedChildren.has(child.id) && 'border-primary bg-primary/5'
-                              )}
-                            >
-                              <div className="flex items-center gap-2">
-                                <Checkbox
-                                  checked={selectedChildren.has(child.id)}
-                                  onCheckedChange={() => toggleChildSelected(child.id)}
-                                />
-                                <span className="text-sm">
-                                  {getWorkItemIcon(child.workItemType)}
-                                </span>
-                                <span className="text-sm font-medium flex-1">{child.title}</span>
-                                {child.attachments && child.attachments.length > 0 && (
-                                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                                    <Paperclip className="w-3 h-3" />
-                                    {child.attachments.length}
-                                  </span>
+                          {children.map((child) => {
+                            const isChildSelected = selectedChildren.has(child.id);
+                            return (
+                              <div
+                                key={child.id}
+                                className={cn(
+                                  'rounded-lg border p-2 transition-colors',
+                                  isChildSelected && 'border-primary bg-primary/5'
                                 )}
-                                <span className="text-xs font-mono text-muted-foreground">
-                                  #{child.id}
-                                </span>
-                                <span
-                                  className={cn('text-xs font-medium', getStateColor(child.state))}
-                                >
-                                  {child.state}
-                                </span>
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Checkbox
+                                    checked={isChildSelected}
+                                    onCheckedChange={() => toggleChildSelected(child.id)}
+                                  />
+                                  <span className="text-sm">
+                                    {getWorkItemIcon(child.workItemType)}
+                                  </span>
+                                  <span className="text-sm font-medium flex-1">{child.title}</span>
+                                  {child.attachments && child.attachments.length > 0 && (
+                                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                      <Paperclip className="w-3 h-3" />
+                                      {child.attachments.length}
+                                    </span>
+                                  )}
+                                  <span className="text-xs font-mono text-muted-foreground">
+                                    #{child.id}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      'text-xs font-medium',
+                                      getStateColor(child.state)
+                                    )}
+                                  >
+                                    {child.state}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -1199,7 +1143,7 @@ export function ImportWorkItemsDialog({
             ) : (
               <>
                 <Download className="w-4 h-4 mr-2" />
-                Import Selected ({selectedWorkItems.size + selectedChildren.size})
+                Import Selected ({getActualImportCount()})
               </>
             )}
           </Button>

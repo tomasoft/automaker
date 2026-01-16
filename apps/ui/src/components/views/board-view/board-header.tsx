@@ -21,6 +21,7 @@ interface BoardHeaderProps {
   onOpenImportDialog?: () => void;
   addFeatureShortcut: KeyboardShortcut;
   planBacklogShortcut: KeyboardShortcut;
+  importAzureDevOpsShortcut: KeyboardShortcut;
   isMounted: boolean;
 }
 
@@ -40,6 +41,7 @@ export function BoardHeader({
   onOpenImportDialog,
   addFeatureShortcut,
   planBacklogShortcut,
+  importAzureDevOpsShortcut,
   isMounted,
 }: BoardHeaderProps) {
   const apiKeys = useAppStore((state) => state.apiKeys);
@@ -117,15 +119,17 @@ export function BoardHeader({
         </HotkeyButton>
 
         {onOpenImportDialog && (
-          <Button
+          <HotkeyButton
             size="sm"
             variant="outline"
             onClick={onOpenImportDialog}
+            hotkey={importAzureDevOpsShortcut}
+            hotkeyActive={false}
             data-testid="import-work-items-button"
           >
             <Download className="w-4 h-4 mr-2" />
             Import from Azure DevOps
-          </Button>
+          </HotkeyButton>
         )}
 
         <HotkeyButton

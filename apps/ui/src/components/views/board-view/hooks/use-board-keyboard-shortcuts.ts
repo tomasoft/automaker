@@ -12,6 +12,7 @@ interface UseBoardKeyboardShortcutsProps {
   onAddFeature: () => void;
   onStartNextFeatures: () => void;
   onPlanBacklog: () => void;
+  onImportAzureDevOps: () => void;
   onViewOutput: (feature: Feature) => void;
 }
 
@@ -21,6 +22,7 @@ export function useBoardKeyboardShortcuts({
   onAddFeature,
   onStartNextFeatures,
   onPlanBacklog,
+  onImportAzureDevOps,
   onViewOutput,
 }: UseBoardKeyboardShortcutsProps) {
   const shortcuts = useKeyboardShortcutsConfig();
@@ -59,6 +61,11 @@ export function useBoardKeyboardShortcuts({
         action: onPlanBacklog,
         description: 'Backlog planning',
       },
+      {
+        key: shortcuts.importAzureDevOps,
+        action: onImportAzureDevOps,
+        description: 'Import from Azure DevOps',
+      },
     ];
 
     // Add shortcuts for in-progress cards (1-9 and 0 for 10th)
@@ -75,7 +82,14 @@ export function useBoardKeyboardShortcuts({
     });
 
     return shortcutsList;
-  }, [inProgressFeaturesForShortcuts, shortcuts, onAddFeature, onPlanBacklog, onViewOutput]);
+  }, [
+    inProgressFeaturesForShortcuts,
+    shortcuts,
+    onAddFeature,
+    onPlanBacklog,
+    onImportAzureDevOps,
+    onViewOutput,
+  ]);
 
   useKeyboardShortcuts(boardShortcuts);
 

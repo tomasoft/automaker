@@ -583,6 +583,7 @@ export class AzureDevOpsAuthManager {
       tags?: string;
       priority?: number;
       url: string;
+      parentId?: number;
     }>
   > {
     const token = await this.getToken();
@@ -706,6 +707,14 @@ export class AzureDevOpsAuthManager {
         );
       }
 
+      // Find parent work item (reverse hierarchy relation)
+      const parentRelation = wi.relations?.find(
+        (rel: any) => rel.rel === 'System.LinkTypes.Hierarchy-Reverse'
+      );
+      const parentId = parentRelation
+        ? parseInt(parentRelation.url.match(/\/(\d+)$/)?.[1] || '0', 10) || undefined
+        : undefined;
+
       return {
         id: wi.id,
         title: wi.fields['System.Title'],
@@ -718,6 +727,7 @@ export class AzureDevOpsAuthManager {
         priority: wi.fields['Microsoft.VSTS.Common.Priority'],
         url: wi.url,
         attachments,
+        parentId,
       };
     });
   }

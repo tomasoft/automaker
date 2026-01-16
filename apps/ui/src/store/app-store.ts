@@ -170,6 +170,9 @@ export interface KeyboardShortcuts {
   splitTerminalDown: string;
   closeTerminal: string;
   newTerminalTab: string;
+
+  // Azure DevOps shortcuts
+  importAzureDevOps: string;
 }
 
 // Default keyboard shortcuts
@@ -211,6 +214,9 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: KeyboardShortcuts = {
   splitTerminalDown: 'Alt+S',
   closeTerminal: 'Alt+W',
   newTerminalTab: 'Alt+T',
+
+  // Azure DevOps shortcuts (only active in board view)
+  importAzureDevOps: 'Shift+O',
 };
 
 export interface ImageAttachment {
