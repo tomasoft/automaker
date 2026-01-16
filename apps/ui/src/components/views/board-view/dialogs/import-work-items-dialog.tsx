@@ -549,6 +549,16 @@ export function ImportWorkItemsDialog({
             if (writeResult.success) {
               console.log(`Successfully saved ${attachment.name} to ${contextFilePath}`);
 
+              // Delete the temp file now that it's been moved to context folder
+              try {
+                if (api.deleteFile) {
+                  await api.deleteFile(tempResult.path);
+                  console.log(`Deleted temp file: ${tempResult.path}`);
+                }
+              } catch (cleanupError) {
+                console.warn(`Failed to delete temp file ${tempResult.path}:`, cleanupError);
+              }
+
               attachmentFiles.push({
                 id: `attachment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 path: contextFilePath,
