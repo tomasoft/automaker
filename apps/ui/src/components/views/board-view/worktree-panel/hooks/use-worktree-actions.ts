@@ -88,7 +88,9 @@ export function useWorktreeActions({ fetchWorktrees, fetchBranches }: UseWorktre
         }
       } catch (error) {
         logger.error('Pull failed:', error);
-        toast.error('Failed to pull latest changes');
+        const errorMessage =
+          error instanceof Error ? error.message : 'Failed to pull latest changes';
+        toast.error(errorMessage);
       } finally {
         setIsPulling(false);
       }
@@ -117,7 +119,8 @@ export function useWorktreeActions({ fetchWorktrees, fetchBranches }: UseWorktre
         }
       } catch (error) {
         logger.error('Push failed:', error);
-        toast.error('Failed to push changes');
+        const errorMessage = error instanceof Error ? error.message : 'Failed to push changes';
+        toast.error(errorMessage);
       } finally {
         setIsPushing(false);
       }

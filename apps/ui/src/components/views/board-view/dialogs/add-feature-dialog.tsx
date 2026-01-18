@@ -36,15 +36,8 @@ import { toast } from 'sonner';
 import { getElectronAPI } from '@/lib/electron';
 import { getHttpApiClient } from '@/lib/http-api-client';
 import { modelSupportsThinking } from '@/lib/utils';
-import {
-  useAppStore,
-  ModelAlias,
-  ThinkingLevel,
-  FeatureImage,
-  AIProfile,
-  PlanningMode,
-  Feature,
-} from '@/store/app-store';
+import { useAppStore, Feature, FeatureImage } from '@/store/app-store';
+import type { ModelAlias, ThinkingLevel, AIProfile, PlanningMode } from '@automaker/types';
 import {
   ModelSelector,
   ThinkingLevelSelector,
@@ -87,7 +80,7 @@ type FeatureData = {
   imagePaths: DescriptionImagePath[];
   textFilePaths: DescriptionTextFilePath[];
   skipTests: boolean;
-  model: AgentModel;
+  model: ModelAlias;
   thinkingLevel: ThinkingLevel;
   branchName: string; // Can be empty string to use current branch
   priority: number;
@@ -135,7 +128,7 @@ export function AddFeatureDialog({
   const isSpawnMode = !!parentFeature;
   const navigate = useNavigate();
   const httpApi = getHttpApiClient();
-  const { currentProject, defaultWikiPages } = useAppStore();
+  const { currentProject, defaultWikiPages, phaseModels } = useAppStore();
   const [useCurrentBranch, setUseCurrentBranch] = useState(true);
   const [globalSkillsCount, setGlobalSkillsCount] = useState(0);
   const [projectSkillsCount, setProjectSkillsCount] = useState(0);
@@ -151,18 +144,33 @@ export function AddFeatureDialog({
     }>
   >([]);
   const [isLoadingSkillsPreview, setIsLoadingSkillsPreview] = useState(false);
-  const [newFeature, setNewFeature] = useState({
-    title: '',
-    category: '',
-    description: '',
-    images: [] as FeatureImage[],
-    imagePaths: [] as DescriptionImagePath[],
-    textFilePaths: [] as DescriptionTextFilePath[],
-    skipTests: false,
-    model: 'opus' as ModelAlias,
-    thinkingLevel: 'none' as ThinkingLevel,
-    branchName: '',
-    priority: 2 as number, // Default to medium priority
+
+  const [newFeature, setNewFeature] = useState(() => {
+    // Get initial default model from phase models
+    const defaultPhaseModel = phaseModels.featureGenerationModel;
+    let initialModel: string = 'sonnet'; // Fallback to sonnet instead of opus
+    let initialThinking: ThinkingLevel = 'none';
+
+    if (defaultPhaseModel?.model) {
+      const modelString = defaultPhaseModel.model as string;
+      const provider = getModelProvider(modelString);
+      initialModel = addProviderPrefix(modelString, provider);
+      initialThinking = defaultPhaseModel.thinkingLevel ?? 'none';
+    }
+
+    return {
+      title: '',
+      category: '',
+      description: '',
+      images: [] as FeatureImage[],
+      imagePaths: [] as DescriptionImagePath[],
+      textFilePaths: [] as DescriptionTextFilePath[],
+      skipTests: false,
+      model: initialModel as ModelAlias,
+      thinkingLevel: initialThinking,
+      branchName: '',
+      priority: 2 as number, // Default to medium priority
+    };
   });
   const [newFeaturePreviewMap, setNewFeaturePreviewMap] = useState<ImagePreviewMap>(
     () => new Map()
@@ -191,13 +199,8 @@ export function AddFeatureDialog({
   const hasWikiConfig = wikiOrganization && wikiProject && wikiId;
 
   // Get planning mode defaults and worktrees setting from store
-  const {
-    defaultPlanningMode,
-    defaultRequirePlanApproval,
-    defaultAIProfileId,
-    useWorktrees,
-    phaseModels,
-  } = useAppStore();
+  const { defaultPlanningMode, defaultRequirePlanApproval, defaultAIProfileId, useWorktrees } =
+    useAppStore();
 
   // Enhancement model override
   const enhancementOverride = useModelOverride({ phase: 'enhancementModel' });
@@ -223,14 +226,14 @@ export function AddFeatureDialog({
         const provider = getModelProvider(defaultProfile.model);
         normalizedModel = addProviderPrefix(defaultProfile.model, provider);
       } else {
-        normalizedModel = 'opus'; // Claude models don't need prefix
+        normalizedModel = 'sonnet'; // Fallback to sonnet for consistency
       }
 
       setNewFeature((prev) => ({
         ...prev,
         skipTests: defaultSkipTests,
         branchName: defaultBranch || '',
-        // Priority: 1) Phase model defaults, 2) Default profile, 3) Fallback to 'opus'
+        // Priority: 1) Phase model defaults, 2) Default profile, 3) Fallback to 'sonnet'
         model: normalizedModel,
         thinkingLevel: defaultPhaseModel?.thinkingLevel ?? defaultProfile?.thinkingLevel ?? 'none',
       }));
@@ -352,8 +355,8 @@ export function AddFeatureDialog({
         id: parentFeature.id,
         title: parentFeature.title,
         description: parentFeature.description,
-        spec: parentFeature.spec,
-        summary: parentFeature.summary,
+        spec: parentFeature.spec as string | undefined,
+        summary: parentFeature.summary as string | undefined,
         depth: -1,
       };
 
@@ -388,6 +391,18 @@ export function AddFeatureDialog({
   };
 
   const resetForm = () => {
+    // Get default model from phase models for reset
+    const defaultPhaseModel = phaseModels.featureGenerationModel;
+    let resetModel: string = 'sonnet'; // Fallback to sonnet
+    let resetThinking: ThinkingLevel = 'none';
+
+    if (defaultPhaseModel?.model) {
+      const modelString = defaultPhaseModel.model as string;
+      const provider = getModelProvider(modelString);
+      resetModel = addProviderPrefix(modelString, provider);
+      resetThinking = defaultPhaseModel.thinkingLevel ?? 'none';
+    }
+
     setNewFeature({
       title: '',
       category: '',
@@ -396,9 +411,9 @@ export function AddFeatureDialog({
       imagePaths: [],
       textFilePaths: [],
       skipTests: defaultSkipTests,
-      model: 'opus',
+      model: resetModel as ModelAlias,
       priority: 2,
-      thinkingLevel: 'none',
+      thinkingLevel: resetThinking,
       branchName: '',
     });
     setUseCurrentBranch(true);
@@ -466,8 +481,7 @@ export function AddFeatureDialog({
       const result = await api.enhancePrompt?.enhance(
         newFeature.description,
         enhancementMode,
-        enhancementOverride.effectiveModel, // API accepts string, extract from PhaseModelEntry
-        enhancementOverride.effectiveModelEntry.thinkingLevel // Pass thinking level
+        enhancementOverride.effectiveModel // API accepts string, extract from PhaseModelEntry
       );
 
       // Clear timeout if successful
@@ -597,8 +611,8 @@ export function AddFeatureDialog({
                   id: parentFeature.id,
                   title: parentFeature.title,
                   description: parentFeature.description,
-                  spec: parentFeature.spec,
-                  summary: parentFeature.summary,
+                  spec: parentFeature.spec as string | undefined,
+                  summary: parentFeature.summary as string | undefined,
                 }}
                 ancestors={ancestors}
                 selectedAncestorIds={selectedAncestorIds}
