@@ -124,7 +124,26 @@ if (ENABLE_REQUEST_LOGGING) {
 
   app.use(
     morgan(':method :url :status-colored', {
-      skip: (req) => req.url === '/api/health', // Skip health check logs
+      skip: (req) => {
+        // Skip health check logs
+        if (req.url === '/api/health') return true;
+        // Skip OPTIONS requests (CORS preflight)
+        if (req.method === 'OPTIONS') return true;
+        // Skip noisy polling endpoints (both GET and POST)
+        const noisyEndpoints = [
+          '/api/features/list',
+          '/api/auto-mode/context-exists',
+          '/api/features/agent-output',
+          '/api/worktree/list',
+        ];
+        // Check if URL matches any noisy endpoint
+        for (const endpoint of noisyEndpoints) {
+          if (req.url === endpoint || req.url.startsWith(endpoint + '?')) {
+            return true;
+          }
+        }
+        return false;
+      },
     })
   );
 }

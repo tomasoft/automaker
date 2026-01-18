@@ -24,6 +24,8 @@ interface TaskProgressPanelProps {
   className?: string;
   /** Whether the panel starts expanded (default: true) */
   defaultExpanded?: boolean;
+  /** Title for the panel (default: "Execution Plan") */
+  title?: string;
 }
 
 export function TaskProgressPanel({
@@ -31,11 +33,17 @@ export function TaskProgressPanel({
   projectPath,
   className,
   defaultExpanded = true,
+  title = 'Execution Plan',
 }: TaskProgressPanelProps) {
   const [tasks, setTasks] = useState<TaskInfo[]>([]);
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [isTestingExpanded, setIsTestingExpanded] = useState(defaultExpanded);
   const [isLoading, setIsLoading] = useState(true);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+
+  // Separate execution and testing tasks
+  const executionTasks = tasks.filter((t) => !t.id.startsWith('TEST'));
+  const testingTasks = tasks.filter((t) => t.id.startsWith('TEST'));
 
   // Load initial tasks from feature's planSpec
   const loadInitialTasks = useCallback(async () => {
@@ -52,27 +60,30 @@ export function TaskProgressPanel({
       }
 
       const result = await api.features.get(projectPath, featureId);
-      if (result.success && result.feature?.planSpec?.tasks) {
-        const planTasks = result.feature.planSpec.tasks;
-        const currentId = result.feature.planSpec.currentTaskId;
-        const completedCount = result.feature.planSpec.tasksCompleted || 0;
+      if (result.success && result.feature?.planSpec) {
+        const planSpec = result.feature.planSpec as any;
+        if (planSpec.tasks && Array.isArray(planSpec.tasks)) {
+          const planTasks = planSpec.tasks;
+          const currentId = planSpec.currentTaskId;
+          const completedCount = planSpec.tasksCompleted || 0;
 
-        // Convert planSpec tasks to TaskInfo with proper status
-        const initialTasks: TaskInfo[] = planTasks.map((t: any, index: number) => ({
-          id: t.id,
-          description: t.description,
-          filePath: t.filePath,
-          phase: t.phase,
-          status:
-            index < completedCount
-              ? ('completed' as const)
-              : t.id === currentId
-                ? ('in_progress' as const)
-                : ('pending' as const),
-        }));
+          // Convert planSpec tasks to TaskInfo with proper status
+          const initialTasks: TaskInfo[] = planTasks.map((t: any, index: number) => ({
+            id: t.id,
+            description: t.description,
+            filePath: t.filePath,
+            phase: t.phase,
+            status:
+              index < completedCount
+                ? ('completed' as const)
+                : t.id === currentId
+                  ? ('in_progress' as const)
+                  : ('pending' as const),
+          }));
 
-        setTasks(initialTasks);
-        setCurrentTaskId(currentId || null);
+          setTasks(initialTasks);
+          setCurrentTaskId(currentId || null);
+        }
       }
     } catch (error) {
       logger.error('Failed to load initial tasks:', error);
@@ -154,11 +165,28 @@ export function TaskProgressPanel({
   const totalCount = tasks.length;
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
+  const executionCompletedCount = executionTasks.filter((t) => t.status === 'completed').length;
+  const executionProgressPercent =
+    executionTasks.length > 0
+      ? Math.round((executionCompletedCount / executionTasks.length) * 100)
+      : 0;
+
+  const testingCompletedCount = testingTasks.filter((t) => t.status === 'completed').length;
+  const testingProgressPercent =
+    testingTasks.length > 0 ? Math.round((testingCompletedCount / testingTasks.length) * 100) : 0;
+
   if (isLoading || tasks.length === 0) {
     return null;
   }
 
-  return (
+  const renderTaskSection = (
+    sectionTasks: TaskInfo[],
+    sectionTitle: string,
+    sectionExpanded: boolean,
+    setExpanded: (expanded: boolean) => void,
+    completedCount: number,
+    progressPercent: number
+  ) => (
     <div
       className={cn(
         'group rounded-lg border bg-card/50 shadow-sm overflow-hidden transition-all duration-200',
@@ -166,26 +194,26 @@ export function TaskProgressPanel({
       )}
     >
       <button
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={() => setExpanded(!sectionExpanded)}
         className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/10 hover:bg-muted/20 transition-colors"
       >
         <div className="flex items-center gap-3">
           <div
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition-colors',
-              isExpanded ? 'bg-background border-border' : 'bg-muted border-transparent'
+              sectionExpanded ? 'bg-background border-border' : 'bg-muted border-transparent'
             )}
           >
-            {isExpanded ? (
+            {sectionExpanded ? (
               <ChevronDown className="h-4 w-4 text-foreground/70" />
             ) : (
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             )}
           </div>
           <div className="flex flex-col items-start gap-0.5">
-            <h3 className="font-semibold text-sm tracking-tight">Execution Plan</h3>
+            <h3 className="font-semibold text-sm tracking-tight">{sectionTitle}</h3>
             <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-              {completedCount} of {totalCount} tasks completed
+              {completedCount} of {sectionTasks.length} tasks completed
             </span>
           </div>
         </div>
@@ -224,7 +252,7 @@ export function TaskProgressPanel({
       <div
         className={cn(
           'grid transition-all duration-300 ease-in-out',
-          isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+          sectionExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
         )}
       >
         <div className="overflow-hidden">
@@ -233,7 +261,7 @@ export function TaskProgressPanel({
             <div className="absolute left-[2.35rem] top-4 bottom-8 w-px bg-linear-to-b from-border/80 via-border/40 to-transparent" />
 
             <div className="space-y-5">
-              {tasks.map((task, index) => {
+              {sectionTasks.map((task, index) => {
                 const isActive = task.status === 'in_progress';
                 const isCompleted = task.status === 'completed';
                 const isPending = task.status === 'pending';
@@ -314,6 +342,32 @@ export function TaskProgressPanel({
           </div>
         </div>
       </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      {/* Execution Plan Section */}
+      {executionTasks.length > 0 &&
+        renderTaskSection(
+          executionTasks,
+          'Execution Plan',
+          isExpanded,
+          setIsExpanded,
+          executionCompletedCount,
+          executionProgressPercent
+        )}
+
+      {/* Testing Plan Section */}
+      {testingTasks.length > 0 &&
+        renderTaskSection(
+          testingTasks,
+          'Testing Plan',
+          isTestingExpanded,
+          setIsTestingExpanded,
+          testingCompletedCount,
+          testingProgressPercent
+        )}
     </div>
   );
 }

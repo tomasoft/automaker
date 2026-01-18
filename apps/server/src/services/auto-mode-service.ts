@@ -31,7 +31,6 @@ import {
 const logger = createLogger('AutoMode');
 import { resolveModelString, resolvePhaseModel, DEFAULT_MODELS } from '@automaker/model-resolver';
 import { resolveDependencies, areDependenciesSatisfied } from '@automaker/dependency-resolver';
-import { getGitRepositoryDiffs } from '@automaker/git-utils';
 import { getFeatureDir, getAutomakerDir, getFeaturesDir } from '@automaker/platform';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -45,12 +44,9 @@ import {
 } from '../lib/sdk-options.js';
 import { FeatureLoader } from './feature-loader.js';
 import type { SettingsService } from './settings-service.js';
-import { SkillsLoaderService } from './skills-loader.js';
 import { WikiService } from './wiki-service.js';
-import { DEFAULT_PROMPTS } from '@automaker/prompts';
-import { azureAuthSessions } from '../routes/azure-devops-auth/routes/poll-azure-auth.js';
+import mammoth from 'mammoth';
 import { pipelineService, PipelineService } from './pipeline-service.js';
-import { analyzeFeatureImpact } from './impact-analysis-service.js';
 import {
   getAutoLoadClaudeMdSetting,
   getEnableSandboxModeSetting,
@@ -92,68 +88,25 @@ interface PlanSpec {
 function parseTasksFromSpec(specContent: string): ParsedTask[] {
   const tasks: ParsedTask[] = [];
 
-  logger.info('[Task Parser] Starting task parsing from spec');
-
   // Extract content within ```tasks ... ``` block
   const tasksBlockMatch = specContent.match(/```tasks\s*([\s\S]*?)```/);
   if (!tasksBlockMatch) {
-    logger.warn('[Task Parser] No tasks code block found, trying fallback patterns');
-
-    // Fallback 1: Strict pattern - look for task lines anywhere in content
-    let taskLines = specContent.match(/- \[ \] T\d{3}:.*$/gm);
-    if (taskLines && taskLines.length > 0) {
-      logger.info(`[Task Parser] Fallback 1 matched: Found ${taskLines.length} strict task lines`);
-      let currentPhase: string | undefined;
-      for (const line of taskLines) {
-        const parsed = parseTaskLine(line, currentPhase);
-        if (parsed) {
-          tasks.push(parsed);
-        }
-      }
-      logger.info(`[Task Parser] Successfully parsed ${tasks.length} tasks using Fallback 1`);
+    // Try fallback: look for task lines anywhere in content
+    const taskLines = specContent.match(/- \[ \] T\d{3}:.*$/gm);
+    if (!taskLines) {
       return tasks;
     }
-
-    // Fallback 2: Lenient pattern - tasks with checkboxes but flexible ID
-    taskLines = specContent.match(/- \[ \] (?:T\d+|Task \d+|\d+)[:.].*$/gim);
-    if (taskLines && taskLines.length > 0) {
-      logger.info(`[Task Parser] Fallback 2 matched: Found ${taskLines.length} lenient task lines`);
-      let currentPhase: string | undefined;
-      let counter = 1;
-      for (const line of taskLines) {
-        const parsed = parseLenientTaskLine(line, counter, currentPhase);
-        if (parsed) {
-          tasks.push(parsed);
-          counter++;
-        }
+    // Parse fallback task lines
+    let currentPhase: string | undefined;
+    for (const line of taskLines) {
+      const parsed = parseTaskLine(line, currentPhase);
+      if (parsed) {
+        tasks.push(parsed);
       }
-      logger.info(`[Task Parser] Successfully parsed ${tasks.length} tasks using Fallback 2`);
-      return tasks;
     }
-
-    // Fallback 3: Numbered list pattern (1., 2., etc.)
-    taskLines = specContent.match(/^\d+[.)]\s+.+$/gm);
-    if (taskLines && taskLines.length > 0) {
-      logger.info(
-        `[Task Parser] Fallback 3 matched: Found ${taskLines.length} numbered list items`
-      );
-      let counter = 1;
-      for (const line of taskLines) {
-        const parsed = parseNumberedTaskLine(line, counter);
-        if (parsed) {
-          tasks.push(parsed);
-          counter++;
-        }
-      }
-      logger.info(`[Task Parser] Successfully parsed ${tasks.length} tasks using Fallback 3`);
-      return tasks;
-    }
-
-    logger.error('[Task Parser] No tasks found with any pattern');
     return tasks;
   }
 
-  logger.info('[Task Parser] Found tasks code block');
   const tasksContent = tasksBlockMatch[1];
   const lines = tasksContent.split('\n');
 
@@ -166,12 +119,6 @@ function parseTasksFromSpec(specContent: string): ParsedTask[] {
     const phaseMatch = trimmedLine.match(/^##\s*(.+)$/);
     if (phaseMatch) {
       currentPhase = phaseMatch[1].trim();
-      logger.debug(`[Task Parser] Found phase: ${currentPhase}`);
-      continue;
-    }
-
-    // Skip empty lines
-    if (!trimmedLine) {
       continue;
     }
 
@@ -184,12 +131,11 @@ function parseTasksFromSpec(specContent: string): ParsedTask[] {
     }
   }
 
-  logger.info(`[Task Parser] Successfully parsed ${tasks.length} tasks from code block`);
   return tasks;
 }
 
 /**
- * Parse a single task line (strict format)
+ * Parse a single task line
  * Format: - [ ] T###: Description | File: path/to/file
  */
 function parseTaskLine(line: string, currentPhase?: string): ParsedTask | null {
@@ -214,76 +160,6 @@ function parseTaskLine(line: string, currentPhase?: string): ParsedTask | null {
     description: taskMatch[2].trim(),
     filePath: taskMatch[3]?.trim(),
     phase: currentPhase,
-    status: 'pending',
-  };
-}
-
-/**
- * Parse lenient task format (auto-assign IDs)
- * Format: - [ ] Task 001: Description or - [ ] Description
- */
-function parseLenientTaskLine(
-  line: string,
-  suggestedId: number,
-  currentPhase?: string
-): ParsedTask | null {
-  // Pattern 1: - [ ] T###: or Task ###:
-  const pattern1 = line.match(/- \[ \] (?:T|Task\s*)(\d+)[:.]?\s*([^|]+)(?:\|\s*File:\s*(.+))?$/i);
-  if (pattern1) {
-    const taskId = `T${pattern1[1].padStart(3, '0')}`;
-    return {
-      id: taskId,
-      description: pattern1[2].trim(),
-      filePath: pattern1[3]?.trim(),
-      phase: currentPhase,
-      status: 'pending',
-    };
-  }
-
-  // Pattern 2: - [ ] ###: or ###.
-  const pattern2 = line.match(/- \[ \] (\d+)[:.]?\s*([^|]+)(?:\|\s*File:\s*(.+))?$/);
-  if (pattern2) {
-    const taskId = `T${pattern2[1].padStart(3, '0')}`;
-    return {
-      id: taskId,
-      description: pattern2[2].trim(),
-      filePath: pattern2[3]?.trim(),
-      phase: currentPhase,
-      status: 'pending',
-    };
-  }
-
-  // Pattern 3: - [ ] Description (no ID, auto-assign)
-  const pattern3 = line.match(/- \[ \] ([^|]+)(?:\|\s*File:\s*(.+))?$/);
-  if (pattern3) {
-    const taskId = `T${suggestedId.toString().padStart(3, '0')}`;
-    return {
-      id: taskId,
-      description: pattern3[1].trim(),
-      filePath: pattern3[2]?.trim(),
-      phase: currentPhase,
-      status: 'pending',
-    };
-  }
-
-  return null;
-}
-
-/**
- * Parse numbered list task format
- * Format: 1. Description or 1) Description
- */
-function parseNumberedTaskLine(line: string, suggestedId: number): ParsedTask | null {
-  const match = line.match(/^\d+[.)]\s+([^|]+)(?:\|\s*File:\s*(.+))?$/);
-  if (!match) {
-    return null;
-  }
-
-  const taskId = `T${suggestedId.toString().padStart(3, '0')}`;
-  return {
-    id: taskId,
-    description: match[1].trim(),
-    filePath: match[2]?.trim(),
     status: 'pending',
   };
 }
@@ -654,283 +530,14 @@ export class AutoModeService {
       // (SDK handles CLAUDE.md via settingSources), but keep other context files like CODE_QUALITY.md
       const contextFilesPrompt = filterClaudeMdFromContext(contextResult, autoLoadClaudeMd);
 
-      // Determine if we need to generate a spec first (separate from implementation)
-      const needsSpecGeneration =
-        !options?.continuationPrompt && feature.planningMode === 'spec' && !feature.spec; // Only generate if spec doesn't exist yet
-
       if (options?.continuationPrompt) {
         // Continuation prompt is used when recovering from a plan approval
         // The plan was already approved, so skip the planning phase
         prompt = options.continuationPrompt;
         logger.info(`Using continuation prompt for feature ${featureId}`);
-      } else if (needsSpecGeneration) {
-        // SPEC GENERATION PHASE: Use specGenerationModel from Model Defaults
-        logger.info(`[Planning Phase] Generating spec using specGenerationModel`);
-
-        // Get the phase model configuration from settings
-        const settings = await this.settingsService?.getGlobalSettings();
-        const phaseModelEntry =
-          settings?.phaseModels?.specGenerationModel || DEFAULT_PHASE_MODELS.specGenerationModel;
-        const { model: specModel, thinkingLevel: specThinkingLevel } =
-          resolvePhaseModel(phaseModelEntry);
-
-        logger.info(
-          `[Planning Phase] Using model '${specModel}' for spec generation (from Model Defaults)`
-        );
-
-        // Build spec generation prompt
-        const featurePrompt = this.buildFeaturePrompt(feature, workDir);
-        const planningPrefix = await this.getPlanningPromptPrefix(feature);
-        const specPrompt = planningPrefix + featurePrompt;
-
-        // Emit planning mode info
-        this.emitAutoModeEvent('planning_started', {
-          featureId: feature.id,
-          mode: feature.planningMode,
-          message: `Generating specification using ${specModel}`,
-        });
-
-        // Log the spec generation prompt
-        logger.info(`[Planning Phase] Spec generation prompt length: ${specPrompt.length} chars`);
-        logger.info(`[Planning Phase] Spec prompt preview: ${specPrompt.substring(0, 300)}...`);
-
-        // Generate spec using the spec generation model
-        // For custom agents (Copilot, Local LLM), force agent mode for codebase access
-        const isCustomAgent =
-          specModel.startsWith('copilot-') || specModel.startsWith('local-llm-');
-        const specProvider = isCustomAgent
-          ? ProviderFactory.getProviderForModel(specModel, {
-              agenticMode: true,
-              projectRoot: workDir,
-            })
-          : ProviderFactory.getProviderForModel(specModel);
-
-        logger.info(`[Planning Phase] Starting spec generation stream...`);
-
-        let generatedSpec = '';
-        let chunkCount = 0;
-
-        try {
-          const specStream = specProvider.executeQuery({
-            prompt: specPrompt,
-            model: specModel,
-            systemPrompt: contextFilesPrompt || undefined,
-            thinkingLevel: specThinkingLevel || undefined,
-            cwd: workDir,
-          });
-
-          for await (const msg of specStream) {
-            chunkCount++;
-            logger.debug(`[Planning Phase] Received chunk ${chunkCount}, type: ${msg.type}`);
-
-            if (msg.type === 'assistant' && msg.message?.content) {
-              // SDK-formatted message
-              for (const block of msg.message.content) {
-                if (block.type === 'text' && block.text) {
-                  generatedSpec += block.text;
-
-                  // Stream spec generation to UI
-                  this.emitAutoModeEvent('agent_output', {
-                    featureId,
-                    output: block.text,
-                    append: true,
-                  });
-                }
-              }
-            }
-          }
-
-          logger.info(
-            `[Planning Phase] Spec generation completed. Generated ${generatedSpec.length} chars in ${chunkCount} chunks`
-          );
-        } catch (error) {
-          logger.error(`[Planning Phase] Spec generation failed:`, error);
-          throw error;
-        }
-
-        // Validate that we generated a spec
-        if (!generatedSpec || generatedSpec.trim().length === 0) {
-          const error = 'Spec generation failed: no content generated';
-          logger.error(`[Planning Phase] ${error}`);
-          throw new Error(error);
-        }
-
-        // Strip [SPEC_GENERATED] marker and everything after it from the spec
-        // This prevents the "approved" text from leaking into the implementation prompt
-        let cleanSpec = generatedSpec;
-        const markerIndex = generatedSpec.indexOf('[SPEC_GENERATED]');
-        if (markerIndex > -1) {
-          cleanSpec = generatedSpec.substring(0, markerIndex).trim();
-          logger.info(
-            `[Planning Phase] Removed [SPEC_GENERATED] marker and approval text from spec`
-          );
-        }
-
-        // Parse tasks from the spec
-        logger.info(
-          `[SPEC DETECTION] Parsing tasks from generated spec (${cleanSpec.length} chars)`
-        );
-        const parsedTasks = parseTasksFromSpec(cleanSpec);
-        logger.info(`[TASK PARSING] Found ${parsedTasks.length} tasks in spec`);
-
-        if (parsedTasks.length > 0) {
-          logger.info(
-            `[TASK PARSING] Tasks parsed:`,
-            parsedTasks.map((t) => `${t.id}: ${t.description}`)
-          );
-        }
-
-        // Save cleaned spec and tasks to feature
-        feature.spec = cleanSpec;
-        feature.tasks = parsedTasks.length > 0 ? parsedTasks : undefined;
-
-        // Also save to planSpec for UI compatibility
-        if (!feature.planSpec) {
-          feature.planSpec = {
-            status: 'generated',
-            version: 1,
-            reviewedByUser: false,
-          };
-        }
-        feature.planSpec.content = cleanSpec;
-        feature.planSpec.tasks = parsedTasks.length > 0 ? parsedTasks : undefined;
-        feature.planSpec.tasksTotal = parsedTasks.length;
-        feature.planSpec.tasksCompleted = 0;
-
-        const featureDirForSave = getFeatureDir(projectPath, featureId);
-        const featurePath = path.join(featureDirForSave, 'feature.json');
-        await secureFs.writeFile(featurePath, JSON.stringify(feature, null, 2));
-
-        logger.info(`[Planning Phase] Spec saved to feature.json (${cleanSpec.length} chars)`);
-        logger.info(`[Planning Phase] Spec preview: ${cleanSpec.substring(0, 200)}...`);
-
-        // Auto-run impact analysis if enabled in settings
-        try {
-          const globalSettings = await this.settingsService?.getGlobalSettings();
-          const autoAnalyze = globalSettings?.autoAnalyzeImpact ?? true; // Default to true
-
-          if (autoAnalyze) {
-            logger.info(`[Planning Phase] Auto-analyzing impact...`);
-            const projectSettings = await this.settingsService?.getProjectSettings(projectPath);
-
-            if (projectSettings?.repositoryGraph && projectSettings?.repositoryFileTree) {
-              const impactConfig = globalSettings?.impactAnalysis;
-              const projectRules = Array.isArray(projectSettings.impactAnalysisRules)
-                ? projectSettings.impactAnalysisRules
-                : [];
-
-              const context = {
-                fileTree: projectSettings.repositoryFileTree,
-                graph: projectSettings.repositoryGraph,
-                services: projectSettings.targetRepository?.services || [],
-                features: [],
-                rules: projectRules.length > 0 ? projectRules : impactConfig?.rules || [],
-                dependencyDepth: impactConfig?.dependencyDepth || 2,
-              };
-
-              const impactResult = analyzeFeatureImpact(
-                feature,
-                context,
-                impactConfig?.fileExtractionPatterns || []
-              );
-
-              feature.impactAnalysis = impactResult;
-              await secureFs.writeFile(featurePath, JSON.stringify(feature, null, 2));
-              logger.info(
-                `[Planning Phase] Impact analysis complete: Risk ${impactResult.riskLevel} (${impactResult.riskScore}/100)`
-              );
-            } else {
-              logger.info(`[Planning Phase] Skipping impact analysis - repository not analyzed`);
-            }
-          }
-        } catch (error) {
-          logger.warn(`[Planning Phase] Impact analysis failed, continuing anyway:`, error);
-        }
-
-        // Now check if approval is required
-        if (feature.requirePlanApproval) {
-          // Wait for approval before continuing to implementation
-          logger.info(`[Planning Phase] Spec requires approval, waiting for user review...`);
-          await this.updateFeatureStatus(projectPath, featureId, 'waiting_approval');
-
-          // CRITICAL: Register pending approval BEFORE emitting event
-          const approvalPromise = this.waitForPlanApproval(featureId, projectPath);
-
-          logger.info(`[Planning Phase] Emitting plan_approval_required event`);
-
-          this.emitAutoModeEvent('plan_approval_required', {
-            featureId,
-            projectPath,
-            planContent: cleanSpec,
-            planningMode: feature.planningMode,
-          });
-
-          logger.info(
-            `[Planning Phase] Spec generation complete. Feature status: waiting_approval (plan). Waiting for user approval...`
-          );
-
-          // Wait for user approval
-          const approvalResult = await approvalPromise;
-
-          if (!approvalResult.approved) {
-            logger.info(`[Planning Phase] Plan was rejected by user`);
-            await this.updateFeatureStatus(projectPath, featureId, 'backlog');
-            return;
-          }
-
-          logger.info(`[Planning Phase] Plan approved! Continuing to implementation...`);
-
-          // If user provided feedback or edited the spec, update the feature
-          if (approvalResult.editedPlan && approvalResult.editedPlan !== cleanSpec) {
-            logger.info(`[Planning Phase] User edited the spec, updating feature...`);
-            feature.spec = approvalResult.editedPlan;
-
-            // Re-parse tasks from edited spec
-            const reparsedTasks = parseTasksFromSpec(approvalResult.editedPlan);
-            feature.tasks = reparsedTasks.length > 0 ? reparsedTasks : undefined;
-            logger.info(`[TASK PARSING] Re-parsed ${reparsedTasks.length} tasks from edited spec`);
-
-            // Update planSpec as well
-            if (!feature.planSpec) {
-              feature.planSpec = {
-                status: 'generated',
-                version: 1,
-                reviewedByUser: true,
-              };
-            }
-            feature.planSpec.content = approvalResult.editedPlan;
-            feature.planSpec.tasks = reparsedTasks.length > 0 ? reparsedTasks : undefined;
-            feature.planSpec.tasksTotal = reparsedTasks.length;
-            feature.planSpec.tasksCompleted = 0;
-
-            const featureDirForSave = getFeatureDir(projectPath, featureId);
-            const featurePath = path.join(featureDirForSave, 'feature.json');
-            await secureFs.writeFile(featurePath, JSON.stringify(feature, null, 2));
-          }
-
-          // Continue to implementation phase with the approved spec
-          logger.info(`[Implementation Phase] Starting implementation with ${feature.model}...`);
-
-          // Build implementation prompt (feature now includes the spec)
-          const featurePromptWithSpec = this.buildFeaturePrompt(feature, workDir);
-          prompt = featurePromptWithSpec;
-        } else {
-          logger.info(
-            `[Planning Phase] No approval required, continuing directly to implementation...`
-          );
-
-          // If no approval needed, continue to implementation with the feature's model
-          logger.info(
-            `[Implementation Phase] Continuing with implementation model: ${feature.model}`
-          );
-
-          // Build implementation prompt (feature now includes the spec)
-          const featurePromptWithSpec = this.buildFeaturePrompt(feature, workDir);
-          prompt = featurePromptWithSpec;
-        }
       } else {
-        // Normal flow: build prompt with planning phase (for lite/full modes or skip)
-        const featurePrompt = this.buildFeaturePrompt(feature, workDir);
+        // Normal flow: build prompt with planning phase
+        const featurePrompt = await this.buildFeaturePrompt(feature);
         const planningPrefix = await this.getPlanningPromptPrefix(feature);
         prompt = planningPrefix + featurePrompt;
 
@@ -944,73 +551,41 @@ export class AutoModeService {
         }
       }
 
-      // Extract image paths from feature
-      const imagePaths = feature.imagePaths?.map((img) =>
-        typeof img === 'string' ? img : img.path
-      );
+      // Note: feature.imagePaths contains ALL binary files, but we only pass actual images to buildPromptWithImages
+      // Documents are already extracted and included in the text prompt by buildFeaturePrompt
+      const imagePaths = feature.imagePaths
+        ?.filter((img) => {
+          const mimeType = typeof img === 'string' ? '' : (img.mimeType as string) || '';
+          return mimeType.startsWith('image/');
+        })
+        .map((img) => (typeof img === 'string' ? img : (img.path as string)));
 
-      // Get model from feature and determine provider (used for implementation phase)
+      // Get model from feature and determine provider
       const model = resolveModelString(feature.model, DEFAULT_MODELS.claude);
       const provider = ProviderFactory.getProviderNameForModel(model);
       logger.info(
-        `Executing feature ${featureId} with implementation model: ${model}, provider: ${provider} in ${workDir}`
+        `Executing feature ${featureId} with model: ${model}, provider: ${provider} in ${workDir}`
       );
 
       // Store model and provider in running feature for tracking
       tempRunningFeature.model = model;
       tempRunningFeature.provider = provider;
 
-      // Load skills based on feature description
-      try {
-        const globalSettings = await this.settingsService?.getGlobalSettings();
-        const projectSettings = await this.settingsService?.getProjectSettings(projectPath);
-
-        if (globalSettings) {
-          const skillsLoader = new SkillsLoaderService(
-            globalSettings,
-            projectSettings,
-            projectPath,
-            this.dataDir,
-            this.wikiService
-          );
-
-          const skillsResult = await skillsLoader.loadSkills(feature.description, {
-            maxSkills: globalSettings.maxAutoSelectedSkills ?? 3,
-            similarityThreshold: globalSettings.skillSimilarityThreshold ?? 0.3,
-            disabledSkills: projectSettings?.disabledSkills,
-          });
-
-          // Emit skills_loaded event if any skills were loaded
-          if (skillsResult.skills.length > 0) {
-            this.emitAutoModeEvent('skills_loaded', {
-              featureId,
-              projectPath,
-              skills: skillsResult.skills.map((s) => ({
-                id: s.id,
-                name: s.name,
-                description: s.description,
-                score: s.score,
-                tags: s.tags,
-                filePath: s.filePath,
-              })),
-              wikiPagesUsed: skillsResult.wikiPagesUsed,
-              warnings: skillsResult.warnings,
-            });
-
-            logger.info(
-              `Loaded ${skillsResult.skills.length} skills for feature ${featureId}: ${skillsResult.skills.map((s) => s.name).join(', ')}`
-            );
-          }
-        }
-      } catch (error) {
-        logger.warn(`Failed to load skills for feature ${featureId}:`, error);
-        // Don't fail the feature if skills loading fails
+      // Log context details before sending to agent
+      logger.info(`\n${'='.repeat(80)}`);
+      logger.info(`CONTEXT SENT TO AGENT - Feature ${featureId}`);
+      logger.info(`Model: ${model}, Provider: ${provider}`);
+      logger.info(`Prompt length: ${prompt.length} characters`);
+      logger.info(`Image files: ${imagePaths?.length || 0}`);
+      if (imagePaths && imagePaths.length > 0) {
+        logger.info(`  Images: ${imagePaths.map((p) => path.basename(p)).join(', ')}`);
       }
+      logger.info(`Context files: ${contextFilesPrompt ? 'Yes' : 'No'}`);
+      logger.info(`First 500 chars of prompt:\n${prompt.substring(0, 500)}...`);
+      logger.info(`${'='.repeat(80)}\n`);
 
       // Run the agent with the feature's model and images
       // Context files are passed as system prompt for higher priority
-      // NOTE: runAgent will automatically detect and execute tasks individually
-      // if feature.planSpec.tasks exists (multi-agent execution)
       await this.runAgent(
         workDir,
         featureId,
@@ -1046,15 +621,10 @@ export class AutoModeService {
         );
       }
 
-      // Automatically update wiki documentation if attached
-      await this.updateWikiDocumentation(projectPath, featureId, workDir, feature);
-
-      // Determine final status based on testing mode and approval requirements:
-      // - requirePlanApproval=true: always go to 'waiting_approval' for manual implementation review
-      // - skipTests=true: go to 'waiting_approval' for manual verification
+      // Determine final status based on testing mode:
       // - skipTests=false (automated testing): go directly to 'verified' (no manual verify needed)
-      const requiresManualReview = feature.requirePlanApproval || feature.skipTests;
-      const finalStatus = requiresManualReview ? 'waiting_approval' : 'verified';
+      // - skipTests=true (manual verification): go to 'waiting_approval' for manual review
+      const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';
       await this.updateFeatureStatus(projectPath, featureId, finalStatus);
 
       // Record success to reset consecutive failure tracking
@@ -1168,7 +738,7 @@ export class AutoModeService {
       });
 
       // Build prompt for this pipeline step
-      const prompt = this.buildPipelineStepPrompt(step, feature, previousContext, projectPath);
+      const prompt = await this.buildPipelineStepPrompt(step, feature, previousContext);
 
       // Get model from feature
       const model = resolveModelString(feature.model, DEFAULT_MODELS.claude);
@@ -1220,18 +790,17 @@ export class AutoModeService {
   /**
    * Build the prompt for a pipeline step
    */
-  private buildPipelineStepPrompt(
+  private async buildPipelineStepPrompt(
     step: PipelineStep,
     feature: Feature,
-    previousContext: string,
-    projectPath: string
-  ): string {
+    previousContext: string
+  ): Promise<string> {
     let prompt = `## Pipeline Step: ${step.name}
 
 This is an automated pipeline step following the initial feature implementation.
 
 ### Feature Context
-${this.buildFeaturePrompt(feature, projectPath)}
+${await this.buildFeaturePrompt(feature)}
 
 `;
 
@@ -1374,7 +943,7 @@ Complete the pipeline step instructions above. Review the previous work and appl
     // Build complete prompt with feature info, previous context, and follow-up instructions
     let fullPrompt = `## Follow-up on Feature Implementation
 
-${feature ? this.buildFeaturePrompt(feature, workDir) : `**Feature ID:** ${featureId}`}
+${feature ? await this.buildFeaturePrompt(feature) : `**Feature ID:** ${featureId}`}
 `;
 
     if (previousContext) {
@@ -1508,12 +1077,10 @@ Address the follow-up instructions above. Review the previous work and make the 
         }
       );
 
-      // Determine final status based on testing mode and approval requirements:
-      // - requirePlanApproval=true: always go to 'waiting_approval' for manual implementation review
-      // - skipTests=true: go to 'waiting_approval' for manual verification
+      // Determine final status based on testing mode:
       // - skipTests=false (automated testing): go directly to 'verified' (no manual verify needed)
-      const requiresManualReview = feature?.requirePlanApproval || feature?.skipTests;
-      const finalStatus = requiresManualReview ? 'waiting_approval' : 'verified';
+      // - skipTests=true (manual verification): go to 'waiting_approval' for manual review
+      const finalStatus = feature?.skipTests ? 'waiting_approval' : 'verified';
       await this.updateFeatureStatus(projectPath, featureId, finalStatus);
 
       // Record success to reset consecutive failure tracking
@@ -1639,30 +1206,14 @@ Address the follow-up instructions above. Review the previous work and make the 
         );
       }
     } else {
-      // Load feature to get branchName
-      const feature = await this.loadFeature(projectPath, featureId);
-      const branchName = feature?.branchName;
-
-      // Try to find existing worktree for this branch
-      if (branchName) {
-        const worktreePath = await this.findExistingWorktreeForBranch(projectPath, branchName);
-        if (worktreePath) {
-          workDir = worktreePath;
-          logger.info(`Committing in worktree for branch "${branchName}": ${workDir}`);
-        } else {
-          logger.warn(`Worktree for branch "${branchName}" not found, trying legacy location...`);
-          // Fallback: try legacy location
-          const legacyWorktreePath = path.join(projectPath, '.worktrees', featureId);
-          try {
-            await secureFs.access(legacyWorktreePath);
-            workDir = legacyWorktreePath;
-            logger.info(`Committing in legacy worktree: ${workDir}`);
-          } catch {
-            logger.info(`No worktree found, committing in project path: ${workDir}`);
-          }
-        }
-      } else {
-        logger.info(`No branchName set for feature ${featureId}, committing in project path`);
+      // Fallback: try to find worktree at legacy location
+      const legacyWorktreePath = path.join(projectPath, '.worktrees', featureId);
+      try {
+        await secureFs.access(legacyWorktreePath);
+        workDir = legacyWorktreePath;
+        logger.info(`Committing in legacy worktree: ${workDir}`);
+      } catch {
+        logger.info(`No worktree found, committing in project path: ${workDir}`);
       }
     }
 
@@ -1758,7 +1309,15 @@ Format your response as a structured markdown document.`;
         resolvePhaseModel(phaseModelEntry);
       logger.info('Using model for project analysis:', analysisModel);
 
-      const provider = ProviderFactory.getProviderForModel(analysisModel);
+      // For custom agents (Copilot, Local LLM), enable agenticMode for full codebase access
+      const isCustomAgent =
+        analysisModel.startsWith('copilot-') || analysisModel.startsWith('local-llm-');
+      const provider = isCustomAgent
+        ? ProviderFactory.getProviderForModel(analysisModel, {
+            agenticMode: true,
+            projectRoot: projectPath,
+          })
+        : ProviderFactory.getProviderForModel(analysisModel);
 
       // Load autoLoadClaudeMd setting
       const autoLoadClaudeMd = await getAutoLoadClaudeMdSetting(
@@ -2153,127 +1712,6 @@ Format your response as a structured markdown document.`;
     }
   }
 
-  /**
-   * Automatically update wiki documentation for a feature
-   */
-  private async updateWikiDocumentation(
-    projectPath: string,
-    featureId: string,
-    workDir: string,
-    feature: Feature
-  ): Promise<void> {
-    if (!feature.wikiPages || feature.wikiPages.length === 0) {
-      return;
-    }
-
-    logger.info(`Starting wiki documentation update for feature ${featureId}`);
-    this.emitAutoModeEvent('auto_mode_progress', {
-      featureId,
-      message: 'Updating wiki documentation...',
-      projectPath,
-    });
-
-    try {
-      // Get Azure DevOps config from global settings
-      const settings = await this.settingsService?.getGlobalSettings();
-      const azConfig = settings?.azureDevOps;
-
-      if (!azConfig?.organization || !azConfig?.project || !azConfig?.wikiId) {
-        logger.warn('Azure DevOps configuration missing in global settings, skipping wiki updates');
-        return;
-      }
-
-      // Get authenticated session
-      const authManager = Array.from(azureAuthSessions.values())[0];
-      if (!authManager) {
-        logger.warn('Not authenticated with Azure DevOps, skipping wiki updates');
-        return;
-      }
-
-      // Register adapter if not already registered (WikiService.registerAzureDevOps is idempotent for same adapterId)
-      this.wikiService.registerAzureDevOps(azConfig, authManager);
-
-      // Get git diff of the changes
-      // Use the absolute workDir for git diff
-      const diffResult = await getGitRepositoryDiffs(workDir);
-      const diff = diffResult.diff || 'No code changes detected.';
-
-      // Get model for wiki updates (use spec generation model from Model Defaults as it's good for planning/docs)
-      const phaseModelEntry =
-        settings?.phaseModels?.specGenerationModel || DEFAULT_PHASE_MODELS.specGenerationModel;
-      const { model: updateModel, thinkingLevel: updateThinkingLevel } =
-        resolvePhaseModel(phaseModelEntry);
-
-      logger.info(`Using model '${updateModel}' for wiki documentation update`);
-
-      for (const pageRef of feature.wikiPages) {
-        try {
-          logger.info(`Processing wiki page: ${pageRef.path}`);
-
-          // Get current content
-          const currentContent = await this.wikiService.getPageContent(pageRef.path);
-
-          // Load prompts from settings (allows hot reload of custom prompts)
-          const customPrompts = await getPromptCustomization(this.settingsService, '[AutoMode]');
-
-          // Prepare prompt using template
-          let prompt = customPrompts.enhancement.wikiUpdateTemplate;
-          prompt = prompt.replace('{{featureTitle}}', feature.title || 'Untitled Feature');
-          prompt = prompt.replace('{{featureDescription}}', feature.description);
-          prompt = prompt.replace('{{gitDiff}}', diff);
-          prompt = prompt.replace('{{pageContent}}', currentContent);
-
-          // Get updated content from AI
-          // Using ProviderFactory directly for a simple text-to-text transformation
-          const provider = ProviderFactory.getProviderForModel(updateModel);
-          let updatedContent = '';
-          const stream = provider.executeQuery({
-            prompt,
-            model: updateModel,
-            thinkingLevel: updateThinkingLevel || undefined,
-            cwd: workDir,
-          });
-
-          for await (const msg of stream) {
-            if (msg.type === 'assistant' && msg.message?.content) {
-              for (const block of msg.message.content) {
-                if (block.type === 'text' && block.text) {
-                  updatedContent += block.text;
-                }
-              }
-            }
-          }
-
-          // Basic validation and update
-          if (
-            updatedContent &&
-            updatedContent.trim().length > 0 &&
-            updatedContent.trim() !== currentContent.trim()
-          ) {
-            // Strip potential markdown code blocks if the AI wrapped the entire response
-            let cleanedContent = updatedContent.trim();
-            if (cleanedContent.startsWith('```markdown') && cleanedContent.endsWith('```')) {
-              cleanedContent = cleanedContent.substring(11, cleanedContent.length - 3).trim();
-            } else if (cleanedContent.startsWith('```') && cleanedContent.endsWith('```')) {
-              cleanedContent = cleanedContent.substring(3, cleanedContent.length - 3).trim();
-            }
-
-            await this.wikiService.updatePage(pageRef.path, cleanedContent);
-            logger.info(`Successfully updated wiki page: ${pageRef.path}`);
-          } else {
-            logger.info(`No changes needed or suggested for wiki page: ${pageRef.path}`);
-          }
-        } catch (pageError) {
-          logger.error(`Failed to update wiki page ${pageRef.path}:`, pageError);
-          // Continue with other pages
-        }
-      }
-    } catch (error) {
-      logger.error(`Wiki documentation update failed for feature ${featureId}:`, error);
-      // Don't fail the whole feature if wiki update fails
-    }
-  }
-
   private async updateFeatureStatus(
     projectPath: string,
     featureId: string,
@@ -2439,8 +1877,63 @@ Format your response as a structured markdown document.`;
     return planningPrompt + '\n\n---\n\n## Feature Request\n\n';
   }
 
-  private buildFeaturePrompt(feature: Feature, projectRoot?: string): string {
+  /**
+   * Extract text content from a binary file (docx, pdf, xlsx)
+   */
+  private async extractDocumentContent(filePath: string): Promise<string | null> {
+    try {
+      const extension = path.extname(filePath).toLowerCase();
+      logger.info(`Extracting content from document: ${path.basename(filePath)} (${extension})`);
+      const buffer = await secureFs.readFile(filePath);
+
+      if (extension === '.docx') {
+        const result = await mammoth.extractRawText({ buffer: buffer as Buffer });
+        const content = result.value.trim();
+        logger.info(
+          `Extracted ${content.length} characters from .docx file: ${path.basename(filePath)}`
+        );
+        return content;
+      } else if (extension === '.pdf') {
+        // Use pdfjs-dist for PDF extraction
+        const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+        const uint8Array = new Uint8Array(buffer as Buffer);
+        const loadingTask = pdfjsLib.getDocument({ data: uint8Array });
+        const pdf = await loadingTask.promise;
+
+        const textParts: string[] = [];
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const page = await pdf.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map((item: any) => item.str).join(' ');
+          textParts.push(pageText);
+        }
+
+        const content = textParts.join('\n\n').trim();
+        logger.info(
+          `Extracted ${content.length} characters from ${pdf.numPages} pages of PDF: ${path.basename(filePath)}`
+        );
+        return content;
+      } else if (extension === '.xlsx') {
+        // For Excel files, we could use xlsx library, but for now return a note
+        return '[Excel file - content extraction not yet implemented]';
+      }
+
+      return null;
+    } catch (error) {
+      logger.error(`Failed to extract content from ${filePath}:`, error);
+      return null;
+    }
+  }
+
+  private async buildFeaturePrompt(feature: Feature): Promise<string> {
     const title = this.extractTitleFromDescription(feature.description);
+
+    // Log what files are attached to this feature
+    logger.info(`Building feature prompt for ${feature.id}`);
+    logger.info(`  imagePaths count: ${feature.imagePaths?.length || 0}`);
+    if (feature.imagePaths && feature.imagePaths.length > 0) {
+      logger.info(`  imagePaths raw data:`, JSON.stringify(feature.imagePaths, null, 2));
+    }
 
     let prompt = `## Feature Implementation Task
 
@@ -2456,74 +1949,102 @@ ${feature.spec}
 `;
     }
 
-    // Add images note (like old implementation)
+    // Note: feature.imagePaths contains ALL binary files (images, documents, spreadsheets, etc.)
+    // despite the misleading name - kept for backward compatibility
     if (feature.imagePaths && feature.imagePaths.length > 0) {
-      const imagesList = feature.imagePaths
-        .map((img, idx) => {
-          const absolutePath = typeof img === 'string' ? img : img.path;
-          // Make path relative to project root if projectRoot is provided
-          const relativePath = projectRoot
-            ? path.relative(projectRoot, absolutePath).replace(/\\/g, '/')
-            : absolutePath;
-          const filename =
-            typeof img === 'string'
-              ? relativePath.split('/').pop()
-              : img.filename || relativePath.split('/').pop();
-          const mimeType = typeof img === 'string' ? 'image/*' : img.mimeType || 'image/*';
-          return `   ${idx + 1}. ${filename} (${mimeType})\n      Path: ${relativePath}`;
-        })
-        .join('\n');
+      // Categorize files by type
+      const images: string[] = [];
+      const documents: Array<{ info: string; path: string; filename: string }> = [];
+      const otherFiles: string[] = [];
 
-      prompt += `
-**📎 Context Images Attached:**
-The user has attached ${feature.imagePaths.length} image(s) for context. These images are provided both visually (in the initial message) and as files you can read:
+      for (let idx = 0; idx < feature.imagePaths.length; idx++) {
+        const img = feature.imagePaths[idx];
+        const path = typeof img === 'string' ? img : (img.path as string);
+        const filename: string | undefined =
+          typeof img === 'string'
+            ? path.split('/').pop()
+            : (img.filename as string | undefined) || path.split('/').pop();
+        const mimeType: string =
+          typeof img === 'string' ? 'image/*' : (img.mimeType as string) || 'image/*';
+        const fileInfo = `   ${idx + 1}. ${filename} (${mimeType})\n      Path: ${path}`;
 
-${imagesList}
+        // Categorize by MIME type or extension
+        if (mimeType.startsWith('image/')) {
+          images.push(fileInfo);
+        } else if (
+          mimeType.includes('document') ||
+          mimeType.includes('word') ||
+          mimeType.includes('pdf') ||
+          mimeType.includes('text') ||
+          mimeType.includes('spreadsheet') ||
+          mimeType.includes('excel') ||
+          (filename && (filename.endsWith('.docx') || filename.endsWith('.doc'))) ||
+          (filename && filename.endsWith('.pdf')) ||
+          (filename && (filename.endsWith('.xlsx') || filename.endsWith('.xls'))) ||
+          (filename && filename.endsWith('.txt'))
+        ) {
+          documents.push({ info: fileInfo, path, filename: filename || 'unknown' });
+        } else {
+          otherFiles.push(fileInfo);
+        }
+      }
 
-You can use the Read tool to view these images at any time during implementation. Review them carefully before implementing.
+      logger.info(
+        `Binary files for feature ${feature.id}: ${images.length} images, ${documents.length} documents, ${otherFiles.length} other files`
+      );
+
+      let attachmentSection = '';
+
+      if (images.length > 0) {
+        attachmentSection += `
+**📷 Images Attached (${images.length}):**
+${images.join('\n')}
+
+These images are provided visually in the initial message and can be viewed using the Read tool.
 `;
+      }
+
+      if (documents.length > 0) {
+        attachmentSection += `\n**📄 Documents Attached (${documents.length}):**\n`;
+
+        // Extract and include document contents
+        for (const doc of documents) {
+          attachmentSection += `${doc.info}\n`;
+
+          // Extract content for supported formats
+          const content = await this.extractDocumentContent(doc.path);
+          if (content) {
+            attachmentSection += `\n**Content of ${doc.filename}:**\n\`\`\`\n${content}\n\`\`\`\n\n`;
+          } else {
+            attachmentSection += `\n**Note:** Content could not be extracted from ${doc.filename}. Use the Read tool if needed.\n\n`;
+          }
+        }
+      }
+
+      if (otherFiles.length > 0) {
+        attachmentSection += `
+**📎 Other Files Attached (${otherFiles.length}):**
+${otherFiles.join('\n')}
+
+Use the Read tool to access these files as needed.
+`;
+      }
+
+      prompt += attachmentSection;
     }
 
-    // Add wiki pages/documentation (textFilePaths)
+    // Add text files that already have extracted content (from Azure DevOps import, etc.)
     if (feature.textFilePaths && feature.textFilePaths.length > 0) {
-      const wikiList = feature.textFilePaths
-        .map((file, idx) => {
-          const filename = file.filename || file.path.split('/').pop() || 'Unknown';
-          const absolutePath = file.path;
-          // Make path relative to project root if projectRoot is provided
-          const relativePath = projectRoot
-            ? path.relative(projectRoot, absolutePath).replace(/\\/g, '/')
-            : absolutePath;
-          return `   ${idx + 1}. ${filename}\n      Type: ${file.mimeType || 'Unknown'}\n      Location: ${relativePath}`;
-        })
-        .join('\n');
+      logger.info(`Adding ${feature.textFilePaths.length} pre-extracted text files to prompt`);
+      prompt += `\n**📝 Additional Context Files (${feature.textFilePaths.length}):**\n\n`;
 
-      prompt += `
-**📚 Reference Documents & Attachments:**
-The following documents have been attached as reference material for this feature:
-
-${wikiList}
-
-**IMPORTANT:** These documents contain critical requirements, specifications, or reference materials.
-- Review the file names and types above - they indicate what information is available
-- For PDF files: These likely contain detailed specifications, mockups, or technical documentation
-- For Word documents: These may contain requirements, user stories, or design documents
-- For text/markdown files: These contain readable documentation shown below
-
-Note: Binary files (PDFs, images, Word docs) are stored in the project but cannot be read by the agent directly. 
-The requirements from these files should be summarized in the feature description and comments sections above.
-
-${feature.textFilePaths
-  .filter((file) => file.content && !file.content.startsWith('[Binary file:'))
-  .map(
-    (file, idx) => `
-### ${idx + 1}. ${file.filename || 'Document ' + (idx + 1)}
-
-${file.content}
-`
-  )
-  .join('\n')}
-`;
+      for (const textFile of feature.textFilePaths) {
+        if (textFile.content) {
+          prompt += `${textFile.content}\n\n`;
+        } else {
+          prompt += `[File: ${textFile.filename}]\nPath: ${textFile.path}\n\n`;
+        }
+      }
     }
 
     // Add verification instructions based on testing mode
@@ -2532,22 +2053,11 @@ ${file.content}
       prompt += `
 ## Instructions
 
-**IMPORTANT - Operating System**: You are running on ${process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux'}.
-${process.platform === 'win32' ? '- Windows uses different command syntax than Unix/Linux\n- PREFER using the provided tools (create_file, read_file, update_file, list_directory) over shell commands\n- If you must use shell commands, use Windows syntax (e.g., "mkdir" not "mkdir -p", "dir" not "ls")\n- The create_file tool automatically creates parent directories, making it better than shell commands' : ''}
-
 Implement this feature by:
 1. First, explore the codebase to understand the existing structure
-2. **IMPORTANT - .gitignore**: If the project is new or doesn't have a .gitignore:
-   - Create a .gitignore file with at minimum: node_modules/, dist/, build/, .env
-   - This prevents node_modules from being tracked by git
-3. **IMPORTANT**: If creating test files or installing dependencies:
-   - First check if package.json exists and has test dependencies (Vitest, Jest, etc.)
-   - If not, create or update package.json with appropriate test framework
-   - Use \`execute_command\` to run \`npm install\` to install dependencies
-   - Create tsconfig.json if needed for TypeScript projects
-4. Plan your implementation approach
-5. Write the necessary code changes
-6. Ensure the code follows existing patterns and conventions
+2. Plan your implementation approach
+3. Write the necessary code changes
+4. Ensure the code follows existing patterns and conventions
 
 When done, wrap your final summary in <summary> tags like this:
 
@@ -2570,21 +2080,11 @@ This helps parse your summary correctly in the output logs.`;
       prompt += `
 ## Instructions
 
-**IMPORTANT - Operating System**: You are running on ${process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux'}.
-${process.platform === 'win32' ? '- Windows uses different command syntax than Unix/Linux\n- PREFER using the provided tools (create_file, read_file, update_file, list_directory) over shell commands\n- If you must use shell commands, use Windows syntax (e.g., "mkdir" not "mkdir -p", "dir" not "ls")\n- The create_file tool automatically creates parent directories, making it better than shell commands' : ''}
-
 Implement this feature by:
 1. First, explore the codebase to understand the existing structure
-2. **IMPORTANT - .gitignore**: If the project is new or doesn't have a .gitignore:
-   - Create a .gitignore file with at minimum: node_modules/, dist/, build/, .env
-   - This prevents node_modules from being tracked by git
-3. **IMPORTANT**: If the project doesn't have package.json or test dependencies:
-   - Create or update package.json with appropriate test framework (Vitest, Jest, Playwright, etc.)
-   - Use \`execute_command\` to run \`npm install\` to install dependencies
-   - Create tsconfig.json if needed for TypeScript projects
-4. Plan your implementation approach
-5. Write the necessary code changes
-6. Ensure the code follows existing patterns and conventions
+2. Plan your implementation approach
+3. Write the necessary code changes
+4. Ensure the code follows existing patterns and conventions
 
 ## Verification with Playwright (REQUIRED)
 
@@ -2733,7 +2233,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
     // Load MCP permission settings (global setting only)
 
     // Build SDK options using centralized configuration for feature implementation
-    const sdkOptions = await createAutoModeOptions({
+    const { options: sdkOptions } = await createAutoModeOptions({
       cwd: workDir,
       model: model,
       abortController,
@@ -2744,21 +2244,27 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
     });
 
     // Extract model, maxTurns, and allowedTools from SDK options
-    const finalModel = sdkOptions.options.model!;
-    const maxTurns = sdkOptions.options.maxTurns;
-    const allowedTools = sdkOptions.options.allowedTools as string[] | undefined;
+    const finalModel = sdkOptions.model!;
+    const maxTurns = sdkOptions.maxTurns;
+    const allowedTools = sdkOptions.allowedTools as string[] | undefined;
 
     logger.info(
       `runAgent called for feature ${featureId} with model: ${finalModel}, planningMode: ${planningMode}, requiresApproval: ${requiresApproval}`
     );
 
-    // Get provider for this model (with agentic mode for autonomous implementation)
-    const provider = ProviderFactory.getProviderForModel(finalModel, {
-      projectRoot: projectPath,
-      agenticMode: true,
-    });
+    // Get provider for this model
+    // For custom agents (Copilot, Local LLM), enable agenticMode for full codebase access
+    const isCustomAgent = finalModel.startsWith('copilot-') || finalModel.startsWith('local-llm-');
+    const provider = isCustomAgent
+      ? ProviderFactory.getProviderForModel(finalModel, {
+          agenticMode: true,
+          projectRoot: workDir,
+        })
+      : ProviderFactory.getProviderForModel(finalModel);
 
-    logger.info(`Using provider "${provider.getName()}" for model "${finalModel}"`);
+    logger.info(
+      `Using provider "${provider.getName()}" for model "${finalModel}"${isCustomAgent ? ' (agentic mode enabled)' : ''}`
+    );
 
     // Build prompt content with images using utility
     const { content: promptContent } = await buildPromptWithImages(
@@ -2782,9 +2288,9 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
       cwd: workDir,
       allowedTools: allowedTools,
       abortController,
-      systemPrompt: sdkOptions.options.systemPrompt,
-      settingSources: sdkOptions.options.settingSources,
-      sandbox: sdkOptions.options.sandbox, // Pass sandbox configuration
+      systemPrompt: sdkOptions.systemPrompt,
+      settingSources: sdkOptions.settingSources,
+      sandbox: sdkOptions.sandbox, // Pass sandbox configuration
       mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined, // Pass MCP servers configuration
       thinkingLevel: options?.thinkingLevel, // Pass thinking level for extended thinking
     };
@@ -2798,168 +2304,6 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
       ? `${previousContent}\n\n---\n\n## Follow-up Session\n\n`
       : '';
     let specDetected = false;
-
-    // Check if tasks already exist from separate spec generation
-    // (e.g., when using custom Copilot/Local LLM agents with separate spec phase)
-    let preExistingTasks: ParsedTask[] = [];
-    let preExistingPlanContent = '';
-    try {
-      const featurePath = path.join(
-        finalProjectPath,
-        '.automaker',
-        'features',
-        featureId,
-        'feature.json'
-      );
-      const featureData = await secureFs.readFile(featurePath, 'utf-8');
-      const loadedFeature = JSON.parse(featureData as string);
-
-      // Check both feature.tasks and feature.planSpec.tasks
-      if (
-        loadedFeature.tasks &&
-        Array.isArray(loadedFeature.tasks) &&
-        loadedFeature.tasks.length > 0
-      ) {
-        preExistingTasks = loadedFeature.tasks;
-        preExistingPlanContent = loadedFeature.spec || '';
-        logger.info(
-          `[runAgent] Loaded ${preExistingTasks.length} pre-existing tasks from feature.tasks for ${featureId}`
-        );
-        logger.info(
-          `[runAgent] Pre-existing tasks: ${preExistingTasks.map((t: ParsedTask) => t.id).join(', ')}`
-        );
-      } else if (
-        loadedFeature.planSpec?.tasks &&
-        Array.isArray(loadedFeature.planSpec.tasks) &&
-        loadedFeature.planSpec.tasks.length > 0
-      ) {
-        preExistingTasks = loadedFeature.planSpec.tasks;
-        preExistingPlanContent = loadedFeature.spec || loadedFeature.planSpec.content || '';
-        logger.info(
-          `[runAgent] Loaded ${preExistingTasks.length} pre-existing tasks from planSpec.tasks for ${featureId}`
-        );
-        logger.info(
-          `[runAgent] Pre-existing tasks: ${preExistingTasks.map((t: ParsedTask) => t.id).join(', ')}`
-        );
-      } else {
-        logger.info(
-          `[runAgent] No pre-existing tasks found for feature ${featureId} (checked feature.tasks and planSpec.tasks)`
-        );
-      }
-    } catch (error) {
-      // Feature file not found or doesn't have planSpec - this is okay, continue normally
-      logger.warn(`[runAgent] Error loading feature for pre-existing tasks:`, error);
-    }
-
-    // If we have pre-existing tasks, skip to multi-agent execution immediately
-    if (preExistingTasks.length > 0 && planningMode === 'spec') {
-      logger.info(
-        `[runAgent] Skipping stream processing - executing ${preExistingTasks.length} pre-existing tasks directly`
-      );
-
-      // Execute multi-agent task execution with pre-existing tasks
-      for (let taskIndex = 0; taskIndex < preExistingTasks.length; taskIndex++) {
-        const task = preExistingTasks[taskIndex];
-
-        // Check for abort
-        if (abortController.signal.aborted) {
-          throw new Error('Feature execution aborted');
-        }
-
-        // Update task status to in_progress
-        task.status = 'in_progress';
-        await this.updateFeaturePlanSpec(finalProjectPath, featureId, {
-          currentTaskId: task.id,
-          tasks: preExistingTasks,
-          tasksCompleted: taskIndex,
-        });
-
-        // Emit task started
-        logger.info(`Starting task ${task.id}: ${task.description}`);
-        this.emitAutoModeEvent('auto_mode_task_started', {
-          featureId,
-          projectPath: finalProjectPath,
-          taskId: task.id,
-          taskDescription: task.description,
-          taskIndex,
-          tasksTotal: preExistingTasks.length,
-        });
-
-        // Build focused prompt for this specific task
-        const taskPrompt = this.buildTaskPrompt(
-          task,
-          preExistingTasks,
-          taskIndex,
-          preExistingPlanContent,
-          undefined
-        );
-
-        // Execute task with dedicated agent
-        const taskStream = provider.executeQuery({
-          prompt: taskPrompt,
-          model: finalModel,
-          maxTurns: Math.min(maxTurns || 100, 50), // Limit turns per task
-          cwd: workDir,
-          allowedTools: allowedTools,
-          abortController,
-          mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
-        });
-
-        let taskOutput = '';
-
-        for await (const msg of taskStream) {
-          if (msg.type === 'assistant' && msg.message?.content) {
-            for (const block of msg.message.content) {
-              if (block.type === 'text' && block.text) {
-                taskOutput += block.text;
-                responseText += block.text;
-
-                // Emit agent output for UI
-                this.emitAutoModeEvent('agent_output', {
-                  featureId,
-                  output: block.text,
-                  append: true,
-                });
-              }
-            }
-          } else if (msg.type === 'result') {
-            // Task completed
-            logger.info(`Task ${task.id} completed`);
-          } else if (msg.type === 'error') {
-            throw new Error(`Task ${task.id} failed: ${msg.error}`);
-          }
-        }
-
-        // Update task status
-        task.status = 'completed';
-        await this.updateFeaturePlanSpec(finalProjectPath, featureId, {
-          tasks: preExistingTasks,
-          tasksCompleted: taskIndex + 1,
-        });
-
-        // Emit task completed
-        this.emitAutoModeEvent('auto_mode_task_completed', {
-          featureId,
-          projectPath: finalProjectPath,
-          taskId: task.id,
-          taskDescription: task.description,
-          taskIndex,
-          tasksTotal: preExistingTasks.length,
-          output: taskOutput,
-        });
-
-        logger.info(`Completed task ${taskIndex + 1}/${preExistingTasks.length}: ${task.id}`);
-      }
-
-      // Write final output
-      const featureDirForOutput = getFeatureDir(finalProjectPath, featureId);
-      const outputPath = path.join(featureDirForOutput, 'agent-output.md');
-      await secureFs.mkdir(path.dirname(outputPath), { recursive: true });
-      await secureFs.writeFile(outputPath, responseText);
-
-      logger.info(`[runAgent] All ${preExistingTasks.length} tasks completed successfully`);
-      return; // Exit early - tasks already executed
-    }
 
     // Agent output goes to .automaker directory
     // Note: We use projectPath here, not workDir, because workDir might be a worktree path
@@ -3035,7 +2379,7 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
         // Log raw stream event for debugging
         appendRawEvent(msg);
 
-        logger.debug(`Stream message received:`, msg.type, msg.subtype || '');
+        logger.info(`Stream message received:`, msg.type, msg.subtype || '');
         if (msg.type === 'assistant' && msg.message?.content) {
           for (const block of msg.message.content) {
             if (block.type === 'text') {
@@ -3089,13 +2433,6 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                 !specDetected &&
                 responseText.includes('[SPEC_GENERATED]')
               ) {
-                logger.info(
-                  `[SPEC DETECTION] Spec marker found in response text for feature ${featureId}`
-                );
-                logger.info(`[SPEC DETECTION] Response text length: ${responseText.length}`);
-                logger.info(
-                  `[SPEC DETECTION] Response preview: ${responseText.substring(0, 500)}...`
-                );
                 specDetected = true;
 
                 // Extract plan content (everything before the marker)
@@ -3107,21 +2444,9 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                 let parsedTasks = parseTasksFromSpec(planContent);
                 const tasksTotal = parsedTasks.length;
 
-                logger.info(
-                  `[TASK PARSING] Parsed ${tasksTotal} tasks from spec for feature ${featureId}`
-                );
+                logger.info(`Parsed ${tasksTotal} tasks from spec for feature ${featureId}`);
                 if (parsedTasks.length > 0) {
-                  logger.info(`[TASK PARSING] Tasks: ${parsedTasks.map((t) => t.id).join(', ')}`);
-                  logger.info(
-                    `[TASK PARSING] Task details: ${JSON.stringify(parsedTasks.map((t) => ({ id: t.id, desc: t.description })))}`
-                  );
-                } else {
-                  logger.warn(
-                    `[TASK PARSING] No tasks parsed! Plan content length: ${planContent.length}`
-                  );
-                  logger.warn(
-                    `[TASK PARSING] Plan content preview: ${planContent.substring(0, 1000)}`
-                  );
+                  logger.info(`Tasks: ${parsedTasks.map((t) => t.id).join(', ')}`);
                 }
 
                 // Update planSpec status to 'generated' and save content with parsed tasks
@@ -3516,7 +2841,7 @@ Implement all the changes described in the plan above.`;
 
               // Only emit progress for non-marker text (marker was already handled above)
               if (!specDetected) {
-                logger.debug(
+                logger.info(
                   `Emitting progress event for ${featureId}, content length: ${block.text?.length || 0}`
                 );
                 this.emitAutoModeEvent('auto_mode_progress', {
@@ -3547,184 +2872,6 @@ Implement all the changes described in the plan above.`;
           // Handle error messages
           throw new Error(msg.error || 'Unknown error');
         } else if (msg.type === 'result' && msg.subtype === 'success') {
-          // Check for spec marker in result (for agent providers that return complete results)
-          if (
-            planningModeRequiresApproval &&
-            !specDetected &&
-            msg.result &&
-            msg.result.includes('[SPEC_GENERATED]')
-          ) {
-            logger.info(
-              `[SPEC DETECTION] Spec marker found in result message for feature ${featureId}`
-            );
-            logger.info(`[SPEC DETECTION] Result length: ${msg.result.length}`);
-
-            // Add result to responseText if not already there
-            if (!responseText.includes(msg.result.substring(0, 100))) {
-              responseText += msg.result;
-            }
-
-            // Now trigger spec detection processing
-            specDetected = true;
-
-            // Extract plan content (everything before the marker)
-            const markerIndex = responseText.indexOf('[SPEC_GENERATED]');
-            const planContent = responseText.substring(0, markerIndex).trim();
-
-            // Parse tasks from the generated spec
-            let parsedTasks = parseTasksFromSpec(planContent);
-            const tasksTotal = parsedTasks.length;
-
-            logger.info(
-              `[TASK PARSING] Parsed ${tasksTotal} tasks from spec for feature ${featureId}`
-            );
-            if (parsedTasks.length > 0) {
-              logger.info(`[TASK PARSING] Tasks: ${parsedTasks.map((t) => t.id).join(', ')}`);
-              logger.info(
-                `[TASK PARSING] Task details: ${JSON.stringify(parsedTasks.map((t) => ({ id: t.id, desc: t.description })))}`
-              );
-            } else {
-              logger.warn(
-                `[TASK PARSING] No tasks parsed! Plan content length: ${planContent.length}`
-              );
-              logger.warn(`[TASK PARSING] Plan content preview: ${planContent.substring(0, 1000)}`);
-            }
-
-            // Update planSpec status to 'generated' and save content with parsed tasks
-            await this.updateFeaturePlanSpec(projectPath, featureId, {
-              status: 'generated',
-              content: planContent,
-              version: 1,
-              generatedAt: new Date().toISOString(),
-              reviewedByUser: false,
-              tasks: parsedTasks,
-              tasksTotal,
-              tasksCompleted: 0,
-            });
-
-            // Handle approval/auto-approval and task execution
-            let approvedPlanContent = planContent;
-            const requiresApproval =
-              planningMode === 'full' ||
-              (planningMode === 'spec' && options?.requirePlanApproval === true);
-
-            if (requiresApproval) {
-              logger.info(`Spec generated for feature ${featureId}, waiting for approval`);
-
-              const approvalPromise = this.waitForPlanApproval(featureId, projectPath);
-
-              this.emitAutoModeEvent('plan_approval_required', {
-                featureId,
-                projectPath,
-                planContent,
-                planningMode,
-                planVersion: 1,
-              });
-
-              const approvalResult = await approvalPromise;
-
-              if (approvalResult.approved) {
-                logger.info(`Plan approved for feature ${featureId}`);
-                approvedPlanContent = approvalResult.editedPlan || planContent;
-
-                this.emitAutoModeEvent('plan_approved', {
-                  featureId,
-                  projectPath,
-                  hasEdits: !!approvalResult.editedPlan,
-                });
-              } else {
-                throw new Error('Plan approval cancelled');
-              }
-            } else {
-              logger.info(`Spec generated for feature ${featureId}, auto-approving`);
-
-              this.emitAutoModeEvent('plan_auto_approved', {
-                featureId,
-                projectPath,
-                planContent,
-                planningMode,
-              });
-            }
-
-            // Update to approved status
-            await this.updateFeaturePlanSpec(projectPath, featureId, {
-              status: 'approved',
-              approvedAt: new Date().toISOString(),
-              reviewedByUser: requiresApproval,
-            });
-
-            // Execute tasks if any were parsed
-            if (parsedTasks.length > 0) {
-              logger.info(`[MULTI-AGENT] Starting task execution: ${parsedTasks.length} tasks`);
-
-              for (let taskIndex = 0; taskIndex < parsedTasks.length; taskIndex++) {
-                const task = parsedTasks[taskIndex];
-
-                logger.info(`[TASK ${task.id}] Starting: ${task.description}`);
-                this.emitAutoModeEvent('auto_mode_task_started', {
-                  featureId,
-                  projectPath,
-                  taskId: task.id,
-                  taskDescription: task.description,
-                  taskIndex,
-                  tasksTotal: parsedTasks.length,
-                });
-
-                await this.updateFeaturePlanSpec(projectPath, featureId, {
-                  currentTaskId: task.id,
-                });
-
-                const taskPrompt = this.buildTaskPrompt(
-                  task,
-                  parsedTasks,
-                  taskIndex,
-                  approvedPlanContent
-                );
-
-                const taskStream = provider.executeQuery({
-                  prompt: taskPrompt,
-                  model: finalModel,
-                  maxTurns: 10,
-                  cwd: workDir,
-                });
-
-                let taskOutput = '';
-                for await (const taskMsg of taskStream) {
-                  if (taskMsg.type === 'assistant' && taskMsg.message?.content) {
-                    for (const block of taskMsg.message.content) {
-                      if (block.type === 'text') {
-                        taskOutput += block.text || '';
-                        responseText += block.text || '';
-                        this.emitAutoModeEvent('auto_mode_progress', {
-                          featureId,
-                          content: block.text,
-                        });
-                      }
-                    }
-                  }
-                }
-
-                logger.info(`[TASK ${task.id}] Complete`);
-                this.emitAutoModeEvent('auto_mode_task_complete', {
-                  featureId,
-                  projectPath,
-                  taskId: task.id,
-                  tasksCompleted: taskIndex + 1,
-                  tasksTotal: parsedTasks.length,
-                });
-
-                await this.updateFeaturePlanSpec(projectPath, featureId, {
-                  tasksCompleted: taskIndex + 1,
-                });
-              }
-
-              logger.info(`[MULTI-AGENT] All tasks completed`);
-            }
-
-            // Break out of stream loop
-            break streamLoop;
-          }
-
           // Don't replace responseText - the accumulated content is the full history
           // The msg.result is just a summary which would lose all tool use details
           // Just ensure final write happens
@@ -3771,7 +2918,7 @@ Implement all the changes described in the plan above.`;
 
     const prompt = `## Continuing Feature Implementation
 
-${this.buildFeaturePrompt(feature, projectPath)}
+${await this.buildFeaturePrompt(feature)}
 
 ## Previous Context
 The following is the output from a previous implementation attempt. Continue from where you left off:

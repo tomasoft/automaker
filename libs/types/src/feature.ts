@@ -4,6 +4,9 @@
 
 import type { PlanningMode, ThinkingLevel } from './settings.js';
 
+// Note: Despite the name "FeatureImagePath", this type represents ALL binary files
+// (images, documents like .docx/.pdf, spreadsheets, etc.) attached to a feature.
+// The name is kept for backward compatibility with existing feature.json files.
 export interface FeatureImagePath {
   id: string;
   path: string;
@@ -140,6 +143,8 @@ export interface Feature {
   dependencies?: string[];
   spec?: string;
   model?: string;
+  // Note: Despite the name, imagePaths contains ALL binary files (images, .docx, .pdf, .xlsx, etc.)
+  // The name is kept for backward compatibility with existing features
   imagePaths?: Array<string | FeatureImagePath | { path: string; [key: string]: unknown }>;
   textFilePaths?: FeatureTextFilePath[];
   // Wiki pages attached to this feature

@@ -60,6 +60,18 @@ export class ToolExecutor {
       'mkdir',
       'touch',
       'npx',
+      // Testing framework commands
+      'dotnet',
+      'pytest',
+      'python',
+      'python3',
+      'mvn',
+      'gradle',
+      'cargo',
+      'go',
+      'ruby',
+      'bundle',
+      'make',
     ]);
 
     // Patterns that should NEVER appear in paths
