@@ -25,6 +25,7 @@ import { logAuthStatus } from './common.js';
 import { generateFeaturesFromSpec } from './generate-features-from-spec.js';
 import { ensureAutomakerDir, getAppSpecPath } from '@automaker/platform';
 import type { SettingsService } from '../../services/settings-service.js';
+import { getUsageTrackingService } from '../../services/usage-tracking-service.js';
 import { getAutoLoadClaudeMdSetting } from '../../lib/settings-helpers.js';
 
 const logger = createLogger('SpecRegeneration');
@@ -111,6 +112,8 @@ ${getStructuredSpecPromptInstruction()}`;
   let responseText = '';
   let messageCount = 0;
   let structuredOutput: SpecOutput | null = null;
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   // Route to appropriate provider based on model type
   if (isCursorModel(model)) {
@@ -252,6 +255,11 @@ Your entire response should be valid JSON starting with { and ending with }. No 
           } else {
             logger.warn('⚠️ No structured output in result, will fall back to text parsing');
           }
+          // Capture usage data
+          if (resultMsg.usage) {
+            inputTokens = resultMsg.usage.inputTokens || 0;
+            outputTokens = resultMsg.usage.outputTokens || 0;
+          }
         } else if (msg.type === 'result') {
           // Handle error result types
           const subtype = (msg as any).subtype;
@@ -342,6 +350,22 @@ Your entire response should be valid JSON starting with { and ending with }. No 
   }
 
   logger.info('Spec saved successfully');
+
+  // Log usage if tokens were consumed
+  if (inputTokens > 0 || outputTokens > 0) {
+    const usageService = getUsageTrackingService();
+    await usageService.logUsage({
+      provider: isCursorModel(model) ? 'cursor' : 'claude',
+      model: model,
+      projectPath: projectPath,
+      contextType: 'spec-generation',
+      tokens: {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+      },
+    });
+  }
 
   // Emit spec completion event
   if (generateFeatures) {

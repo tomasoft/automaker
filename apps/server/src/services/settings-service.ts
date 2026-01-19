@@ -348,6 +348,7 @@ export class SettingsService {
   async updateCredentials(updates: Partial<Credentials>): Promise<Credentials> {
     await ensureDataDir(this.dataDir);
     const credentialsPath = getCredentialsPath(this.dataDir);
+    logger.info(`[updateCredentials] Writing to: ${credentialsPath}`);
 
     const current = await this.getCredentials();
     const updated: Credentials = {
@@ -372,12 +373,9 @@ export class SettingsService {
       };
     }
 
-    // Deep merge Azure DevOps tokens if provided
-    if (updates.azureDevOpsTokens) {
-      updated.azureDevOpsTokens = {
-        ...current.azureDevOpsTokens,
-        ...updates.azureDevOpsTokens,
-      };
+    // Replace Azure DevOps tokens completely (don't merge - supports deletions)
+    if (updates.azureDevOpsTokens !== undefined) {
+      updated.azureDevOpsTokens = updates.azureDevOpsTokens;
     }
 
     await atomicWriteJson(credentialsPath, updated);
@@ -819,6 +817,29 @@ export class SettingsService {
         azureDevOpsTokens: tokens,
       });
       logger.info(`Deleted Azure DevOps auth token for session: ${sessionId}`);
+    }
+  }
+
+  /**
+   * Delete multiple Azure DevOps auth tokens in a single operation (avoids race conditions)
+   */
+  async deleteAzureAuthTokens(sessionIds: string[]): Promise<void> {
+    const credentials = await this.getCredentials();
+    const tokens = credentials.azureDevOpsTokens || {};
+
+    let deletedCount = 0;
+    for (const sessionId of sessionIds) {
+      if (tokens[sessionId]) {
+        delete tokens[sessionId];
+        deletedCount++;
+      }
+    }
+
+    if (deletedCount > 0) {
+      await this.updateCredentials({
+        azureDevOpsTokens: tokens,
+      });
+      logger.info(`Deleted ${deletedCount} Azure DevOps auth token(s) in batch operation`);
     }
   }
 

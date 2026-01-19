@@ -7,18 +7,21 @@
 
 import type { Request, Response } from 'express';
 import { createLogger } from '@automaker/utils';
-import { azureAuthSessions } from '../../azure-devops-auth/routes/poll-azure-auth.js';
+import { SettingsService } from '../../../services/settings-service.js';
+import { getAuthSessionBySessionId } from '../../azure-devops-auth/routes/poll-azure-auth.js';
 
 const logger = createLogger('AzureWikiRoutes');
 
 export function createGetPageHandler() {
   return async (req: Request, res: Response) => {
     try {
-      const { organization, project, wikiId, path } = req.body as {
+      const settingsService = (req as any).settingsService as SettingsService;
+      const { organization, project, wikiId, path, sessionId } = req.body as {
         organization: string;
         project: string;
         wikiId: string;
         path: string;
+        sessionId?: string;
       };
 
       if (!organization || !project || !wikiId || !path) {
@@ -29,8 +32,8 @@ export function createGetPageHandler() {
         return;
       }
 
-      // Get authenticated session
-      const authManager = Array.from(azureAuthSessions.values())[0];
+      // Get authenticated session using sessionId
+      const authManager = await getAuthSessionBySessionId(sessionId, settingsService);
 
       if (!authManager) {
         res.status(401).json({

@@ -1,16 +1,19 @@
 import type { Request, Response } from 'express';
 import { createLogger } from '@automaker/utils';
-import { azureAuthSessions } from '../../azure-devops-auth/routes/poll-azure-auth.js';
+import { SettingsService } from '../../../services/settings-service.js';
+import { getAuthSessionBySessionId } from '../../azure-devops-auth/routes/poll-azure-auth.js';
 
 const logger = createLogger('[GetWorkItemCommentsRoute]');
 
 export function createGetWorkItemCommentsHandler() {
   return async (req: Request, res: Response) => {
     try {
-      const { organization, project, workItemId } = req.query as {
+      const settingsService = (req as any).settingsService as SettingsService;
+      const { organization, project, workItemId, sessionId } = req.query as {
         organization?: string;
         project?: string;
         workItemId?: string;
+        sessionId?: string;
       };
 
       if (!organization || !project || !workItemId) {
@@ -21,8 +24,8 @@ export function createGetWorkItemCommentsHandler() {
 
       logger.info(`Getting comments for work item ${workItemId}`);
 
-      // Get authenticated session
-      const authManager = Array.from(azureAuthSessions.values())[0];
+      // Get authenticated session using sessionId
+      const authManager = await getAuthSessionBySessionId(sessionId, settingsService);
 
       if (!authManager) {
         return res.status(401).json({

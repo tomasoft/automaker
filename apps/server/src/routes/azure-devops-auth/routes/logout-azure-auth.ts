@@ -15,40 +15,32 @@ export function createLogoutAzureAuthHandler() {
   return async (req: Request, res: Response) => {
     try {
       const settingsService = (req as any).settingsService as SettingsService;
-      const { sessionId } = req.body as { sessionId?: string };
+      let { sessionId } = req.body as { sessionId?: string };
 
+      // If no sessionId provided, auto-detect the active session
       if (!sessionId) {
-        // No session ID provided - clear all sessions
-        logger.info('No sessionId provided, clearing all Azure DevOps sessions');
-        const sessionCount = azureAuthSessions.size;
-
-        // Revoke all tokens
-        for (const [id, authManager] of azureAuthSessions.entries()) {
-          try {
-            await authManager.revoke();
-          } catch (error) {
-            logger.warn(`Failed to revoke session ${id}:`, error);
-          }
+        if (azureAuthSessions.size === 0) {
+          logger.info('No active sessions to logout from');
+          res.json({
+            success: true,
+            message: 'No active sessions',
+          });
+          return;
         }
 
-        // Clear all sessions (in-memory)
-        azureAuthSessions.clear();
-
-        // Clear all persisted tokens
-        await settingsService.clearAllAzureAuthTokens();
-
-        logger.info(`Cleared ${sessionCount} Azure DevOps session(s)`);
-        res.json({
-          success: true,
-          message: 'All sessions cleared',
-        });
-        return;
+        // Get the first (and ideally only) session
+        sessionId = Array.from(azureAuthSessions.keys())[0];
+        logger.info(`No sessionId provided, auto-detected session: ${sessionId}`);
       }
 
       const authManager = azureAuthSessions.get(sessionId);
       if (authManager) {
         // Revoke tokens
-        await authManager.revoke();
+        try {
+          await authManager.revoke();
+        } catch (error) {
+          logger.warn(`Failed to revoke tokens for session ${sessionId}:`, error);
+        }
 
         // Remove from in-memory sessions
         azureAuthSessions.delete(sessionId);

@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import type { SettingsService } from '../../../services/settings-service.js';
 import { createLogger } from '@automaker/utils';
-import { azureAuthSessions } from '../../azure-devops-auth/routes/poll-azure-auth.js';
+import { getAuthSessionBySessionId } from '../../azure-devops-auth/routes/poll-azure-auth.js';
 
 const logger = createLogger('[DownloadAttachmentRoute]');
 
@@ -9,9 +9,10 @@ export const downloadAttachmentRoute = (settingsService: SettingsService) => {
   return async (req: Request, res: Response) => {
     try {
       const { attachmentId } = req.params;
-      const { organization, project } = req.query as {
+      const { organization, project, sessionId } = req.query as {
         organization?: string;
         project?: string;
+        sessionId?: string;
       };
 
       if (!attachmentId) {
@@ -26,8 +27,8 @@ export const downloadAttachmentRoute = (settingsService: SettingsService) => {
 
       logger.info(`Downloading attachment: ${attachmentId}`);
 
-      // Get authenticated session
-      const authManager = Array.from(azureAuthSessions.values())[0];
+      // Get authenticated session using sessionId
+      const authManager = await getAuthSessionBySessionId(sessionId, settingsService);
 
       if (!authManager) {
         return res.status(401).json({

@@ -6,19 +6,22 @@
 
 import type { Request, Response } from 'express';
 import { createLogger } from '@automaker/utils';
-import { azureAuthSessions } from '../../azure-devops-auth/routes/poll-azure-auth.js';
+import { SettingsService } from '../../../services/settings-service.js';
+import { getAuthSessionBySessionId } from '../../azure-devops-auth/routes/poll-azure-auth.js';
 
 const logger = createLogger('AddWorkItemLinkRoute');
 
 export function createAddWorkItemLinkHandler() {
   return async (req: Request, res: Response) => {
     try {
-      const { organization, project, workItemId, linkUrl, linkComment } = req.body as {
+      const settingsService = (req as any).settingsService as SettingsService;
+      const { organization, project, workItemId, linkUrl, linkComment, sessionId } = req.body as {
         organization?: string;
         project?: string;
         workItemId?: number;
         linkUrl?: string;
         linkComment?: string;
+        sessionId?: string;
       };
 
       if (!organization || !project || !workItemId || !linkUrl) {
@@ -29,7 +32,7 @@ export function createAddWorkItemLinkHandler() {
         return;
       }
 
-      const authManager = Array.from(azureAuthSessions.values())[0];
+      const authManager = await getAuthSessionBySessionId(sessionId, settingsService);
       if (!authManager) {
         res.status(401).json({
           success: false,

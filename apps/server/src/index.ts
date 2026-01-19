@@ -226,7 +226,62 @@ const usageTrackingService = getUsageTrackingService(DATA_DIR);
     if (sessionIds.length > 0) {
       logger.info(`Restoring ${sessionIds.length} Azure DevOps auth session(s)...`);
 
+      // Group sessions by userId to detect duplicates
+      const sessionsByUser = new Map<string, string[]>();
+
       for (const sessionId of sessionIds) {
+        const tokenData = persistedTokens[sessionId];
+        const userId = tokenData.userId || 'unknown';
+
+        if (!sessionsByUser.has(userId)) {
+          sessionsByUser.set(userId, []);
+        }
+        sessionsByUser.get(userId)!.push(sessionId);
+      }
+
+      // Clean up duplicate sessions - keep only the most recent one per user
+      const sessionsToDelete: string[] = [];
+      for (const [userId, sessions] of sessionsByUser.entries()) {
+        if (sessions.length > 1) {
+          logger.warn(
+            `Found ${sessions.length} sessions for user ${userId}, cleaning up duplicates`
+          );
+          // Sort by timestamp (newer sessions have higher timestamps in their ID)
+          sessions.sort((a, b) => {
+            // Extract timestamp from session ID format:
+            // - New format: azure_userId (UUID) -> use token expiresAt
+            // - Old format: azure_timestamp_random -> extract timestamp
+            const getSessionTime = (id: string) => {
+              const match = id.match(/azure_(\d+)/);
+              if (match) {
+                // Old format with timestamp
+                return parseInt(match[1]);
+              } else {
+                // New format with userId - use token expiry time
+                return persistedTokens[id]?.expiresAt || 0;
+              }
+            };
+
+            return getSessionTime(b) - getSessionTime(a); // Descending - newest first
+          });
+
+          // Keep the first (newest), delete the rest
+          sessionsToDelete.push(...sessions.slice(1));
+        }
+      }
+
+      // Delete duplicate sessions in a single batch operation to avoid race conditions
+      if (sessionsToDelete.length > 0) {
+        logger.info(
+          `Deleting ${sessionsToDelete.length} duplicate session(s): ${sessionsToDelete.join(', ')}`
+        );
+        await settingsService.deleteAzureAuthTokens(sessionsToDelete);
+      }
+
+      // Now restore only the valid sessions
+      const validSessionIds = sessionIds.filter((id) => !sessionsToDelete.includes(id));
+
+      for (const sessionId of validSessionIds) {
         const tokenData = persistedTokens[sessionId];
 
         // Check if token is expired (with 5 min buffer)
@@ -247,7 +302,9 @@ const usageTrackingService = getUsageTrackingService(DATA_DIR);
         azureAuthSessions.set(sessionId, authManager);
       }
 
-      logger.info(`✓ Restored ${sessionIds.length} Azure DevOps auth session(s)`);
+      logger.info(
+        `✓ Restored ${validSessionIds.length} Azure DevOps auth session(s) (cleaned up ${sessionsToDelete.length} duplicates)`
+      );
     }
   } catch (error) {
     logger.error('Failed to restore Azure DevOps auth sessions:', error);

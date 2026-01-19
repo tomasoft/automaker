@@ -85,12 +85,46 @@ export function ImportWorkItemsDialog({
   const [organization, setOrganization] = useState('');
   const [project, setProject] = useState('');
 
-  // Get Azure DevOps config from settings when dialog opens
+  // Get Azure DevOps config from server when dialog opens
   useEffect(() => {
     const loadConfig = async () => {
       if (!open) return;
 
       try {
+        // Check auth status (server will auto-detect session)
+        const authCheckUrl = 'http://localhost:3008/api/azure-auth/status';
+
+        const authResponse = await fetch(authCheckUrl);
+
+        console.log('[ImportWorkItems] Auth check URL:', authCheckUrl);
+        console.log('[ImportWorkItems] Auth check response status:', authResponse.status);
+
+        if (!authResponse.ok) {
+          console.warn('[ImportWorkItems] Auth check failed with status:', authResponse.status);
+          toast.error('Failed to check Azure DevOps authentication');
+          return;
+        }
+
+        const authData = await authResponse.json();
+        console.log(
+          '[ImportWorkItems] Auth check response data:',
+          JSON.stringify(authData, null, 2)
+        );
+
+        if (!authData.authenticated) {
+          console.warn(
+            '[ImportWorkItems] Not authenticated with Azure DevOps. Auth data:',
+            authData
+          );
+          toast.error(
+            'Not authenticated with Azure DevOps. Please authenticate in Settings → DevOps Resources.'
+          );
+          return;
+        }
+
+        console.log('[ImportWorkItems] Authenticated successfully');
+
+        // Now get the config
         const azureConfigResponse = await fetch(
           'http://localhost:3008/api/azure-devops-wiki/config',
           {
@@ -1048,7 +1082,6 @@ export function ImportWorkItemsDialog({
                 <Checkbox
                   id="select-all"
                   checked={allSelected}
-                  // @ts-expect-error - indeterminate is valid but not in types
                   indeterminate={someSelected}
                   onCheckedChange={toggleSelectAll}
                 />

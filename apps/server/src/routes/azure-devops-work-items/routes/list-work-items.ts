@@ -7,18 +7,23 @@
 
 import type { Request, Response } from 'express';
 import { createLogger } from '@automaker/utils';
-import { azureAuthSessions } from '../../azure-devops-auth/routes/poll-azure-auth.js';
+import { SettingsService } from '../../../services/settings-service.js';
+import { getAuthSessionBySessionId } from '../../azure-devops-auth/routes/poll-azure-auth.js';
 
 const logger = createLogger('AzureWorkItemsRoutes');
 
 export function createListWorkItemsHandler() {
   return async (req: Request, res: Response) => {
     try {
-      const { organization, project, types } = req.query as {
+      const settingsService = (req as any).settingsService as SettingsService;
+      const { organization, project, types, sessionId } = req.query as {
         organization?: string;
         project?: string;
         types?: string;
+        sessionId?: string;
       };
+
+      logger.info(`[list-work-items] Received request with sessionId: ${sessionId}`);
 
       if (!organization || !project) {
         res.status(400).json({
@@ -28,13 +33,15 @@ export function createListWorkItemsHandler() {
         return;
       }
 
-      // Get authenticated session
-      const authManager = Array.from(azureAuthSessions.values())[0];
+      // Get authenticated session using sessionId
+      const authManager = await getAuthSessionBySessionId(sessionId, settingsService);
+
+      logger.info(`[list-work-items] Auth manager found: ${!!authManager}`);
 
       if (!authManager) {
         res.status(401).json({
           success: false,
-          error: 'Not authenticated with Azure DevOps',
+          error: 'Not authenticated with Azure DevOps. Please authenticate in Settings.',
         });
         return;
       }

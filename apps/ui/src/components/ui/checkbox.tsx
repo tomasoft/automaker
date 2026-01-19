@@ -12,6 +12,7 @@ interface CheckboxProps extends Omit<
   defaultChecked?: boolean | 'indeterminate';
   onCheckedChange?: (checked: boolean) => void;
   required?: boolean;
+  indeterminate?: boolean;
 }
 
 const CheckboxRoot = CheckboxPrimitive.Root as React.ForwardRefExoticComponent<
@@ -29,26 +30,32 @@ const CheckboxIndicator = CheckboxPrimitive.Indicator as React.ForwardRefExoticC
 >;
 
 const Checkbox = React.forwardRef<HTMLButtonElement, CheckboxProps>(
-  ({ className, onCheckedChange, children: _children, ...props }, ref) => (
-    <CheckboxRoot
-      ref={ref}
-      className={cn(
-        'peer h-4 w-4 shrink-0 rounded-sm border border-primary ring-offset-background cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground hover:border-primary/80',
-        className
-      )}
-      onCheckedChange={(checked) => {
-        // Handle indeterminate state by treating it as false for consumers expecting boolean
-        if (onCheckedChange) {
-          onCheckedChange(checked === true);
-        }
-      }}
-      {...props}
-    >
-      <CheckboxIndicator className={cn('flex items-center justify-center text-current')}>
-        <Check className="h-4 w-4" />
-      </CheckboxIndicator>
-    </CheckboxRoot>
-  )
+  ({ className, onCheckedChange, children: _children, indeterminate, ...props }, ref) => {
+    // Convert indeterminate boolean prop to checked value format
+    const checkedValue = indeterminate ? 'indeterminate' : props.checked;
+
+    return (
+      <CheckboxRoot
+        ref={ref}
+        className={cn(
+          'peer h-4 w-4 shrink-0 rounded-sm border border-primary ring-offset-background cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground hover:border-primary/80',
+          className
+        )}
+        onCheckedChange={(checked) => {
+          // Handle indeterminate state by treating it as false for consumers expecting boolean
+          if (onCheckedChange) {
+            onCheckedChange(checked === true);
+          }
+        }}
+        {...props}
+        checked={checkedValue}
+      >
+        <CheckboxIndicator className={cn('flex items-center justify-center text-current')}>
+          <Check className="h-4 w-4" />
+        </CheckboxIndicator>
+      </CheckboxRoot>
+    );
+  }
 );
 Checkbox.displayName = CheckboxPrimitive.Root.displayName;
 

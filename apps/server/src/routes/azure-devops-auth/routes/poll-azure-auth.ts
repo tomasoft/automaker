@@ -23,6 +23,61 @@ interface TokenResponse {
 // Store authenticated sessions (in production, use proper session management)
 export const azureAuthSessions = new Map<string, AzureDevOpsAuthManager>();
 
+/**
+ * Helper function to get auth session by sessionId
+ * Tries in-memory sessions first, then restores from persisted storage if needed
+ */
+export async function getAuthSessionBySessionId(
+  sessionId: string | undefined,
+  settingsService: SettingsService
+): Promise<AzureDevOpsAuthManager | null> {
+  logger.info(`[getAuthSessionBySessionId] Looking for session: ${sessionId}`);
+  logger.info(`[getAuthSessionBySessionId] In-memory sessions count: ${azureAuthSessions.size}`);
+
+  if (!sessionId) {
+    // If no sessionId provided, try to use the first available session (backward compatibility)
+    const sessions = Array.from(azureAuthSessions.values());
+    if (sessions.length > 0) {
+      logger.warn(
+        'No sessionId provided, using first available session (this may cause issues with multiple sessions)'
+      );
+      return sessions[0];
+    }
+    logger.warn('No sessionId provided and no sessions available');
+    return null;
+  }
+
+  // First check in-memory sessions
+  let authManager = azureAuthSessions.get(sessionId);
+
+  if (authManager) {
+    logger.info(`[getAuthSessionBySessionId] Found session in memory: ${sessionId}`);
+  } else {
+    logger.info(`[getAuthSessionBySessionId] Session not in memory, checking persisted storage`);
+  }
+
+  // If not in memory, try to restore from persisted tokens
+  if (!authManager) {
+    const tokenData = await settingsService.getAzureAuthToken(sessionId);
+    if (tokenData) {
+      logger.info(`Restoring Azure session ${sessionId} from persisted storage`);
+      authManager = new AzureDevOpsAuthManager();
+      authManager.setCachedToken({
+        accessToken: tokenData.accessToken,
+        refreshToken: tokenData.refreshToken,
+        expiresAt: tokenData.expiresAt,
+        userId: tokenData.userId,
+      });
+      // Add back to in-memory sessions
+      azureAuthSessions.set(sessionId, authManager);
+    } else {
+      logger.warn(`[getAuthSessionBySessionId] No persisted token found for session: ${sessionId}`);
+    }
+  }
+
+  return authManager || null;
+}
+
 export function createPollAzureAuthHandler() {
   return async (req: Request, res: Response) => {
     try {
@@ -130,18 +185,53 @@ export function createPollAzureAuthHandler() {
           expiresAt: Date.now() + data.expires_in * 1000,
         });
 
-        // Get user ID from token
-        const tokenInfo = authManager.getCachedTokenInfo();
+        // Get user ID from Azure DevOps API
+        let userId: string;
+        try {
+          const userInfo = await authManager.getCurrentUser();
+          userId = userInfo.id;
 
-        // Generate session ID (moved up to use in both persistence and in-memory storage)
-        const sessionId = `azure_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+          // Update the cached token with userId
+          authManager.setCachedToken({
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token,
+            expiresAt: Date.now() + data.expires_in * 1000,
+            userId: userId,
+          });
+        } catch (userError) {
+          logger.error('Failed to get user information:', userError);
+          res.json({
+            success: false,
+            error: 'Failed to get user information from Azure DevOps',
+          });
+          return;
+        }
+
+        // Use userId as sessionId to ensure only one session per user
+        const sessionId = `azure_${userId}`;
+
+        // Clean up any old sessions for this user (in case there are duplicates)
+        const oldSessionKeys = Array.from(azureAuthSessions.keys()).filter(
+          (key) => key !== sessionId && key.startsWith('azure_')
+        );
+
+        if (oldSessionKeys.length > 0) {
+          logger.info(
+            `Cleaning up ${oldSessionKeys.length} old Azure DevOps session(s): ${oldSessionKeys.join(', ')}`
+          );
+          for (const oldKey of oldSessionKeys) {
+            azureAuthSessions.delete(oldKey);
+          }
+          // Delete all old sessions in a single batch operation to avoid race conditions
+          await settingsService.deleteAzureAuthTokens(oldSessionKeys);
+        }
 
         // Save token to credentials.json for persistence
         await settingsService.saveAzureAuthToken(sessionId, {
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
           expiresAt: Date.now() + data.expires_in * 1000,
-          userId: tokenInfo?.userId,
+          userId: userId,
         });
 
         // Fetch user's Azure DevOps organizations and default project/wiki
@@ -287,7 +377,7 @@ export function createPollAzureAuthHandler() {
           success: true,
           status: 'complete',
           sessionId,
-          userId: tokenInfo?.userId,
+          userId: userId,
           expiresAt: Date.now() + data.expires_in * 1000,
           // Return fetched config (org/project/wiki)
           config: fetchedConfig,

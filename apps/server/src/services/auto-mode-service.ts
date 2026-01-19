@@ -54,6 +54,7 @@ import {
   getMCPServersFromSettings,
   getPromptCustomization,
 } from '../lib/settings-helpers.js';
+import { getUsageTrackingService } from './usage-tracking-service.js';
 
 const execAsync = promisify(exec);
 
@@ -1351,6 +1352,8 @@ Format your response as a structured markdown document.`;
 
       const stream = provider.executeQuery(options);
       let analysisResult = '';
+      let inputTokens = 0;
+      let outputTokens = 0;
 
       for await (const msg of stream) {
         if (msg.type === 'assistant' && msg.message?.content) {
@@ -1365,6 +1368,11 @@ Format your response as a structured markdown document.`;
             }
           }
         } else if (msg.type === 'result' && msg.subtype === 'success') {
+          // Capture usage from result message
+          if (msg.usage) {
+            inputTokens += msg.usage.inputTokens || 0;
+            outputTokens += msg.usage.outputTokens || 0;
+          }
           analysisResult = msg.result || analysisResult;
         }
       }
@@ -1374,6 +1382,33 @@ Format your response as a structured markdown document.`;
       const analysisPath = path.join(automakerDir, 'project-analysis.md');
       await secureFs.mkdir(automakerDir, { recursive: true });
       await secureFs.writeFile(analysisPath, analysisResult);
+
+      // Log usage statistics for cost tracking
+      if (inputTokens > 0 || outputTokens > 0) {
+        try {
+          logger.info(
+            `Analysis ${analysisFeatureId} consumed ${inputTokens} input + ${outputTokens} output tokens, logging usage...`
+          );
+          const usageService = getUsageTrackingService();
+          await usageService.logUsage({
+            provider: ProviderFactory.getProviderNameForModel(analysisModel),
+            model: analysisModel,
+            projectPath,
+            sessionId: analysisFeatureId,
+            contextType: 'planning',
+            tokens: {
+              inputTokens,
+              outputTokens,
+              totalTokens: inputTokens + outputTokens,
+            },
+          });
+          logger.info(
+            `Logged usage for analysis ${analysisFeatureId}: ${inputTokens} input, ${outputTokens} output tokens`
+          );
+        } catch (error) {
+          logger.error(`Failed to log usage for analysis ${analysisFeatureId}:`, error);
+        }
+      }
 
       this.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId: analysisFeatureId,
@@ -2305,6 +2340,10 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
       : '';
     let specDetected = false;
 
+    // Track token usage for cost monitoring
+    let inputTokens = 0;
+    let outputTokens = 0;
+
     // Agent output goes to .automaker directory
     // Note: We use projectPath here, not workDir, because workDir might be a worktree path
     const featureDirForOutput = getFeatureDir(projectPath, featureId);
@@ -2598,6 +2637,11 @@ After generating the revised spec, output:
                           } else if (msg.type === 'error') {
                             throw new Error(msg.error || 'Error during plan revision');
                           } else if (msg.type === 'result' && msg.subtype === 'success') {
+                            // Capture usage from result message
+                            if (msg.usage) {
+                              inputTokens += msg.usage.inputTokens || 0;
+                              outputTokens += msg.usage.outputTokens || 0;
+                            }
                             revisionText += msg.result || '';
                           }
                         }
@@ -2745,6 +2789,11 @@ After generating the revised spec, output:
                       } else if (msg.type === 'error') {
                         throw new Error(msg.error || `Error during task ${task.id}`);
                       } else if (msg.type === 'result' && msg.subtype === 'success') {
+                        // Capture usage from result message
+                        if (msg.usage) {
+                          inputTokens += msg.usage.inputTokens || 0;
+                          outputTokens += msg.usage.outputTokens || 0;
+                        }
                         taskOutput += msg.result || '';
                         responseText += msg.result || '';
                       }
@@ -2829,6 +2878,11 @@ Implement all the changes described in the plan above.`;
                     } else if (msg.type === 'error') {
                       throw new Error(msg.error || 'Unknown error during implementation');
                     } else if (msg.type === 'result' && msg.subtype === 'success') {
+                      // Capture usage from result message
+                      if (msg.usage) {
+                        inputTokens += msg.usage.inputTokens || 0;
+                        outputTokens += msg.usage.outputTokens || 0;
+                      }
                       responseText += msg.result || '';
                     }
                   }
@@ -2872,6 +2926,11 @@ Implement all the changes described in the plan above.`;
           // Handle error messages
           throw new Error(msg.error || 'Unknown error');
         } else if (msg.type === 'result' && msg.subtype === 'success') {
+          // Capture usage from result message
+          if (msg.usage) {
+            inputTokens += msg.usage.inputTokens || 0;
+            outputTokens += msg.usage.outputTokens || 0;
+          }
           // Don't replace responseText - the accumulated content is the full history
           // The msg.result is just a summary which would lose all tool use details
           // Just ensure final write happens
@@ -2881,6 +2940,30 @@ Implement all the changes described in the plan above.`;
 
       // Final write - ensure all accumulated content is saved (on success path)
       await writeToFile();
+
+      // Log usage statistics for cost tracking
+      if (inputTokens > 0 || outputTokens > 0) {
+        try {
+          const usageService = getUsageTrackingService();
+          await usageService.logUsage({
+            provider: ProviderFactory.getProviderNameForModel(finalModel),
+            model: finalModel,
+            projectPath,
+            sessionId: featureId,
+            contextType: 'implementation',
+            tokens: {
+              inputTokens,
+              outputTokens,
+              totalTokens: inputTokens + outputTokens,
+            },
+          });
+          logger.info(
+            `Logged usage for feature ${featureId}: ${inputTokens} input, ${outputTokens} output tokens`
+          );
+        } catch (error) {
+          logger.error(`Failed to log usage for feature ${featureId}:`, error);
+        }
+      }
 
       // Flush remaining raw output (only if enabled, on success path)
       if (enableRawOutput && rawOutputLines.length > 0) {

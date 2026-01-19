@@ -7,17 +7,20 @@
 
 import type { Request, Response } from 'express';
 import { createLogger } from '@automaker/utils';
-import { azureAuthSessions } from '../../azure-devops-auth/routes/poll-azure-auth.js';
+import { SettingsService } from '../../../services/settings-service.js';
+import { getAuthSessionBySessionId } from '../../azure-devops-auth/routes/poll-azure-auth.js';
 
 const logger = createLogger('AzureWorkItemsRoutes');
 
 export function createGetChildWorkItemsHandler() {
   return async (req: Request, res: Response) => {
     try {
-      const { organization, project, parentId } = req.query as {
+      const settingsService = (req as any).settingsService as SettingsService;
+      const { organization, project, parentId, sessionId } = req.query as {
         organization?: string;
         project?: string;
         parentId?: string;
+        sessionId?: string;
       };
 
       if (!organization || !project || !parentId) {
@@ -28,13 +31,13 @@ export function createGetChildWorkItemsHandler() {
         return;
       }
 
-      // Get authenticated session
-      const authManager = Array.from(azureAuthSessions.values())[0];
+      // Get authenticated session using sessionId
+      const authManager = await getAuthSessionBySessionId(sessionId, settingsService);
 
       if (!authManager) {
         res.status(401).json({
           success: false,
-          error: 'Not authenticated with Azure DevOps',
+          error: 'Not authenticated with Azure DevOps. Please authenticate in Settings.',
         });
         return;
       }

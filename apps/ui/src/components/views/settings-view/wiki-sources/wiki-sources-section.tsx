@@ -70,19 +70,9 @@ export function WikiSourcesSection() {
   const [tenantId, setTenantId] = useState('91f5beba-e36c-4c8b-9c37-a2a1d1a82bef');
   const [showAdvancedAuth, setShowAdvancedAuth] = useState(false);
 
-  // User info from auth
-  const [userId, setUserId] = useState<string | null>(() => {
-    // Restore from localStorage on mount
-    return localStorage.getItem('azure_devops_userId') || null;
-  });
-  const [sessionId, setSessionId] = useState<string | null>(() => {
-    // Restore from localStorage on mount
-    return localStorage.getItem('azure_devops_sessionId') || null;
-  });
-  const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(() => {
-    const stored = localStorage.getItem('azure_devops_tokenExpiresAt');
-    return stored ? parseInt(stored, 10) : null;
-  });
+  // User info from auth (fetched from server, not stored in localStorage)
+  const [userId, setUserId] = useState<string | null>(null);
+  const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(null);
 
   const lastIndexed = null; // TODO: Get from global settings
 
@@ -111,30 +101,7 @@ export function WikiSourcesSection() {
     }
   }, [wikiId]);
 
-  // Persist sessionId and userId to localStorage whenever they change
-  useEffect(() => {
-    if (sessionId) {
-      localStorage.setItem('azure_devops_sessionId', sessionId);
-    } else {
-      localStorage.removeItem('azure_devops_sessionId');
-    }
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (userId) {
-      localStorage.setItem('azure_devops_userId', userId);
-    } else {
-      localStorage.removeItem('azure_devops_userId');
-    }
-  }, [userId]);
-
-  useEffect(() => {
-    if (tokenExpiresAt) {
-      localStorage.setItem('azure_devops_tokenExpiresAt', tokenExpiresAt.toString());
-    } else {
-      localStorage.removeItem('azure_devops_tokenExpiresAt');
-    }
-  }, [tokenExpiresAt]);
+  // Auth data is server-side only - no localStorage persistence needed
 
   // Auto-discover projects when organization changes
   useEffect(() => {
@@ -248,16 +215,8 @@ export function WikiSourcesSection() {
         ? await (window.electronAPI as any).getServerUrl()
         : 'http://localhost:3008';
 
-      // Check if we have a persisted sessionId
-      const storedSessionId = sessionId || localStorage.getItem('azure_devops_sessionId');
-      if (!storedSessionId) {
-        setIsAuthenticated(false);
-        return;
-      }
-
-      const response = await fetch(
-        `${serverUrl}/api/azure-auth/status?sessionId=${encodeURIComponent(storedSessionId)}`
-      );
+      // Server will auto-detect the session - no sessionId needed
+      const response = await fetch(`${serverUrl}/api/azure-auth/status`);
 
       if (!response.ok) {
         // Server might not be running or endpoint not available
@@ -384,8 +343,8 @@ export function WikiSourcesSection() {
           toast.success('Successfully authenticated with Azure DevOps');
           setIsAuthenticated(true);
           setUserId(result.userId || null);
-          setSessionId(result.sessionId || null);
           setTokenExpiresAt(result.expiresAt || null);
+          // sessionId is server-side only - UI doesn't need it
 
           // Pre-populate wiki config if provided
           if (result.config) {
@@ -474,17 +433,16 @@ export function WikiSourcesSection() {
         ? await (window.electronAPI as any).getServerUrl()
         : 'http://localhost:3008';
 
+      // Server will sign out the active session - no sessionId needed
       const response = await fetch(`${serverUrl}/api/azure-auth/logout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId }),
       });
 
       const result = await response.json();
 
       if (result.success) {
         setIsAuthenticated(false);
-        setSessionId(null);
         setUserId(null);
         setTokenExpiresAt(null);
         setOrganization('');

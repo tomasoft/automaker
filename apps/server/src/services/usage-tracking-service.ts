@@ -88,6 +88,7 @@ export class UsageTrackingService {
   constructor(dataDir?: string) {
     this.usageDir = dataDir || path.join(process.cwd(), 'data', 'usage');
     this.usageFilePath = path.join(this.usageDir, 'usage-log.jsonl');
+    logger.info(`Usage tracking service created with dir: ${this.usageDir}`);
   }
 
   /**
@@ -192,9 +193,15 @@ export class UsageTrackingService {
 
     // Append to file
     try {
+      // Ensure directory exists before writing
+      await fs.mkdir(this.usageDir, { recursive: true });
       await fs.appendFile(this.usageFilePath, JSON.stringify(entry) + '\n');
+      logger.info(
+        `Logged usage: ${request.model} - ${entry.tokens.totalTokens} tokens (£${entry.cost.totalCost.toFixed(4)})`
+      );
     } catch (error) {
       logger.error('Failed to write usage entry to file:', error);
+      logger.error(`Usage dir: ${this.usageDir}, file: ${this.usageFilePath}`);
       // Don't throw - we still have it in cache
     }
 

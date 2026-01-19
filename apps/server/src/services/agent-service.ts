@@ -18,6 +18,7 @@ import { ProviderFactory } from '../providers/provider-factory.js';
 import { createChatOptions, validateWorkingDirectory } from '../lib/sdk-options.js';
 import { PathNotAllowedError } from '@automaker/platform';
 import type { SettingsService } from './settings-service.js';
+import { getUsageTrackingService } from './usage-tracking-service.js';
 import {
   getAutoLoadClaudeMdSetting,
   getEnableSandboxModeSetting,
@@ -313,6 +314,8 @@ export class AgentService {
       let currentAssistantMessage: Message | null = null;
       let responseText = '';
       const toolUses: Array<{ name: string; input: unknown }> = [];
+      let inputTokens = 0;
+      let outputTokens = 0;
 
       for await (const msg of stream) {
         // Capture SDK session ID from any message and persist it
@@ -368,6 +371,12 @@ export class AgentService {
             }
           }
 
+          // Capture usage data from the result message
+          if (msg.usage) {
+            inputTokens = msg.usage.inputTokens || 0;
+            outputTokens = msg.usage.outputTokens || 0;
+          }
+
           this.emitAgentEvent(sessionId, {
             type: 'complete',
             messageId: currentAssistantMessage?.id,
@@ -378,6 +387,26 @@ export class AgentService {
       }
 
       await this.saveSession(sessionId, session.messages);
+
+      // Log usage if tokens were consumed
+      if (inputTokens > 0 || outputTokens > 0) {
+        const usageService = getUsageTrackingService();
+        const metadata = await this.loadMetadata();
+        const sessionMeta = metadata[sessionId];
+
+        await usageService.logUsage({
+          provider: ProviderFactory.getProviderNameForModel(effectiveModel),
+          model: effectiveModel,
+          projectPath: sessionMeta?.projectPath || effectiveWorkDir,
+          sessionId: sessionId,
+          contextType: 'agent',
+          tokens: {
+            inputTokens,
+            outputTokens,
+            totalTokens: inputTokens + outputTokens,
+          },
+        });
+      }
 
       session.isRunning = false;
       session.abortController = null;

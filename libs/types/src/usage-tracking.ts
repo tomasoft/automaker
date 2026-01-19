@@ -39,7 +39,14 @@ export interface UsageEntry {
   featureTitle?: string;
   projectPath: string;
   sessionId?: string;
-  contextType?: 'chat' | 'feature' | 'planning' | 'implementation' | 'verification';
+  contextType?:
+    | 'chat'
+    | 'feature'
+    | 'planning'
+    | 'implementation'
+    | 'verification'
+    | 'spec-generation'
+    | 'agent';
   tokens: TokenUsage;
   cost: CostBreakdown;
   metadata?: Record<string, unknown>;
@@ -102,7 +109,14 @@ export interface LogUsageRequest {
   featureTitle?: string;
   projectPath: string;
   sessionId?: string;
-  contextType?: 'chat' | 'feature' | 'planning' | 'implementation' | 'verification';
+  contextType?:
+    | 'chat'
+    | 'feature'
+    | 'planning'
+    | 'implementation'
+    | 'verification'
+    | 'spec-generation'
+    | 'agent';
   tokens: TokenUsage;
   cost?: CostBreakdown; // Optional, will be calculated if not provided
 }

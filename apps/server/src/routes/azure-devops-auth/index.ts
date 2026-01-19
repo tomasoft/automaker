@@ -10,6 +10,7 @@ import { createStartAzureAuthHandler } from './routes/start-azure-auth.js';
 import { createPollAzureAuthHandler } from './routes/poll-azure-auth.js';
 import { createCheckAzureAuthHandler } from './routes/check-azure-auth.js';
 import { createLogoutAzureAuthHandler } from './routes/logout-azure-auth.js';
+import { createDebugSessionsHandler } from './routes/debug-sessions.js';
 
 export function createAzureAuthRoutes(settingsService: SettingsService): Router {
   const router = Router();
@@ -31,6 +32,9 @@ export function createAzureAuthRoutes(settingsService: SettingsService): Router 
 
   // Logout and revoke tokens
   router.post('/logout', createLogoutAzureAuthHandler());
+
+  // Debug endpoint to check active sessions
+  router.get('/debug-sessions', createDebugSessionsHandler());
 
   return router;
 }

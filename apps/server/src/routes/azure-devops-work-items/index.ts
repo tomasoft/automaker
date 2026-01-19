@@ -18,6 +18,12 @@ import { createExtractPdfTextHandler } from './routes/extract-pdf-text.js';
 export function createAzureWorkItemsRoutes(settingsService: SettingsService): Router {
   const router = Router();
 
+  // Inject settingsService into all requests
+  router.use((req, _res, next) => {
+    (req as any).settingsService = settingsService;
+    next();
+  });
+
   // List work items assigned to user
   router.get('/list', createListWorkItemsHandler());
 
