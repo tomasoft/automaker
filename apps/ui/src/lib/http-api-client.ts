@@ -2357,6 +2357,11 @@ export class HttpApiClient implements ElectronAPI {
     getStats: (params?: {
       featureId?: string;
       projectPath?: string;
+      startDate?: string;
+      endDate?: string;
+      provider?: string;
+      model?: string;
+      contextType?: string;
     }): Promise<{
       success: boolean;
       stats?: any;
@@ -2365,6 +2370,11 @@ export class HttpApiClient implements ElectronAPI {
       const query = new URLSearchParams();
       if (params?.featureId) query.set('featureId', params.featureId);
       if (params?.projectPath) query.set('projectPath', params.projectPath);
+      if (params?.startDate) query.set('startDate', params.startDate);
+      if (params?.endDate) query.set('endDate', params.endDate);
+      if (params?.provider) query.set('provider', params.provider);
+      if (params?.model) query.set('model', params.model);
+      if (params?.contextType) query.set('contextType', params.contextType);
       const queryString = query.toString();
       return this.get(`/api/usage/stats${queryString ? `?${queryString}` : ''}`);
     },

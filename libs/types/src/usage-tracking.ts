@@ -46,7 +46,14 @@ export interface UsageEntry {
     | 'implementation'
     | 'verification'
     | 'spec-generation'
-    | 'agent';
+    | 'agent'
+    | 'suggestions'
+    | 'backlog-planning'
+    | 'feature-generation'
+    | 'prompt-enhancement'
+    | 'file-description'
+    | 'image-description'
+    | 'ideation';
   tokens: TokenUsage;
   cost: CostBreakdown;
   metadata?: Record<string, unknown>;

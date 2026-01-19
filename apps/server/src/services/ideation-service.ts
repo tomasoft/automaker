@@ -36,6 +36,7 @@ import {
 } from '@automaker/platform';
 import { createLogger, loadContextFiles, isAbortError } from '@automaker/utils';
 import { ProviderFactory } from '../providers/provider-factory.js';
+import { getUsageTrackingService } from './usage-tracking-service.js';
 import type { SettingsService } from './settings-service.js';
 import type { FeatureLoader } from './feature-loader.js';
 import { createChatOptions, validateWorkingDirectory } from '../lib/sdk-options.js';
@@ -231,6 +232,8 @@ export class IdeationService {
       const stream = provider.executeQuery(executeOptions);
 
       let responseText = '';
+      let inputTokens = 0;
+      let outputTokens = 0;
       const assistantMessage: IdeationMessage = {
         id: this.generateId('msg'),
         role: 'assistant',
@@ -239,6 +242,10 @@ export class IdeationService {
       };
 
       for await (const msg of stream) {
+        if (msg.usage) {
+          inputTokens = msg.usage.inputTokens || 0;
+          outputTokens = msg.usage.outputTokens || 0;
+        }
         if (msg.type === 'assistant' && msg.message?.content) {
           for (const block of msg.message.content) {
             if (block.type === 'text') {
@@ -270,6 +277,28 @@ export class IdeationService {
         content: responseText,
         done: true,
       });
+
+      // Log usage if tokens were consumed
+      if (inputTokens > 0 || outputTokens > 0) {
+        try {
+          const usageService = getUsageTrackingService();
+          await usageService.logUsage({
+            provider: ProviderFactory.getProviderNameForModel(modelId),
+            model: modelId,
+            projectPath: projectPath,
+            sessionId: sessionId,
+            contextType: 'ideation',
+            tokens: {
+              inputTokens,
+              outputTokens,
+              totalTokens: inputTokens + outputTokens,
+            },
+          });
+        } catch (error) {
+          logger.error('Failed to log usage:', error);
+          // Don't fail the main operation if logging fails
+        }
+      }
 
       // Save session
       await this.saveSessionToDisk(projectPath, activeSession.session, activeSession.messages);
@@ -683,7 +712,13 @@ export class IdeationService {
       const stream = provider.executeQuery(executeOptions);
 
       let responseText = '';
+      let inputTokens = 0;
+      let outputTokens = 0;
       for await (const msg of stream) {
+        if (msg.usage) {
+          inputTokens = msg.usage.inputTokens || 0;
+          outputTokens = msg.usage.outputTokens || 0;
+        }
         if (msg.type === 'assistant' && msg.message?.content) {
           for (const block of msg.message.content) {
             if (block.type === 'text') {
@@ -692,6 +727,27 @@ export class IdeationService {
           }
         } else if (msg.type === 'result' && msg.subtype === 'success' && msg.result) {
           responseText = msg.result;
+        }
+      }
+
+      // Log usage if tokens were consumed
+      if (inputTokens > 0 || outputTokens > 0) {
+        try {
+          const usageService = getUsageTrackingService();
+          await usageService.logUsage({
+            provider: ProviderFactory.getProviderNameForModel(modelId),
+            model: modelId,
+            projectPath: projectPath,
+            contextType: 'ideation',
+            tokens: {
+              inputTokens,
+              outputTokens,
+              totalTokens: inputTokens + outputTokens,
+            },
+          });
+        } catch (error) {
+          logger.error('Failed to log usage:', error);
+          // Don't fail the main operation if logging fails
         }
       }
 

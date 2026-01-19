@@ -11,6 +11,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import cookie from 'cookie';
+import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import dotenv from 'dotenv';
@@ -204,7 +205,7 @@ const ideationService = new IdeationService(events, settingsService, featureLoad
 
 // Initialize chat and usage tracking services
 const chatService = getChatService(DATA_DIR);
-const usageTrackingService = getUsageTrackingService(DATA_DIR);
+const usageTrackingService = getUsageTrackingService(path.join(DATA_DIR, 'usage'));
 
 // Initialize services
 (async () => {

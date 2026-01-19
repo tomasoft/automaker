@@ -151,6 +151,8 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
     let iteration = 0;
     let accumulatedText = '';
     let isTaskComplete = false;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
 
     // Track recent tool calls to detect loops
     const recentToolCalls: string[] = [];
@@ -166,7 +168,13 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
       logger.info(`[Iteration ${iteration}] Starting agentic loop iteration`);
 
       // Call the model with current messages (full conversation history)
-      const { content, toolCalls, finishReason } = await this.callModel(model, messages);
+      const { content, toolCalls, finishReason, usage } = await this.callModel(model, messages);
+
+      // Track token usage
+      if (usage) {
+        totalInputTokens += usage.inputTokens;
+        totalOutputTokens += usage.outputTokens;
+      }
 
       // If model generated text content, yield it
       if (content) {
@@ -178,20 +186,62 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
             content: [{ type: 'text', text: content }],
           },
         };
+
+        // If no tool calls in this response, immediately yield result with usage
+        // This ensures auto-mode receives usage BEFORE entering approval phase
+        if (!toolCalls || toolCalls.length === 0) {
+          logger.info(
+            `[Iteration ${iteration}] No tool calls detected after content, yielding result immediately`
+          );
+          const normalizedResult = this.normalizeTaskFormat(accumulatedText);
+          const hasUsage = totalInputTokens > 0 || totalOutputTokens > 0;
+          logger.info(
+            `[GitHub Copilot] Yielding result - hasUsage: ${hasUsage}, input: ${totalInputTokens}, output: ${totalOutputTokens}`
+          );
+
+          yield {
+            type: 'result',
+            subtype: 'success',
+            result: normalizedResult,
+            usage: hasUsage
+              ? {
+                  inputTokens: totalInputTokens,
+                  outputTokens: totalOutputTokens,
+                }
+              : undefined,
+          };
+          logger.info(`[GitHub Copilot] Result yielded, breaking from loop`);
+          break;
+        }
       }
 
-      // If no tool calls, model is done thinking
+      // If no tool calls and no content, model is done (shouldn't normally happen)
+      logger.info(
+        `[Iteration ${iteration}] Checking tool calls - toolCalls: ${JSON.stringify(toolCalls)}, length: ${toolCalls?.length}`
+      );
       if (!toolCalls || toolCalls.length === 0) {
-        logger.info(`[Iteration ${iteration}] No tool calls, finishing`);
+        logger.info(`[Iteration ${iteration}] No tool calls and no content, finishing`);
 
-        // Normalize task format before returning (for spec generation)
+        // Normalize task format before returning
         const normalizedResult = this.normalizeTaskFormat(accumulatedText);
+
+        const hasUsage = totalInputTokens > 0 || totalOutputTokens > 0;
+        logger.info(
+          `[GitHub Copilot] Yielding result - hasUsage: ${hasUsage}, input: ${totalInputTokens}, output: ${totalOutputTokens}`
+        );
 
         yield {
           type: 'result',
           subtype: 'success',
           result: normalizedResult,
+          usage: hasUsage
+            ? {
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens,
+              }
+            : undefined,
         };
+        logger.info(`[GitHub Copilot] Result yielded, breaking from loop`);
         break;
       }
 
@@ -340,7 +390,13 @@ Instead of calling tools repeatedly:
       // If task is complete, do one final call to get closing message
       if (isTaskComplete) {
         logger.info(`[Iteration ${iteration + 1}] Getting final response after task_complete`);
-        const { content: finalContent } = await this.callModel(model, messages);
+        const { content: finalContent, usage: finalUsage } = await this.callModel(model, messages);
+
+        // Track usage from final call
+        if (finalUsage) {
+          totalInputTokens += finalUsage.inputTokens;
+          totalOutputTokens += finalUsage.outputTokens;
+        }
 
         if (finalContent) {
           accumulatedText += finalContent;
@@ -356,10 +412,21 @@ Instead of calling tools repeatedly:
         // Normalize task format before returning (for spec generation)
         const normalizedResult = this.normalizeTaskFormat(accumulatedText);
 
+        const hasUsage = totalInputTokens > 0 || totalOutputTokens > 0;
+        logger.info(
+          `[GitHub Copilot] Task complete - yielding result with usage: ${hasUsage}, input: ${totalInputTokens}, output: ${totalOutputTokens}`
+        );
+
         yield {
           type: 'result',
           subtype: 'success',
           result: normalizedResult,
+          usage: hasUsage
+            ? {
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens,
+              }
+            : undefined,
         };
         break;
       }
@@ -376,6 +443,13 @@ Instead of calling tools repeatedly:
         type: 'result',
         subtype: 'success',
         result: normalizedResult,
+        usage:
+          totalInputTokens > 0 || totalOutputTokens > 0
+            ? {
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens,
+              }
+            : undefined,
       };
     }
   }
@@ -390,6 +464,7 @@ Instead of calling tools repeatedly:
     content: string | null;
     toolCalls: ToolCall[] | null;
     finishReason: string | null;
+    usage?: { inputTokens: number; outputTokens: number };
   }> {
     // Get authentication token
     const token = await this.authManager.getToken();
@@ -444,6 +519,7 @@ Instead of calling tools repeatedly:
     content: string | null;
     toolCalls: ToolCall[] | null;
     finishReason: string | null;
+    usage?: { inputTokens: number; outputTokens: number };
   }> {
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
@@ -457,6 +533,7 @@ Instead of calling tools repeatedly:
     let toolCalls: ToolCall[] | null = null;
     let toolCallsBuffer = new Map<number, Partial<ToolCall>>();
     let finishReason: string | null = null;
+    let usage: { inputTokens: number; outputTokens: number } | undefined;
 
     try {
       while (true) {
@@ -512,6 +589,17 @@ Instead of calling tools repeatedly:
                 finishReason = choice.finish_reason;
               }
             }
+
+            // Capture usage data (typically in last chunk)
+            if (chunk.usage) {
+              usage = {
+                inputTokens: chunk.usage.prompt_tokens || 0,
+                outputTokens: chunk.usage.completion_tokens || 0,
+              };
+              logger.info(
+                `[GitHub Copilot] Captured usage from chunk: ${usage.inputTokens} input, ${usage.outputTokens} output tokens`
+              );
+            }
           } catch (err) {
             logger.warn('Failed to parse SSE chunk:', err);
           }
@@ -547,6 +635,7 @@ Instead of calling tools repeatedly:
       content: accumulatedContent || null,
       toolCalls,
       finishReason,
+      usage,
     };
   }
 

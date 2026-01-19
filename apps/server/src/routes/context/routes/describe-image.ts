@@ -19,6 +19,7 @@ import { resolvePhaseModel } from '@automaker/model-resolver';
 import { createCustomOptions } from '../../../lib/sdk-options.js';
 import { ProviderFactory } from '../../../providers/provider-factory.js';
 import * as secureFs from '../../../lib/secure-fs.js';
+import { getUsageTrackingService } from '../../../services/usage-tracking-service.js';
 import * as path from 'path';
 import type { SettingsService } from '../../../services/settings-service.js';
 import { getAutoLoadClaudeMdSetting } from '../../../lib/settings-helpers.js';
@@ -185,9 +186,11 @@ async function extractTextFromStream(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   stream: AsyncIterable<any>,
   requestId: string
-): Promise<string> {
+): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   let responseText = '';
   let messageCount = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   logger.info(`[${requestId}] [Stream] Begin reading SDK stream...`);
 
@@ -200,6 +203,11 @@ async function extractTextFromStream(
     logger.info(
       `[${requestId}] [Stream] #${messageCount} type=${String(msgType)} subtype=${String(msgSubtype ?? '')}`
     );
+
+    if (msg.usage) {
+      inputTokens = msg.usage.inputTokens || 0;
+      outputTokens = msg.usage.outputTokens || 0;
+    }
 
     if (msgType === 'assistant' && msg.message?.content) {
       const blocks = msg.message.content as Array<{ type: string; text?: string }>;
@@ -222,7 +230,7 @@ async function extractTextFromStream(
     `[${requestId}] [Stream] End of stream. messages=${messageCount} textLength=${responseText.length}`
   );
 
-  return responseText;
+  return { text: responseText, inputTokens, outputTokens };
 }
 
 /**
@@ -364,6 +372,8 @@ export function createDescribeImageHandler(
         const cursorPrompt = `${instructionText}\n\nImage file: ${actualPath}\nMIME type: ${imageData.mimeType}`;
 
         let responseText = '';
+        let inputTokens = 0;
+        let outputTokens = 0;
         const queryStart = Date.now();
         for await (const msg of provider.executeQuery({
           prompt: cursorPrompt,
@@ -373,6 +383,10 @@ export function createDescribeImageHandler(
           allowedTools: ['Read'], // Allow Read tool so Cursor can read the image if needed
           readOnly: true, // Image description only reads, doesn't write
         })) {
+          if (msg.usage) {
+            inputTokens = msg.usage.inputTokens || 0;
+            outputTokens = msg.usage.outputTokens || 0;
+          }
           if (msg.type === 'assistant' && msg.message?.content) {
             for (const block of msg.message.content) {
               if (block.type === 'text' && block.text) {
@@ -383,6 +397,27 @@ export function createDescribeImageHandler(
         }
         logger.info(`[${requestId}] Cursor query completed in ${Date.now() - queryStart}ms`);
         description = responseText;
+
+        // Log usage if tokens were consumed
+        if (inputTokens > 0 || outputTokens > 0) {
+          try {
+            const usageService = getUsageTrackingService();
+            await usageService.logUsage({
+              provider: ProviderFactory.getProviderNameForModel(model),
+              model: model,
+              projectPath: cwd,
+              contextType: 'image-description',
+              tokens: {
+                inputTokens,
+                outputTokens,
+                totalTokens: inputTokens + outputTokens,
+              },
+            });
+          } catch (error) {
+            logger.error('Failed to log usage:', error);
+            // Don't fail the main operation if logging fails
+          }
+        }
       } else {
         // Use Claude SDK for Claude models (supports image content blocks)
         logger.info(`[${requestId}] Using Claude SDK for model: ${model}`);
@@ -420,8 +455,30 @@ export function createDescribeImageHandler(
 
         // Extract the description from the response
         const extractStart = Date.now();
-        description = await extractTextFromStream(stream, requestId);
+        const result = await extractTextFromStream(stream, requestId);
+        description = result.text;
         logger.info(`[${requestId}] extractMs=${Date.now() - extractStart}`);
+
+        // Log usage if tokens were consumed
+        if (result.inputTokens > 0 || result.outputTokens > 0) {
+          try {
+            const usageService = getUsageTrackingService();
+            await usageService.logUsage({
+              provider: ProviderFactory.getProviderNameForModel(model),
+              model: model,
+              projectPath: cwd,
+              contextType: 'image-description',
+              tokens: {
+                inputTokens: result.inputTokens,
+                outputTokens: result.outputTokens,
+                totalTokens: result.inputTokens + result.outputTokens,
+              },
+            });
+          } catch (error) {
+            logger.error('Failed to log usage:', error);
+            // Don't fail the main operation if logging fails
+          }
+        }
       }
 
       if (!description || description.trim().length === 0) {

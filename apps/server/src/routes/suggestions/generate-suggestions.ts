@@ -14,6 +14,7 @@ import { createSuggestionsOptions } from '../../lib/sdk-options.js';
 import { extractJsonWithArray } from '../../lib/json-extractor.js';
 import { ProviderFactory } from '../../providers/provider-factory.js';
 import { FeatureLoader } from '../../services/feature-loader.js';
+import { getUsageTrackingService } from '../../services/usage-tracking-service.js';
 import { getAppSpecPath } from '@automaker/platform';
 import * as secureFs from '../../lib/secure-fs.js';
 import type { SettingsService } from '../../services/settings-service.js';
@@ -200,6 +201,8 @@ The response will be automatically formatted as structured JSON.`;
 
   let responseText = '';
   let structuredOutput: { suggestions: Array<Record<string, unknown>> } | null = null;
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   // Route to appropriate provider based on model type
   if (isCursorModel(model)) {
@@ -245,7 +248,12 @@ Your entire response should be valid JSON starting with { and ending with }. No 
             });
           }
         }
-      } else if (msg.type === 'result' && msg.subtype === 'success' && msg.result) {
+      }
+      if (msg.usage) {
+        inputTokens = msg.usage.inputTokens || 0;
+        outputTokens = msg.usage.outputTokens || 0;
+      }
+      if (msg.type === 'result' && msg.subtype === 'success' && msg.result) {
         // Use result if it's a final accumulated message (from Cursor provider)
         logger.info('[Suggestions] Received result from Cursor, length:', msg.result.length);
         logger.info('[Suggestions] Previous responseText length:', responseText.length);
@@ -292,7 +300,12 @@ Your entire response should be valid JSON starting with { and ending with }. No 
             });
           }
         }
-      } else if (msg.type === 'result' && msg.subtype === 'success') {
+      }
+      if (msg.usage) {
+        inputTokens = msg.usage.inputTokens || 0;
+        outputTokens = msg.usage.outputTokens || 0;
+      }
+      if (msg.type === 'result' && (msg as any).subtype === 'success') {
         // Check for structured output
         const resultMsg = msg as any;
         if (resultMsg.structured_output) {
@@ -312,6 +325,27 @@ Your entire response should be valid JSON starting with { and ending with }. No 
           // Still try to parse what we have
         }
       }
+    }
+  }
+
+  // Log usage if tokens were consumed
+  if (inputTokens > 0 || outputTokens > 0) {
+    try {
+      const usageService = getUsageTrackingService();
+      await usageService.logUsage({
+        provider: ProviderFactory.getProviderNameForModel(model),
+        model: model,
+        projectPath: projectPath,
+        contextType: 'suggestions',
+        tokens: {
+          inputTokens,
+          outputTokens,
+          totalTokens: inputTokens + outputTokens,
+        },
+      });
+    } catch (error) {
+      logger.error('Failed to log usage:', error);
+      // Don't fail the main operation if logging fails
     }
   }
 

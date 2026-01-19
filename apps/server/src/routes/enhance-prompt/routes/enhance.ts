@@ -18,6 +18,7 @@ import {
 } from '@automaker/types';
 import { ProviderFactory } from '../../../providers/provider-factory.js';
 import type { SettingsService } from '../../../services/settings-service.js';
+import { getUsageTrackingService } from '../../../services/usage-tracking-service.js';
 import { getPromptCustomization } from '../../../lib/settings-helpers.js';
 import {
   buildUserPrompt,
@@ -68,18 +69,26 @@ async function extractTextFromStream(
     type: string;
     subtype?: string;
     result?: string;
+    usage?: { inputTokens?: number; outputTokens?: number };
     message?: {
       content?: Array<{ type: string; text?: string }>;
     };
   }>
-): Promise<string> {
+): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   let responseText = '';
   let messageCount = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   try {
     for await (const msg of stream) {
       messageCount++;
       logger.debug(`[EnhancePrompt] Received message ${messageCount}, type: ${msg.type}`);
+
+      if (msg.usage) {
+        inputTokens = msg.usage.inputTokens || 0;
+        outputTokens = msg.usage.outputTokens || 0;
+      }
 
       if (msg.type === 'assistant' && msg.message?.content) {
         for (const block of msg.message.content) {
@@ -97,7 +106,7 @@ async function extractTextFromStream(
     throw error;
   }
 
-  return responseText;
+  return { text: responseText, inputTokens, outputTokens };
 }
 
 /**
@@ -111,6 +120,8 @@ async function executeWithProvider(prompt: string, model: string): Promise<strin
   const provider = ProviderFactory.getProviderForModel(model);
 
   let responseText = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   for await (const msg of provider.executeQuery({
     prompt,
@@ -118,6 +129,10 @@ async function executeWithProvider(prompt: string, model: string): Promise<strin
     cwd: process.cwd(), // Enhancement doesn't need a specific working directory
     readOnly: true, // Prompt enhancement only generates text, doesn't write files
   })) {
+    if (msg.usage) {
+      inputTokens = msg.usage.inputTokens || 0;
+      outputTokens = msg.usage.outputTokens || 0;
+    }
     if (msg.type === 'assistant' && msg.message?.content) {
       for (const block of msg.message.content) {
         if (block.type === 'text' && block.text) {
@@ -211,6 +226,8 @@ export function createEnhanceHandler(
       logger.debug(`Using model: ${resolvedModel}`);
 
       let enhancedText: string;
+      let inputTokens = 0;
+      let outputTokens = 0;
 
       // Route to appropriate provider based on model
       if (isCursorModel(resolvedModel) || isGitHubCopilotModel(resolvedModel)) {
@@ -245,7 +262,10 @@ export function createEnhanceHandler(
         });
 
         logger.debug('[EnhancePrompt] Extracting text from stream...');
-        enhancedText = await extractTextFromStream(stream);
+        const result = await extractTextFromStream(stream);
+        enhancedText = result.text;
+        inputTokens = result.inputTokens;
+        outputTokens = result.outputTokens;
         logger.debug('[EnhancePrompt] Stream extraction complete');
       }
 
@@ -260,6 +280,27 @@ export function createEnhanceHandler(
       }
 
       logger.info(`Enhancement complete, output length: ${enhancedText.length} chars`);
+
+      // Log usage if tokens were consumed
+      if (inputTokens > 0 || outputTokens > 0) {
+        try {
+          const usageService = getUsageTrackingService();
+          await usageService.logUsage({
+            provider: ProviderFactory.getProviderNameForModel(resolvedModel),
+            model: resolvedModel,
+            projectPath: process.cwd(), // Enhancement doesn't have a specific project
+            contextType: 'prompt-enhancement',
+            tokens: {
+              inputTokens,
+              outputTokens,
+              totalTokens: inputTokens + outputTokens,
+            },
+          });
+        } catch (error) {
+          logger.error('Failed to log usage:', error);
+          // Don't fail the main operation if logging fails
+        }
+      }
 
       const response: EnhanceSuccessResponse = {
         success: true,

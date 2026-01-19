@@ -14,6 +14,7 @@ import { resolvePhaseModel } from '@automaker/model-resolver';
 import { createFeatureGenerationOptions } from '../../lib/sdk-options.js';
 import { ProviderFactory } from '../../providers/provider-factory.js';
 import { logAuthStatus } from './common.js';
+import { getUsageTrackingService } from '../../services/usage-tracking-service.js';
 import { parseAndCreateFeatures } from './parse-and-create-features.js';
 import { getAppSpecPath } from '@automaker/platform';
 import type { SettingsService } from '../../services/settings-service.js';
@@ -117,6 +118,8 @@ IMPORTANT: Do not ask for clarification. The specification is provided above. Ge
 
   let responseText = '';
   let messageCount = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   // Route to appropriate provider based on model type
   if (isCursorModel(model)) {
@@ -143,6 +146,11 @@ CRITICAL INSTRUCTIONS:
       readOnly: true, // Feature generation only reads code, doesn't write
     })) {
       messageCount++;
+
+      if (msg.usage) {
+        inputTokens = msg.usage.inputTokens || 0;
+        outputTokens = msg.usage.outputTokens || 0;
+      }
 
       if (msg.type === 'assistant' && msg.message?.content) {
         for (const block of msg.message.content) {
@@ -200,6 +208,11 @@ CRITICAL INSTRUCTIONS:
           JSON.stringify({ type: msg.type, subtype: (msg as any).subtype }, null, 2)
         );
 
+        if (msg.usage) {
+          inputTokens = msg.usage.inputTokens || 0;
+          outputTokens = msg.usage.outputTokens || 0;
+        }
+
         if (msg.type === 'assistant' && msg.message.content) {
           for (const block of msg.message.content) {
             if (block.type === 'text') {
@@ -232,6 +245,27 @@ CRITICAL INSTRUCTIONS:
   logger.info('========== FULL RESPONSE TEXT ==========');
   logger.info(responseText);
   logger.info('========== END RESPONSE TEXT ==========');
+
+  // Log usage if tokens were consumed
+  if (inputTokens > 0 || outputTokens > 0) {
+    try {
+      const usageService = getUsageTrackingService();
+      await usageService.logUsage({
+        provider: ProviderFactory.getProviderNameForModel(model),
+        model: model,
+        projectPath: projectPath,
+        contextType: 'feature-generation',
+        tokens: {
+          inputTokens,
+          outputTokens,
+          totalTokens: inputTokens + outputTokens,
+        },
+      });
+    } catch (error) {
+      logger.error('Failed to log usage:', error);
+      // Don't fail the main operation if logging fails
+    }
+  }
 
   await parseAndCreateFeatures(projectPath, responseText, events, settingsService);
 

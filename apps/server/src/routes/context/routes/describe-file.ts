@@ -19,6 +19,7 @@ import { resolvePhaseModel } from '@automaker/model-resolver';
 import { createCustomOptions } from '../../../lib/sdk-options.js';
 import { ProviderFactory } from '../../../providers/provider-factory.js';
 import * as secureFs from '../../../lib/secure-fs.js';
+import { getUsageTrackingService } from '../../../services/usage-tracking-service.js';
 import * as path from 'path';
 import type { SettingsService } from '../../../services/settings-service.js';
 import { getAutoLoadClaudeMdSetting } from '../../../lib/settings-helpers.js';
@@ -55,10 +56,16 @@ interface DescribeFileErrorResponse {
 async function extractTextFromStream(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   stream: AsyncIterable<any>
-): Promise<string> {
+): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   let responseText = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   for await (const msg of stream) {
+    if (msg.usage) {
+      inputTokens = msg.usage.inputTokens || 0;
+      outputTokens = msg.usage.outputTokens || 0;
+    }
     if (msg.type === 'assistant' && msg.message?.content) {
       const blocks = msg.message.content as Array<{ type: string; text?: string }>;
       for (const block of blocks) {
@@ -71,7 +78,7 @@ async function extractTextFromStream(
     }
   }
 
-  return responseText;
+  return { text: responseText, inputTokens, outputTokens };
 }
 
 /**
@@ -203,6 +210,8 @@ File: ${fileName}${truncated ? ' (truncated)' : ''}`;
         const cursorPrompt = `${instructionText}\n\n--- FILE CONTENT ---\n${contentToAnalyze}`;
 
         let responseText = '';
+        let inputTokens = 0;
+        let outputTokens = 0;
         for await (const msg of provider.executeQuery({
           prompt: cursorPrompt,
           model,
@@ -211,6 +220,10 @@ File: ${fileName}${truncated ? ' (truncated)' : ''}`;
           allowedTools: [],
           readOnly: true, // File description only reads, doesn't write
         })) {
+          if (msg.usage) {
+            inputTokens = msg.usage.inputTokens || 0;
+            outputTokens = msg.usage.outputTokens || 0;
+          }
           if (msg.type === 'assistant' && msg.message?.content) {
             for (const block of msg.message.content) {
               if (block.type === 'text' && block.text) {
@@ -220,6 +233,27 @@ File: ${fileName}${truncated ? ' (truncated)' : ''}`;
           }
         }
         description = responseText;
+
+        // Log usage if tokens were consumed
+        if (inputTokens > 0 || outputTokens > 0) {
+          try {
+            const usageService = getUsageTrackingService();
+            await usageService.logUsage({
+              provider: ProviderFactory.getProviderNameForModel(model),
+              model: model,
+              projectPath: cwd,
+              contextType: 'file-description',
+              tokens: {
+                inputTokens,
+                outputTokens,
+                totalTokens: inputTokens + outputTokens,
+              },
+            });
+          } catch (error) {
+            logger.error('Failed to log usage:', error);
+            // Don't fail the main operation if logging fails
+          }
+        }
       } else {
         // Use Claude SDK for Claude models
         logger.info(`Using Claude SDK for model: ${model}`);
@@ -248,7 +282,29 @@ File: ${fileName}${truncated ? ' (truncated)' : ''}`;
         const stream = query({ prompt: promptGenerator, options: sdkOptions });
 
         // Extract the description from the response
-        description = await extractTextFromStream(stream);
+        const result = await extractTextFromStream(stream);
+        description = result.text;
+
+        // Log usage if tokens were consumed
+        if (result.inputTokens > 0 || result.outputTokens > 0) {
+          try {
+            const usageService = getUsageTrackingService();
+            await usageService.logUsage({
+              provider: ProviderFactory.getProviderNameForModel(model),
+              model: model,
+              projectPath: cwd,
+              contextType: 'file-description',
+              tokens: {
+                inputTokens: result.inputTokens,
+                outputTokens: result.outputTokens,
+                totalTokens: result.inputTokens + result.outputTokens,
+              },
+            });
+          } catch (error) {
+            logger.error('Failed to log usage:', error);
+            // Don't fail the main operation if logging fails
+          }
+        }
       }
 
       if (!description || description.trim().length === 0) {

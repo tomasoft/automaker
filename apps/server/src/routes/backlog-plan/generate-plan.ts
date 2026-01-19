@@ -12,6 +12,7 @@ import { resolvePhaseModel } from '@automaker/model-resolver';
 import { FeatureLoader } from '../../services/feature-loader.js';
 import { ProviderFactory } from '../../providers/provider-factory.js';
 import { extractJsonWithArray } from '../../lib/json-extractor.js';
+import { getUsageTrackingService } from '../../services/usage-tracking-service.js';
 import { logger, setRunningState, getErrorMessage } from './common.js';
 import type { SettingsService } from '../../services/settings-service.js';
 import { getAutoLoadClaudeMdSetting, getPromptCustomization } from '../../lib/settings-helpers.js';
@@ -163,10 +164,17 @@ ${userPrompt}`;
     });
 
     let responseText = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     for await (const msg of stream) {
       if (abortController.signal.aborted) {
         throw new Error('Generation aborted');
+      }
+
+      if (msg.usage) {
+        inputTokens = msg.usage.inputTokens || 0;
+        outputTokens = msg.usage.outputTokens || 0;
       }
 
       if (msg.type === 'assistant') {
@@ -187,6 +195,27 @@ ${userPrompt}`;
         } else {
           logger.info('[BacklogPlan] Keeping accumulated text (longer than Cursor result)');
         }
+      }
+    }
+
+    // Log usage if tokens were consumed
+    if (inputTokens > 0 || outputTokens > 0) {
+      try {
+        const usageService = getUsageTrackingService();
+        await usageService.logUsage({
+          provider: ProviderFactory.getProviderNameForModel(effectiveModel),
+          model: effectiveModel,
+          projectPath: projectPath,
+          contextType: 'backlog-planning',
+          tokens: {
+            inputTokens,
+            outputTokens,
+            totalTokens: inputTokens + outputTokens,
+          },
+        });
+      } catch (error) {
+        logger.error('Failed to log usage:', error);
+        // Don't fail the main operation if logging fails
       }
     }
 

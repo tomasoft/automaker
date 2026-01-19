@@ -2790,9 +2790,13 @@ After generating the revised spec, output:
                         throw new Error(msg.error || `Error during task ${task.id}`);
                       } else if (msg.type === 'result' && msg.subtype === 'success') {
                         // Capture usage from result message
+                        logger.info(`[Task ${task.id}] Result message - has usage: ${!!msg.usage}`);
                         if (msg.usage) {
                           inputTokens += msg.usage.inputTokens || 0;
                           outputTokens += msg.usage.outputTokens || 0;
+                          logger.info(
+                            `[Task ${task.id}] Captured usage: ${msg.usage.inputTokens} input, ${msg.usage.outputTokens} output. Total: ${inputTokens} input, ${outputTokens} output`
+                          );
                         }
                         taskOutput += msg.result || '';
                         responseText += msg.result || '';
@@ -2942,8 +2946,12 @@ Implement all the changes described in the plan above.`;
       await writeToFile();
 
       // Log usage statistics for cost tracking
+      logger.info(
+        `[Auto-Mode] Usage check: inputTokens=${inputTokens}, outputTokens=${outputTokens}`
+      );
       if (inputTokens > 0 || outputTokens > 0) {
         try {
+          logger.info(`[Auto-Mode] About to log usage to file...`);
           const usageService = getUsageTrackingService();
           await usageService.logUsage({
             provider: ProviderFactory.getProviderNameForModel(finalModel),
@@ -2963,6 +2971,10 @@ Implement all the changes described in the plan above.`;
         } catch (error) {
           logger.error(`Failed to log usage for feature ${featureId}:`, error);
         }
+      } else {
+        logger.warn(
+          `[Auto-Mode] No tokens to log - inputTokens: ${inputTokens}, outputTokens: ${outputTokens}`
+        );
       }
 
       // Flush remaining raw output (only if enabled, on success path)

@@ -169,7 +169,12 @@ export class UsageTrackingService {
    * Log a usage entry
    */
   async logUsage(request: LogUsageRequest): Promise<UsageEntry> {
+    logger.info(
+      `[UsageTracking] logUsage called - provider: ${request.provider}, model: ${request.model}, tokens: ${request.tokens.inputTokens}/${request.tokens.outputTokens}`
+    );
+
     if (!this.cacheLoaded) {
+      logger.info(`[UsageTracking] Cache not loaded, loading now...`);
       await this.loadCache();
     }
 
@@ -194,7 +199,9 @@ export class UsageTrackingService {
     // Append to file
     try {
       // Ensure directory exists before writing
+      logger.info(`[UsageTracking] Creating directory: ${this.usageDir}`);
       await fs.mkdir(this.usageDir, { recursive: true });
+      logger.info(`[UsageTracking] Writing to file: ${this.usageFilePath}`);
       await fs.appendFile(this.usageFilePath, JSON.stringify(entry) + '\n');
       logger.info(
         `Logged usage: ${request.model} - ${entry.tokens.totalTokens} tokens (£${entry.cost.totalCost.toFixed(4)})`
@@ -211,10 +218,12 @@ export class UsageTrackingService {
   /**
    * Get usage statistics based on query
    */
-  async getStats(query: UsageQuery): Promise<UsageStats> {
+  async getStats(query: UsageQuery): Promise<UsageStats | ProjectUsageStats> {
     if (!this.cacheLoaded) {
       await this.loadCache();
     }
+
+    logger.info(`[UsageTracking] getStats called with query:`, query);
 
     const entries = Array.from(this.cache.values()).filter((entry) => {
       if (query.projectPath && entry.projectPath !== query.projectPath) return false;
@@ -222,12 +231,48 @@ export class UsageTrackingService {
       if (query.provider && entry.provider !== query.provider) return false;
       if (query.model && entry.model !== query.model) return false;
       if (query.contextType && entry.contextType !== query.contextType) return false;
-      if (query.startDate && entry.timestamp < query.startDate) return false;
-      if (query.endDate && entry.timestamp > query.endDate) return false;
+      if (query.startDate && entry.timestamp < query.startDate) {
+        logger.info(
+          `[UsageTracking] Filtering out entry - timestamp ${entry.timestamp} < startDate ${query.startDate}`
+        );
+        return false;
+      }
+      if (query.endDate && entry.timestamp > query.endDate) {
+        logger.info(
+          `[UsageTracking] Filtering out entry - timestamp ${entry.timestamp} > endDate ${query.endDate}`
+        );
+        return false;
+      }
       return true;
     });
 
-    return this.aggregateStats(entries);
+    logger.info(`[UsageTracking] Filtered ${entries.length} entries from ${this.cache.size} total`);
+
+    const baseStats = this.aggregateStats(entries);
+
+    // If projectPath is specified, return ProjectUsageStats with features breakdown
+    if (query.projectPath && !query.featureId) {
+      const featureIds = new Set(entries.filter((e) => e.featureId).map((e) => e.featureId!));
+      const features: FeatureUsageStats[] = [];
+
+      for (const featureId of featureIds) {
+        const featureEntries = entries.filter((e) => e.featureId === featureId);
+        const featureStats = this.aggregateStats(featureEntries);
+        features.push({
+          ...featureStats,
+          featureId,
+        });
+      }
+
+      return {
+        ...baseStats,
+        projectPath: query.projectPath,
+        projectName: path.basename(query.projectPath),
+        features,
+      };
+    }
+
+    return baseStats;
   }
 
   /**
