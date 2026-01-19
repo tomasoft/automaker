@@ -126,6 +126,23 @@ Provide a security assessment summary with any issues found and fixes applied.`,
     instructions: `## Testing Step
 
 Please ensure comprehensive test coverage for the changes made in this feature.
+Use the appropriate testing framework according to what is being tested.
+
+### Framework-Specific Testing
+
+**For C#/.NET Code:**
+- Use **xUnit** testing framework
+- IMPORTANT: All .NET test projects must use .NET 10.0 (net10.0)
+- Use xUnit's parallelization features where possible
+- Example: dotnet new xunit -n ProjectName.Tests -f net10.0
+
+**For API/Backend:**
+- Use Scala (or appropriate framework for your API)
+- Test all endpoints with various scenarios
+
+**For UI:**
+- Use **Playwright** for end-to-end testing
+- Explore as much of the UI as possible
 
 ### Unit Tests
 - Write unit tests for all new functions and methods

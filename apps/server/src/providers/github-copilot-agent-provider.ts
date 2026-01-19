@@ -64,6 +64,11 @@ interface ResponseChunk {
     };
     finish_reason?: string | null;
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
 
 /**
@@ -82,7 +87,7 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
     super(config || {});
     this.authManager = new CopilotAuthManager(config?.githubToken);
     this.projectRoot = config?.projectRoot || process.cwd();
-    this.maxIterations = 20; // Maximum number of tool-calling iterations
+    this.maxIterations = 30; // Maximum number of tool-calling iterations
     logger.info(`GitHubCopilotAgentProvider initialized`);
   }
 
@@ -166,6 +171,28 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
     while (iteration < this.maxIterations && !isTaskComplete) {
       iteration++;
       logger.info(`[Iteration ${iteration}] Starting agentic loop iteration`);
+
+      // Prune old messages if context is getting too large (prevent 64K token limit)
+      // Keep: system message, last N messages while preserving tool call/response pairs
+      if (messages.length > 20) {
+        const systemMessage = messages[0];
+
+        // Find a safe cutoff point that doesn't break tool call/response pairs
+        // Work backwards from the end, keeping at least 15 messages
+        let safeCutoff = Math.max(1, messages.length - 15);
+
+        // Ensure we don't start with a 'tool' message (it needs its preceding 'assistant' with tool_calls)
+        while (safeCutoff < messages.length && messages[safeCutoff].role === 'tool') {
+          safeCutoff--;
+        }
+
+        const recentMessages = messages.slice(safeCutoff);
+        const prunedCount = messages.length - recentMessages.length - 1;
+        messages = [systemMessage, ...recentMessages];
+        logger.warn(
+          `[Context Pruning] Removed ${prunedCount} old messages to stay under token limit (kept ${recentMessages.length} recent messages)`
+        );
+      }
 
       // Call the model with current messages (full conversation history)
       const { content, toolCalls, finishReason, usage } = await this.callModel(model, messages);
@@ -662,6 +689,116 @@ Instead of calling tools repeatedly:
    */
   private getToolErrorSuggestion(toolName: string | undefined, errorMessage: string): string {
     if (!toolName) return 'Try a different approach or skip this step.';
+
+    // .NET project and test setup errors
+    if (toolName === 'execute_command') {
+      // Framework version mismatch between projects
+      if (
+        errorMessage.includes('You must install or update .NET') ||
+        (errorMessage.includes('Framework:') && errorMessage.includes('version'))
+      ) {
+        return `Framework version mismatch or missing runtime. CRITICAL: When updating framework versions:
+1. Check BOTH projects' target frameworks: read_file both .csproj files
+2. Update BOTH to the same framework version (e.g., both to net6.0 or both to net8.0)
+3. Main project: update_file to change <TargetFramework>
+4. Test project: update_file to change <TargetFramework>
+5. Restore: dotnet restore
+6. Rebuild solution: dotnet build
+7. Run tests: dotnet test
+
+DO NOT update only one project - this breaks project references!`;
+      }
+
+      // Missing or wrong project structure
+      if (
+        errorMessage.includes('Specify a project or solution file') ||
+        errorMessage.includes('does not contain a project or solution file')
+      ) {
+        return `No project/solution file found. For .NET projects, you need proper setup:
+1. Use list_directory to find existing .sln or .csproj files
+2. Create console app WITH -f net10.0: dotnet new console -n ProjectName -f net10.0
+3. Create test project WITH -f net10.0: dotnet new xunit -n ProjectName.Tests -f net10.0
+4. Create solution file (REQUIRED): dotnet new sln -n ProjectName
+5. Add projects to solution: dotnet sln add ProjectName/ProjectName.csproj ProjectName.Tests/ProjectName.Tests.csproj
+6. Add reference from test to main: cd ProjectName.Tests && dotnet add reference ../ProjectName/ProjectName.csproj
+7. Restore and test: dotnet restore && dotnet test
+
+IMPORTANT: Always use -f net10.0 flag when creating projects!`;
+      }
+
+      // Missing NuGet packages (XUnit, NUnit, etc.)
+      if (
+        errorMessage.includes(
+          'could not be found (are you missing a using directive or an assembly reference?)'
+        )
+      ) {
+        const isXunit = errorMessage.includes('Xunit');
+        const isNunit = errorMessage.includes('NUnit');
+        const framework = isXunit ? 'xunit' : isNunit ? 'nunit' : 'test framework';
+
+        return `Missing NuGet packages. For .NET test projects:
+1. Navigate to test project directory: cd ProjectName.Tests
+2. Restore/install packages: dotnet restore
+3. If still missing, explicitly add test packages:
+   ${
+     isXunit
+       ? 'dotnet add package xunit\n   dotnet add package xunit.runner.visualstudio\n   dotnet add package Microsoft.NET.Test.Sdk'
+       : isNunit
+         ? 'dotnet add package NUnit\n   dotnet add package NUnit3TestAdapter\n   dotnet add package Microsoft.NET.Test.Sdk'
+         : 'dotnet add package Microsoft.NET.Test.Sdk'
+   }
+4. Restore again: dotnet restore
+5. Build the test project: dotnet build
+6. Run tests: dotnet test`;
+      }
+
+      // Referenced project not found
+      if (
+        errorMessage.includes('The referenced project') &&
+        errorMessage.includes('does not exist')
+      ) {
+        return `Test project cannot find main project reference. Fix the project structure:
+1. Use list_directory to verify both projects exist
+2. Check .csproj file for correct relative path in <ProjectReference>
+3. Update reference: cd TestProject && dotnet add reference ../MainProject/MainProject.csproj
+4. Verify solution structure: dotnet sln list
+5. Rebuild: dotnet build`;
+      }
+
+      // Skipping project because it was not found
+      if (
+        errorMessage.includes('Skipping project') &&
+        errorMessage.includes('because it was not found')
+      ) {
+        return `Solution file references projects that don't exist (often due to incorrect paths or nested directories).
+1. Check for duplicate/nested directories: list_directory to see actual structure
+2. Remove old solution: remove the .sln file
+3. Create fresh solution: dotnet new sln -n ProjectName
+4. Add existing projects with correct paths: dotnet sln add correct/path/to/Project.csproj
+5. Verify: dotnet sln list`;
+      }
+
+      if (
+        errorMessage.includes('Cannot find module') ||
+        errorMessage.includes('MODULE_NOT_FOUND')
+      ) {
+        return `Node module not found. Try:
+1. Check if node_modules exists
+2. Run: npm install or npm ci
+3. Verify package.json exists`;
+      }
+
+      if (errorMessage.includes('playwright') && errorMessage.includes('not installed')) {
+        return `Playwright not installed. Run: npx playwright install`;
+      }
+
+      if (errorMessage.includes('connection refused') || errorMessage.includes('ECONNREFUSED')) {
+        return `Cannot connect to server. The application server may not be running.
+1. Check if the app needs to be started first
+2. Verify the correct port is being used
+3. Consider if this is a backend-only project that doesn't need a running server for tests`;
+      }
+    }
 
     // Windows command syntax errors
     if (errorMessage.includes('The syntax of the command is incorrect')) {

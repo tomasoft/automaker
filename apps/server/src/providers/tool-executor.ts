@@ -323,9 +323,31 @@ export class ToolExecutor {
     // Read current content
     const currentContent = await fs.readFile(fullPath, 'utf-8');
 
-    // Find and replace
+    // Find and replace with exact match
     if (!currentContent.includes(oldContent)) {
-      throw new Error('Old content not found in file. The file may have changed.');
+      // Enhanced error message with context to help agent understand what went wrong
+      const fileName = relPath.split('/').pop() || relPath;
+      const isCSharpFile = fileName.endsWith('.cs');
+      const hasEscapeSequences = oldContent.includes('\\');
+
+      let errorMsg = `Old content not found in file. The file may have changed.\n\n`;
+
+      // Provide helpful context based on file type
+      if (isCSharpFile && hasEscapeSequences) {
+        errorMsg += `💡 HINT: This is a C# file with escape sequences. Common issues:\n`;
+        errorMsg += `- For regex patterns, use verbatim strings: @"[a-z]+" instead of "[a-z]+"\n`;
+        errorMsg += `- Check if the content exists with different escaping\n`;
+        errorMsg += `- Instead of trying to match exact escape sequences, consider:\n`;
+        errorMsg += `  1. Read the file to see current content\n`;
+        errorMsg += `  2. Delete the problematic line\n`;
+        errorMsg += `  3. Add the corrected line back\n\n`;
+      }
+
+      // Show what we're looking for vs what's in the file (first 200 chars of each)
+      errorMsg += `Looking for (first 200 chars):\n${oldContent.substring(0, 200)}\n\n`;
+      errorMsg += `File contains (first 500 chars):\n${currentContent.substring(0, 500)}`;
+
+      throw new Error(errorMsg);
     }
 
     const updatedContent = currentContent.replace(oldContent, newContent);

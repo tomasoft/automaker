@@ -24,8 +24,21 @@ export {
 // Re-export types from @automaker/types
 export type { EnhancementMode, EnhancementExample } from '@automaker/types';
 
+// Language-specific context system
+export {
+  CSHARP_CONTEXT,
+  TYPESCRIPT_REACT_CONTEXT,
+  PYTHON_CONTEXT,
+  SQL_CONTEXT,
+  LANGUAGE_CONTEXTS,
+  detectProjectLanguages,
+  buildLanguageContext,
+} from './language-context.js';
+export type { LanguageContext, ErrorPattern, ProjectLanguage } from './language-context.js';
+
 // Default prompts
 export {
+  DOTNET_TESTING_INSTRUCTIONS,
   DEFAULT_AUTO_MODE_PLANNING_LITE,
   DEFAULT_AUTO_MODE_PLANNING_LITE_WITH_APPROVAL,
   DEFAULT_AUTO_MODE_PLANNING_SPEC,
@@ -34,6 +47,7 @@ export {
   DEFAULT_AUTO_MODE_FOLLOW_UP_PROMPT_TEMPLATE,
   DEFAULT_AUTO_MODE_CONTINUATION_PROMPT_TEMPLATE,
   DEFAULT_AUTO_MODE_PIPELINE_STEP_PROMPT_TEMPLATE,
+  DEFAULT_PIPELINE_TESTING_INSTRUCTIONS,
   DEFAULT_AUTO_MODE_PROMPTS,
   DEFAULT_AGENT_SYSTEM_PROMPT,
   DEFAULT_AGENT_PROMPTS,

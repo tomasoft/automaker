@@ -20,6 +20,127 @@ import { STATIC_PORT, SERVER_PORT } from '@automaker/types';
 
 /**
  * ========================================================================
+ * .NET TESTING INSTRUCTIONS (SHARED ACROSS ALL AGENTS)
+ * ========================================================================
+ * Users can customize the target framework version here (default: net10.0)
+ */
+
+export const DOTNET_TESTING_INSTRUCTIONS = `### For C#/.NET Applications:
+
+**🚨 MANDATORY .NET VERSION REQUIREMENT 🚨**
+**YOU MUST USE .NET 10.0 (net10.0) FOR ALL .NET PROJECTS!**
+**DO NOT CREATE PROJECTS WITH net6.0, net7.0, or net8.0 - THEY ARE OUTDATED!**
+
+**IMPORTANT: Follow this exact structure for .NET projects with tests:**
+
+1. **Check existing structure first** - use list_directory to see if .csproj and .sln files exist
+
+2. **If starting fresh, create proper structure using .NET 10.0 (MANDATORY):**
+
+   Step 1: Create main console app
+   \`\`\`
+   dotnet new console -n ProjectName -f net10.0
+   \`\`\`
+
+   Step 2: Create test project with xUnit
+   \`\`\`
+   dotnet new xunit -n ProjectName.Tests -f net10.0
+   \`\`\`
+
+   Step 3: Create solution
+   \`\`\`
+   dotnet new sln -n ProjectName
+   \`\`\`
+
+   Step 4: Add both projects to solution
+   \`\`\`
+   dotnet sln add ProjectName/ProjectName.csproj
+   dotnet sln add ProjectName.Tests/ProjectName.Tests.csproj
+   \`\`\`
+
+   Step 5: Add reference from test project to main project
+   \`\`\`
+   cd ProjectName.Tests
+   dotnet add reference ../ProjectName/ProjectName.csproj
+   cd ..
+   \`\`\`
+
+   Step 6: Restore packages
+   \`\`\`
+   dotnet restore
+   \`\`\`
+
+3. **Verify test project has required packages** - The .Tests.csproj should contain:
+   - Microsoft.NET.Test.Sdk (version 17.8.0+)
+   - xunit (version 2.6.2+)
+   - xunit.runner.visualstudio (version 2.5.4+)
+   - ProjectReference to main project
+
+4. **Write tests** following this pattern:
+   - Use Xunit namespace
+   - Reference main project namespace
+   - Use [Fact] attribute for test methods
+   - Follow Arrange-Act-Assert pattern
+
+5. **Build and run tests:**
+   \`\`\`
+   dotnet build    # Build first to catch compilation errors
+   dotnet test     # Run all tests in solution
+   \`\`\`
+
+**Critical: Avoid These Mistakes:**
+
+**WRONG Directory Structure (DO NOT DO THIS):**
+- Creating Program.cs at BOTH solution level AND inside project folder
+- Example of WRONG structure:
+  * PasswordUtility/ (solution folder)
+  * PasswordUtility/Program.cs (WRONG - at solution level)
+  * PasswordUtility/PasswordUtility/ (nested project folder - BAD!)
+  * PasswordUtility/PasswordUtility/Program.cs (creates duplicate!)
+
+**CORRECT Directory Structure:**
+- PasswordUtility/ (solution folder)
+- PasswordUtility/PasswordUtility.sln
+- PasswordUtility/PasswordUtility/ (project folder - NOT nested)
+- PasswordUtility/PasswordUtility/PasswordUtility.csproj
+- PasswordUtility/PasswordUtility/Program.cs (ONLY here - ONE file)
+- PasswordUtility/PasswordUtility.Tests/ (test project)
+- PasswordUtility/PasswordUtility.Tests/PasswordUtility.Tests.csproj
+
+**CRITICAL Rules:**
+- When you run 'dotnet new console -n ProjectName' it creates: ProjectName/ProjectName.csproj
+- Program.cs should ONLY exist inside the project folder: ProjectName/Program.cs
+- NEVER create ProjectName/ProjectName/ProjectName.csproj (double nested)
+- NEVER create Program.cs at the solution level
+- ALWAYS use list_directory tool to verify structure BEFORE creating files
+- If you see TWO Program.cs files or nested directories, DELETE the wrong ones first
+
+**Before Creating Files - Verify Structure:**
+Use list_directory \".\" to see the actual directory tree and ensure no duplicate files exist.
+
+**Common Mistakes:**
+1. Creating Program.cs at multiple levels (creates build errors)
+2. Nested project directories like ProjectName/ProjectName/ProjectName/
+3. Forgetting project reference from test to main
+4. Skipping dotnet restore
+
+**⚠️ .NET FRAMEWORK VERSION REQUIREMENTS (MANDATORY):**
+- **ALWAYS USE .NET 10.0** (net10.0) for ALL new .NET projects - this is NON-NEGOTIABLE!
+- **NEVER create projects with net6.0, net7.0, or net8.0** - these are outdated and cause issues
+- **ALL dotnet new commands MUST include: -f net10.0**
+- Examples:
+  - ✅ CORRECT: dotnet new console -n MyApp -f net10.0
+  - ❌ WRONG: dotnet new console -n MyApp (defaults to old version)
+  - ❌ WRONG: dotnet new console -n MyApp -f net6.0 (outdated)
+- **If you see ANY .csproj with <TargetFramework>net6.0</TargetFramework> or net7.0 or net8.0:**
+  1. Update BOTH main and test projects to net10.0
+  2. Use update_file to change <TargetFramework> in BOTH .csproj files
+  3. Run dotnet restore and dotnet build to verify
+- **NEVER change only one project's framework** - this breaks project references and the solution won't load
+`;
+
+/**
+ * ========================================================================
  * AUTO MODE PROMPTS
  * ========================================================================
  */
@@ -166,7 +287,9 @@ Generate a specification with an actionable task breakdown. WAIT for approval be
    - Sequential: T001, T002, T003, etc.
    - Description: Clear action (e.g., "Create user model", "Add API endpoint")
    - File: Primary file affected (helps with context)
-   - Order by dependencies (foundational tasks first)
+   - **Order by dependencies** (foundational tasks first)
+   - **For .NET projects**: ALWAYS create implementation files BEFORE test files
+   - **For .NET projects**: Structure tasks as: Setup → Implementation Classes → Tests → Build & Verify
 
    **EXAMPLES** (MUST follow this exact format):
    \`\`\`tasks
@@ -174,6 +297,22 @@ Generate a specification with an actionable task breakdown. WAIT for approval be
    - [ ] T002: Add API endpoint for user creation | File: src/routes/users.ts
    - [ ] T003: Write unit tests for user model | File: tests/models/user.test.ts
    \`\`\`
+
+   **.NET Project Example** (CORRECT ORDER - Implementation BEFORE Tests):
+   \`\`\`tasks
+   - [ ] T001: Create solution and projects with .NET 10.0 | File: ProjectName.sln
+   - [ ] T002: Create PasswordGenerator class with GeneratePassword method | File: ProjectName/PasswordGenerator.cs
+   - [ ] T003: Implement password length validation | File: ProjectName/PasswordGenerator.cs
+   - [ ] T004: Implement character type selection logic | File: ProjectName/PasswordGenerator.cs
+   - [ ] T005: Implement character exclusion rules | File: ProjectName/PasswordGenerator.cs
+   - [ ] T006: Create user input handler in Program.cs | File: ProjectName/Program.cs
+   - [ ] T007: Write unit tests for password length validation | File: ProjectName.Tests/PasswordGeneratorTests.cs
+   - [ ] T008: Write unit tests for character type selection | File: ProjectName.Tests/PasswordGeneratorTests.cs
+   - [ ] T009: Write unit tests for exclusion rules | File: ProjectName.Tests/PasswordGeneratorTests.cs
+   - [ ] T010: Build and run all tests to ensure functionality | File: ProjectName.sln
+   \`\`\`
+   
+   **KEY PRINCIPLE**: Implementation files (T002-T006) come BEFORE test files (T007-T009)
 
 6. **Verification**: How to confirm feature works
 
@@ -417,6 +556,89 @@ export const DEFAULT_AUTO_MODE_PIPELINE_STEP_PROMPT_TEMPLATE = `## Pipeline Step
 `;
 
 /**
+ * Default Testing Pipeline Step Instructions
+ * Used as a template for comprehensive testing after feature implementation
+ */
+export const DEFAULT_PIPELINE_TESTING_INSTRUCTIONS = `## Testing Step
+
+Please ensure comprehensive test coverage for the changes made in this feature.
+Use the appropriate testing framework according to what is being tested.
+
+### Framework-Specific Testing
+
+**For C#/.NET Code:**
+- Use **xUnit** testing framework
+- IMPORTANT: All .NET test projects must use .NET 10.0 (net10.0)
+- Use xUnit's parallelization features where possible for faster test execution
+- Example: dotnet new xunit -n ProjectName.Tests -f net10.0
+- Follow the structure outlined in the main .NET testing guidelines
+
+**For API/Backend:**
+- Use Scala (or appropriate framework for your API)
+- Test all endpoints with various scenarios
+- Include authentication/authorization tests
+
+**For UI:**
+- Use **Playwright** for end-to-end testing
+- Explore as much of the UI as possible
+- Test user interactions and workflows
+- Verify responsive design if applicable
+
+### Unit Tests
+- Write unit tests for all new functions and methods
+- Ensure edge cases are covered (null values, empty inputs, boundary conditions)
+- Test error handling paths and exception scenarios
+- Aim for high code coverage on new code (80%+ recommended)
+- Use descriptive test names that explain the scenario being tested
+
+### Integration Tests
+- Test interactions between components/modules
+- Verify API endpoints work correctly with real data
+- Test database operations if applicable (CRUD operations)
+- Test service integrations and external dependencies
+- Verify data flow through the entire system
+
+### Test Quality Standards
+- Tests should be readable and well-documented
+- Each test should have a single, clear purpose
+- Use descriptive test names that explain the scenario (e.g., \`GeneratePassword_ExcludesSpecifiedCharacters_ReturnsValidPassword\`)
+- Follow the Arrange-Act-Assert pattern consistently:
+  * **Arrange**: Set up test data and preconditions
+  * **Act**: Execute the code being tested
+  * **Assert**: Verify the expected outcome
+- Avoid test interdependencies (each test should run independently)
+- Use test fixtures and setup/teardown methods appropriately
+
+### Run Tests and Verify
+After writing tests, run the full test suite and ensure:
+1. All new tests pass
+2. No existing tests are broken (regression check)
+3. Test coverage meets project standards
+4. Tests run in reasonable time (optimize if needed)
+5. No flaky tests (tests should be deterministic)
+
+### For .NET Projects Specifically:
+\`\`\`bash
+# Build the solution first
+dotnet build
+
+# Run all tests
+dotnet test
+
+# Run with coverage (if configured)
+dotnet test --collect:"XPlat Code Coverage"
+\`\`\`
+
+### Summary Required
+Provide a summary including:
+- Number of tests added (unit vs integration)
+- Test coverage achieved
+- Any issues found during testing
+- Any edge cases or scenarios that need attention
+- Performance observations if relevant
+`;
+
+/**
  * Default Auto Mode prompts (from auto-mode-service.ts)
  */
 export const DEFAULT_AUTO_MODE_PROMPTS: ResolvedAutoModePrompts = {
@@ -467,6 +689,13 @@ You have access to several tools:
 3. Be proactive in suggesting improvements and best practices
 4. Ask questions when requirements are unclear
 5. Guide users toward good software design principles
+
+**CRITICAL - .NET Project Requirements:**
+When working with C#/.NET projects:
+- ALWAYS use .NET 10.0 (net10.0) for new projects: dotnet new console -n MyApp -f net10.0
+- NEVER create projects with net6.0, net7.0, or net8.0 - they are outdated
+- ALL dotnet new commands MUST include -f net10.0
+- When updating framework versions, update BOTH main and test projects to net10.0
 
 **CRITICAL - Port Protection:**
 NEVER kill or terminate processes running on ports ${STATIC_PORT} or ${SERVER_PORT}. These are reserved for the Automaker application itself. Killing these ports will crash Automaker and terminate your session.

@@ -85,7 +85,7 @@ export class LocalLLMAgentProvider extends BaseProvider {
     this.endpoint = config.endpoint || process.env.LOCAL_LLM_ENDPOINT || 'http://localhost:1234/v1';
     this.apiKey = config.apiKey || process.env.LOCAL_LLM_API_KEY || 'not-needed';
     this.projectRoot = config.projectRoot || process.cwd();
-    this.maxIterations = 20; // Maximum number of tool-calling iterations
+    this.maxIterations = 30; // Maximum number of tool-calling iterations
     logger.info(`LocalLLMAgentProvider initialized with endpoint: ${this.endpoint}`);
   }
 

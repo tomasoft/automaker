@@ -623,9 +623,30 @@ export class AutoModeService {
       }
 
       // Determine final status based on testing mode:
-      // - skipTests=false (automated testing): go directly to 'verified' (no manual verify needed)
+      // - skipTests=false (automated testing): check test results, verify only if tests passed
       // - skipTests=true (manual verification): go to 'waiting_approval' for manual review
-      const finalStatus = feature.skipTests ? 'waiting_approval' : 'verified';
+      let finalStatus: 'waiting_approval' | 'verified' = 'waiting_approval';
+
+      if (!feature.skipTests) {
+        // Automated testing mode - read agent output and check if tests passed
+        const featureDir = getFeatureDir(projectPath, featureId);
+        const outputPath = path.join(featureDir, 'agent-output.md');
+
+        try {
+          const agentOutput = await secureFs.readFile(outputPath, 'utf-8');
+          const testsPassed = this.checkTestResults(agentOutput.toString());
+          finalStatus = testsPassed ? 'verified' : 'waiting_approval';
+
+          if (!testsPassed) {
+            logger.warn(`Tests failed for feature ${featureId}, requiring manual verification`);
+          }
+        } catch (error) {
+          logger.error(`Failed to read agent output for test validation:`, error);
+          // If we can't read output, require manual verification
+          finalStatus = 'waiting_approval';
+        }
+      }
+
       await this.updateFeatureStatus(projectPath, featureId, finalStatus);
 
       // Record success to reset consecutive failure tracking
@@ -636,7 +657,7 @@ export class AutoModeService {
         passes: true,
         message: `Feature completed in ${Math.round(
           (Date.now() - tempRunningFeature.startTime) / 1000
-        )}s${finalStatus === 'verified' ? ' - auto-verified' : ''}`,
+        )}s${finalStatus === 'verified' ? ' - auto-verified (tests passed)' : finalStatus === 'waiting_approval' && !feature.skipTests ? ' - tests failed, needs verification' : ''}`,
         projectPath,
         model: tempRunningFeature.model,
         provider: tempRunningFeature.provider,
@@ -1079,9 +1100,30 @@ Address the follow-up instructions above. Review the previous work and make the 
       );
 
       // Determine final status based on testing mode:
-      // - skipTests=false (automated testing): go directly to 'verified' (no manual verify needed)
+      // - skipTests=false (automated testing): check test results, verify only if tests passed
       // - skipTests=true (manual verification): go to 'waiting_approval' for manual review
-      const finalStatus = feature?.skipTests ? 'waiting_approval' : 'verified';
+      let finalStatus: 'waiting_approval' | 'verified' = 'waiting_approval';
+
+      if (!feature?.skipTests) {
+        // Automated testing mode - read agent output and check if tests passed
+        const featureDir = getFeatureDir(projectPath, featureId);
+        const outputPath = path.join(featureDir, 'agent-output.md');
+
+        try {
+          const agentOutput = await secureFs.readFile(outputPath, 'utf-8');
+          const testsPassed = this.checkTestResults(agentOutput.toString());
+          finalStatus = testsPassed ? 'verified' : 'waiting_approval';
+
+          if (!testsPassed) {
+            logger.warn(`Tests failed for feature ${featureId}, requiring manual verification`);
+          }
+        } catch (error) {
+          logger.error(`Failed to read agent output for test validation:`, error);
+          // If we can't read output, require manual verification
+          finalStatus = 'waiting_approval';
+        }
+      }
+
       await this.updateFeatureStatus(projectPath, featureId, finalStatus);
 
       // Record success to reset consecutive failure tracking
@@ -1090,7 +1132,7 @@ Address the follow-up instructions above. Review the previous work and make the 
       this.emitAutoModeEvent('auto_mode_feature_complete', {
         featureId,
         passes: true,
-        message: `Follow-up completed successfully${finalStatus === 'verified' ? ' - auto-verified' : ''}`,
+        message: `Follow-up completed successfully${finalStatus === 'verified' ? ' - auto-verified (tests passed)' : finalStatus === 'waiting_approval' && !feature?.skipTests ? ' - tests failed, needs verification' : ''}`,
         projectPath,
         model,
         provider,
@@ -2111,34 +2153,166 @@ When done, wrap your final summary in <summary> tags like this:
 
 This helps parse your summary correctly in the output logs.`;
     } else {
-      // Automated testing - implement and verify with Playwright
+      // Automated testing - implement and verify with appropriate testing framework
       prompt += `
 ## Instructions
 
-Implement this feature by:
+**CRITICAL: Implementation Before Testing**
 1. First, explore the codebase to understand the existing structure
 2. Plan your implementation approach
-3. Write the necessary code changes
-4. Ensure the code follows existing patterns and conventions
+3. **Implement ALL functionality in the MAIN PROJECT** (e.g., PasswordUtility/PasswordGenerator.cs)
+4. **NEVER create mock/stub implementations in test files** - tests should reference real code
+5. **Verify implementation files exist** before writing tests that reference them
+6. Ensure the code follows existing patterns and conventions
 
-## Verification with Playwright (REQUIRED)
+**Common Mistake to Avoid:**
+❌ DO NOT create placeholder classes in test files (e.g., "public class PasswordGenerator { }" in test file)
+✅ DO create real implementations in the main project, THEN write tests that use them
 
-After implementing the feature, you MUST verify it works correctly using Playwright:
+## Verification with Tests (REQUIRED)
 
-1. **Create a temporary Playwright test** to verify the feature works as expected
-2. **Run the test** to confirm the feature is working
-3. **Delete the test file** after verification - this is a temporary verification test, not a permanent test suite addition
+After implementing the feature, you MUST verify it works correctly using an appropriate testing framework:
 
-Example verification workflow:
-\`\`\`bash
-# Create a simple verification test
-npx playwright test my-verification-test.spec.ts
+### For Web/UI Applications:
+- Use **Playwright** for end-to-end testing
+- Create a temporary test to verify UI functionality
+- Run: \`npx playwright test my-verification-test.spec.ts\`
 
-# After successful verification, delete the test
-rm my-verification-test.spec.ts
-\`\`\`
+### For C#/.NET Applications:
 
-The test should verify the core functionality of the feature. If the test fails, fix the implementation and re-test.
+**CRITICAL REQUIREMENTS - MUST FOLLOW:**
+- ✅ ALWAYS use .NET 10.0 (net10.0) for ALL .NET projects
+- ✅ ALWAYS create a solution (.sln) file
+- ✅ ALWAYS add all projects to the solution
+
+**IMPORTANT: Follow this exact structure for .NET projects with tests:**
+
+1. **Check existing structure first** - use list_directory to see if .csproj and .sln files exist
+
+2. **If starting fresh, create proper structure:**
+
+   Step 1: Create main console app **WITH -f net10.0 FLAG** (REQUIRED)
+   \`\`\`
+   dotnet new console -n ProjectName -f net10.0
+   \`\`\`
+   ⚠️ **NEVER omit the -f net10.0 flag!**
+
+   Step 2: Create test project with xUnit **WITH -f net10.0 FLAG** (REQUIRED)
+   \`\`\`
+   dotnet new xunit -n ProjectName.Tests -f net10.0
+   \`\`\`
+   ⚠️ **NEVER omit the -f net10.0 flag!**
+
+   Step 3: Create solution file (REQUIRED)
+   \`\`\`
+   dotnet new sln -n ProjectName
+   \`\`\`
+   ⚠️ **Every .NET project MUST have a .sln file!**
+
+   Step 4: Add both projects to solution
+   \`\`\`
+   dotnet sln add ProjectName/ProjectName.csproj
+   dotnet sln add ProjectName.Tests/ProjectName.Tests.csproj
+   \`\`\`
+
+   Step 5: Add reference from test project to main project
+   \`\`\`
+   cd ProjectName.Tests
+   dotnet add reference ../ProjectName/ProjectName.csproj
+   cd ..
+   \`\`\`
+
+   Step 6: Restore packages
+   \`\`\`
+   dotnet restore
+   \`\`\`
+
+3. **Verify test project has required packages** - The .Tests.csproj should contain:
+   - Microsoft.NET.Test.Sdk (version 17.8.0+)
+   - xunit (version 2.6.2+)
+   - xunit.runner.visualstudio (version 2.5.4+)
+   - ProjectReference to main project
+
+4. **IMPLEMENT FIRST, TEST SECOND:**
+   
+   Step A: **Create implementation classes in MAIN project** (e.g., ProjectName/PasswordGenerator.cs)
+   - Implement ALL methods and functionality
+   - Use proper namespaces (namespace ProjectName)
+   - Make classes public so tests can access them
+   
+   Step B: **Verify implementation exists** before writing tests
+   - Use read_file to check implementation file exists
+   - Ensure all required classes/methods are implemented
+   
+   Step C: **Write tests in TEST project** (ProjectName.Tests/)
+   - Reference main project namespace: using ProjectName;
+   - Use [Fact] or [Theory] attributes
+   - Follow Arrange-Act-Assert pattern
+   - **NEVER create stub/mock classes in test files**
+   - **For regex patterns:** ALWAYS use verbatim strings: \`@"[a-z]+"\` (NOT \`"[a-z]+"\`)
+   - **For file paths:** ALWAYS use verbatim strings: \`@"C:\\path\\to\\file"\` (NOT \`"C:\\\\path\\\\to\\\\file"\`)
+   - **String escaping:** Prefer \`@"..."\` over manual backslash escaping to avoid compilation errors
+   
+   **CRITICAL: Test Thoroughness Requirements:**
+   - ❌ NEVER write placeholder tests like \`Assert.True(true);\` with "Replace with actual assertions"
+   - ✅ Tests MUST validate ALL acceptance criteria from the spec
+   - ✅ Each test MUST have meaningful assertions that verify behavior
+   - ✅ Cover happy path, edge cases, AND error cases from the spec
+   - ✅ If spec says "must exclude character X", write a test that verifies X is excluded
+   - ✅ If spec says "must validate range 10-20", test valid values AND values outside range
+   - ❌ DO NOT consider tests "done" if they contain placeholder assertions
+   - Example of BAD test: \`Assert.True(true); // Replace with actual assertions\`
+   - Example of GOOD test: \`Assert.DoesNotContain('B', password); // Verify B is excluded per spec\`
+
+5. **C# Best Practices - FOLLOW THESE:**
+   - **Regex patterns:** \`var regex = new Regex(@"[0-9]+");\` ← Use @ prefix
+   - **Assert.Matches:** \`Assert.Matches(@"^[a-z]+$", result);\` ← Use @ prefix
+   - **File paths:** \`var path = @"C:\\Users\\file.txt";\` ← Use @ prefix
+   - **Why verbatim strings?** They prevent "Unrecognized escape sequence" errors
+   - If you get CS1009 errors (Unrecognized escape sequence), you forgot the @ prefix
+
+6. **Build and run tests:**
+   \`\`\`
+   dotnet build    # Build first to catch compilation errors
+   dotnet test     # Run all tests in solution
+   \`\`\`
+
+**Critical: Avoid These Mistakes:**
+- ❌ DO NOT create projects without -f net10.0 flag
+- ❌ DO NOT create .NET projects without a .sln file
+- ❌ DO NOT write tests before implementing the actual functionality
+- ❌ DO NOT create mock/placeholder classes in test files to make tests compile
+- ✅ DO implement functionality in main project FIRST, then write tests
+- ❌ DO NOT create nested ProjectName/ProjectName directories
+- ❌ DO NOT forget project reference from test to main (step 5 above)
+- ❌ DO NOT skip dotnet restore
+- ❌ DO NOT use any framework version other than net10.0 (unless explicitly told otherwise)
+- ✅ DO use list_directory to verify structure before creating files
+- ✅ DO always specify -f net10.0 when creating any .NET project
+- ✅ DO always create a .sln file and add all projects to it
+- **CRITICAL: If you update target framework**, update BOTH projects to the same version (net10.0)
+- **NEVER change only one project's framework** - this breaks project references and the solution won't load
+- ❌ **NEVER use regular strings for regex patterns** - you'll get CS1009 "Unrecognized escape sequence"
+- ✅ **ALWAYS use @"..." verbatim strings** for regex, file paths, and any string with backslashes
+- ❌ **DO NOT write \`"[a-z]+"\` or \`"C:\\\\path"\`** - these cause compilation errors
+- ✅ **DO write \`@"[a-z]+"\` and \`@"C:\\path"\`** - verbatim strings avoid escaping hell
+
+### For Node.js/TypeScript Applications:
+- Use **Vitest**, **Jest**, or the existing test framework
+- Create unit/integration tests for the functionality
+- Run: \`npm test\` or \`pnpm test\`
+
+### For Python Applications:
+- Use **pytest**, **unittest**, or the existing test framework
+- Create unit tests for the implemented functionality
+- Run: \`pytest\` or \`python -m unittest\`
+
+**Important Testing Guidelines:**
+1. **Explore first** - Check what testing framework is already set up in the project
+2. **Match the project type** - Use appropriate testing tools for the language/framework
+3. **Create proper project structure** - For .NET, ensure you have .sln and test .csproj files
+4. **Verify tests pass** - Fix implementation if tests fail
+5. **Clean up temporary tests** - Delete verification test files after successful verification
 
 When done, wrap your final summary in <summary> tags like this:
 
@@ -2152,7 +2326,7 @@ When done, wrap your final summary in <summary> tags like this:
 - [List of files]
 
 ### Verification Status
-- [Describe how the feature was verified with Playwright]
+- [Describe how the feature was verified and what tests were run]
 
 ### Notes for Developer
 - [Any important notes]
@@ -2935,10 +3109,16 @@ Implement all the changes described in the plan above.`;
             inputTokens += msg.usage.inputTokens || 0;
             outputTokens += msg.usage.outputTokens || 0;
           }
-          // Don't replace responseText - the accumulated content is the full history
-          // The msg.result is just a summary which would lose all tool use details
-          // Just ensure final write happens
-          scheduleWrite();
+
+          // Log tool executions (especially execute_command) to agent output for test validation
+          if (msg.result && typeof msg.result === 'object' && 'tool' in msg.result) {
+            const toolResult = msg.result as { tool?: string; output?: string; error?: string };
+            if (toolResult.tool === 'execute_command' && (toolResult.output || toolResult.error)) {
+              const toolLog = `\n\n---\n**Tool: ${toolResult.tool}**\n\n\`\`\`\n${toolResult.output || toolResult.error}\n\`\`\`\n---\n\n`;
+              responseText += toolLog;
+              scheduleWrite();
+            }
+          }
         }
       }
 
@@ -3139,5 +3319,98 @@ Begin implementing task ${task.id} now.`;
         );
       }
     });
+  }
+
+  /**
+   * Check agent output for test results to determine if automated tests passed
+   */
+  private checkTestResults(agentOutput: string): boolean {
+    logger.info('Checking test results in agent output...');
+
+    // First, check if tests were actually executed
+    const testExecutionPatterns = [
+      /npx playwright test/i,
+      /dotnet test/i,
+      /npm test/i,
+      /pnpm test/i,
+      /pytest/i,
+      /running.*tests?/i,
+      /test.*run/i,
+      /executing.*tests?/i,
+    ];
+
+    const testsWereRun = testExecutionPatterns.some((pattern) => {
+      if (pattern.test(agentOutput)) {
+        logger.info(`Found test execution pattern: ${pattern}`);
+        return true;
+      }
+      return false;
+    });
+
+    if (!testsWereRun) {
+      logger.warn(
+        'No evidence of test execution found in agent output - requiring manual verification'
+      );
+      return false;
+    }
+
+    logger.info('Test execution detected, checking results...');
+
+    // Common patterns indicating test failures
+    const failurePatterns = [
+      /\d+ failed/i,
+      /\d+ error/i,
+      /test.*failed/i,
+      /failed.*test/i,
+      /playwright.*\d+.*failed/i,
+      /\d+\s+failing/i,
+      /×.*failed/i,
+      /✗.*failed/i,
+      /error:.*test/i,
+      /tests?.*did not pass/i,
+      /connection.*refused/i, // Common when server isn't running
+      /cannot.*connect/i,
+      /ECONNREFUSED/i,
+      /does not contain a project or solution file/i, // .NET test errors
+      /no tests? found/i,
+      /test run failed/i,
+      /Skipping project.*because it was not found/i, // .NET solution issues
+      /The referenced project.*does not exist/i, // .NET reference issues
+      /could not be found \(are you missing a using directive/i, // .NET missing packages
+      /error CS\d+:/i, // C# compilation errors
+      /Build FAILED/i, // .NET build failures
+      /MSBuild version.*Build FAILED/i,
+    ];
+
+    // Check if any failure patterns match
+    const hasFailures = failurePatterns.some((pattern) => pattern.test(agentOutput));
+
+    if (hasFailures) {
+      logger.info('Detected test failures in agent output');
+      return false;
+    }
+
+    // Patterns indicating successful test execution
+    const successPatterns = [
+      /\d+ passed/i,
+      /all.*tests?.*passed/i,
+      /playwright.*\d+.*passed/i,
+      /✓.*passed/i,
+      /√.*passed/i,
+      /tests?.*successful/i,
+      /test run successful/i,
+      /passed!.*\d+/i,
+    ];
+
+    const hasSuccess = successPatterns.some((pattern) => pattern.test(agentOutput));
+
+    if (hasSuccess) {
+      logger.info('Detected successful test execution in agent output');
+      return true;
+    }
+
+    // If tests were run but no clear success indicator, require manual verification
+    logger.warn('Tests were run but results are unclear, requiring manual verification');
+    return false;
   }
 }

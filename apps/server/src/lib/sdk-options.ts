@@ -20,6 +20,7 @@ import os from 'os';
 import path from 'path';
 import { resolveModelString } from '@automaker/model-resolver';
 import { createLogger } from '@automaker/utils';
+import { detectProjectLanguages, buildLanguageContext } from '@automaker/prompts';
 
 const logger = createLogger('SdkOptions');
 import {
@@ -752,8 +753,43 @@ export async function createAutoModeOptions(
   // Determine the base system prompt (either from config or empty)
   const baseSystemPrompt = config.systemPrompt || '';
 
+  // Detect project language and inject expert context
+  let languageEnhancedPrompt = baseSystemPrompt;
+  try {
+    const fs = await import('fs');
+    const glob = await import('fast-glob');
+
+    // Scan project files to detect language (limit depth for performance)
+    const files = await glob.default('**/*', {
+      cwd: config.cwd,
+      ignore: ['**/node_modules/**', '**/bin/**', '**/obj/**', '**/.git/**', '**/dist/**'],
+      onlyFiles: true,
+      absolute: false,
+      dot: false,
+      stats: false,
+      deep: 3,
+    });
+
+    const projectLanguage = detectProjectLanguages(files as string[]);
+
+    if (projectLanguage) {
+      const languages = [projectLanguage.primary, ...(projectLanguage.secondary || [])];
+      const languageContext = buildLanguageContext(languages);
+
+      if (languageContext) {
+        languageEnhancedPrompt = baseSystemPrompt + languageContext;
+        logger.info(
+          `[Language Context] Injected expert context for: ${languages.join(', ')}${projectLanguage.framework ? ` (${projectLanguage.framework})` : ''}`
+        );
+      }
+    }
+  } catch (error) {
+    logger.warn('[Language Context] Failed to detect project language:', error);
+    // Fall back to base prompt without language context
+  }
+
   // Build skills options if enabled
-  const skillsResult = await buildSkillsOptions(config, baseSystemPrompt);
+  const skillsResult = await buildSkillsOptions(config, languageEnhancedPrompt);
 
   // Use enhanced system prompt if skills loaded, otherwise use base
   const finalSystemPrompt = skillsResult ? skillsResult.systemPrompt : baseSystemPrompt;
