@@ -2203,35 +2203,47 @@ After implementing the feature, you MUST verify it works correctly using an appr
    \`\`\`
    ⚠️ **NEVER omit the -f net10.0 flag!**
 
-   Step 3: Create solution file (REQUIRED)
+   Step 3: **Add required test packages** (CRITICAL - tests won't run without these)
+   \`\`\`
+   cd ProjectName.Tests
+   dotnet add package Microsoft.NET.Test.Sdk
+   dotnet add package xunit
+   dotnet add package xunit.runner.visualstudio
+   cd ..
+   \`\`\`
+   ⚠️ **Microsoft.NET.Test.Sdk is REQUIRED for dotnet test to work!**
+
+   Step 4: Create solution file (REQUIRED)
    \`\`\`
    dotnet new sln -n ProjectName
    \`\`\`
    ⚠️ **Every .NET project MUST have a .sln file!**
 
-   Step 4: Add both projects to solution
+   Step 5: Add both projects to solution
    \`\`\`
    dotnet sln add ProjectName/ProjectName.csproj
    dotnet sln add ProjectName.Tests/ProjectName.Tests.csproj
    \`\`\`
 
-   Step 5: Add reference from test project to main project
+   Step 6: Add reference from test project to main project
    \`\`\`
    cd ProjectName.Tests
    dotnet add reference ../ProjectName/ProjectName.csproj
    cd ..
    \`\`\`
 
-   Step 6: Restore packages
+   Step 7: Restore packages
    \`\`\`
    dotnet restore
    \`\`\`
 
-3. **Verify test project has required packages** - The .Tests.csproj should contain:
-   - Microsoft.NET.Test.Sdk (version 17.8.0+)
-   - xunit (version 2.6.2+)
-   - xunit.runner.visualstudio (version 2.5.4+)
+3. **Verify test project has required packages** - The .Tests.csproj MUST contain:
+   - **Microsoft.NET.Test.Sdk** (CRITICAL - without this, dotnet test fails)
+   - xunit
+   - xunit.runner.visualstudio
    - ProjectReference to main project
+   
+   **If dotnet test fails with "No test is available", you forgot Microsoft.NET.Test.Sdk**
 
 4. **IMPLEMENT FIRST, TEST SECOND:**
    
@@ -2276,6 +2288,27 @@ After implementing the feature, you MUST verify it works correctly using an appr
    dotnet build    # Build first to catch compilation errors
    dotnet test     # Run all tests in solution
    \`\`\`
+   
+   **❌ NEVER RUN INTERACTIVE CONSOLE APPLICATIONS DIRECTLY:**
+   - DO NOT run: \`dotnet run\` for console apps that prompt for user input
+   - DO NOT run: \`dotnet run --project ProjectName\` on interactive programs
+   - WHY? Interactive programs wait for input and will hang indefinitely
+   - ✅ INSTEAD: Verify functionality ONLY through \`dotnet test\`
+   - ✅ Tests should validate all behavior without requiring user interaction
+   - ✅ If program has Console.ReadLine() or prompts, ONLY validate via tests
+   - Example: Password generator that prompts → Test the PasswordGenerator class, NOT the interactive Program.cs
+   
+   **When to use dotnet run:**
+   - ✅ ONLY for non-interactive services/APIs/background tasks
+   - ✅ ONLY when you need to verify the program starts without errors
+   - ✅ ONLY for quick smoke tests (use timeout or background execution)
+   - ❌ NEVER for programs with Console.ReadLine(), user prompts, or interactive menus
+   
+   **Completion criteria:**
+   - ✅ \`dotnet build\` succeeds (no compilation errors)
+   - ✅ \`dotnet test\` succeeds (all tests pass)
+   - ❌ DO NOT require \`dotnet run\` to succeed for interactive console apps
+   - The program works if tests pass - manual execution is for users, not validation
 
 **Critical: Avoid These Mistakes:**
 - ❌ DO NOT create projects without -f net10.0 flag

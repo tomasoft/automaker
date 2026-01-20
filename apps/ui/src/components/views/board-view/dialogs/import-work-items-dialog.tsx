@@ -632,7 +632,8 @@ export function ImportWorkItemsDialog({
           const provider = getModelProvider(modelString);
           normalizedModel = addProviderPrefix(modelString, provider);
         } else {
-          normalizedModel = 'opus'; // Claude models don't need prefix
+          // Fallback to sonnet (same as Add Feature dialog)
+          normalizedModel = 'sonnet';
         }
 
         const featureId = `feature-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

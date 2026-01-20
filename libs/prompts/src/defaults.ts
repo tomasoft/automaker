@@ -58,22 +58,43 @@ export const DOTNET_TESTING_INSTRUCTIONS = `### For C#/.NET Applications:
    dotnet sln add ProjectName.Tests/ProjectName.Tests.csproj
    \`\`\`
 
-   Step 5: Add reference from test project to main project
+   Step 3: **Add required test packages** (CRITICAL - tests won't run without these)
+   \`\`\`
+   cd ProjectName.Tests
+   dotnet add package Microsoft.NET.Test.Sdk
+   dotnet add package xunit
+   dotnet add package xunit.runner.visualstudio
+   cd ..
+   \`\`\`
+   ⚠️ **Microsoft.NET.Test.Sdk is REQUIRED for dotnet test to work!**
+
+   Step 4: Create solution file
+   \`\`\`
+   dotnet new sln -n ProjectName
+   \`\`\`
+
+   Step 5: Add both projects to solution
+   \`\`\`
+   dotnet sln add ProjectName/ProjectName.csproj
+   dotnet sln add ProjectName.Tests/ProjectName.Tests.csproj
+   \`\`\`
+
+   Step 6: Add reference from test project to main project
    \`\`\`
    cd ProjectName.Tests
    dotnet add reference ../ProjectName/ProjectName.csproj
    cd ..
    \`\`\`
 
-   Step 6: Restore packages
+   Step 7: Restore packages
    \`\`\`
    dotnet restore
    \`\`\`
 
-3. **Verify test project has required packages** - The .Tests.csproj should contain:
-   - Microsoft.NET.Test.Sdk (version 17.8.0+)
-   - xunit (version 2.6.2+)
-   - xunit.runner.visualstudio (version 2.5.4+)
+3. **Verify test project has required packages** - The .Tests.csproj MUST contain:
+   - **Microsoft.NET.Test.Sdk** (CRITICAL - without this, "dotnet test" will fail with "No test is available")
+   - xunit
+   - xunit.runner.visualstudio
    - ProjectReference to main project
 
 4. **Write tests** following this pattern:

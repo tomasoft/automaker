@@ -113,14 +113,55 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
         });
       }
 
-      // Add user prompt
+      // Add user prompt with platform-specific context
       const promptText = Array.isArray(prompt)
         ? prompt.map((p) => (typeof p === 'string' ? p : p.text || '')).join('\n')
         : prompt;
 
+      // Inject platform-specific guidance
+      const isWindows = process.platform === 'win32';
+      const platformGuidance = isWindows
+        ? '\n\n**CRITICAL - Platform Context:**\nYou are running on WINDOWS. Use PowerShell commands only:\n- ✅ Get-Content, Select-String, Select-Object\n- ❌ NEVER use: sed, awk, head, tail, grep (these are Unix/Linux commands)\n- File paths use backslashes: C:\\path\\to\\file\n- Use PowerShell syntax for all commands'
+        : '';
+
+      // Detect simple tasks that should complete quickly
+      const simpleTaskKeywords = [
+        'password',
+        'calculator',
+        'hello world',
+        'todo list',
+        'counter',
+        'greeting',
+        'simple',
+        'basic',
+        'utility',
+        'proof of concept',
+        'demo',
+      ];
+      const isSimpleTask = simpleTaskKeywords.some((keyword) =>
+        promptText.toLowerCase().includes(keyword)
+      );
+
+      const simpleTaskGuidance = isSimpleTask
+        ? `\n\n**PERFORMANCE MODE - Simple Task Detected:**
+This is a SIMPLE task that should complete in < 1 minute with minimal code.
+
+MANDATORY RULES:
+- ✅ Generate MINIMAL code (< 50 lines per file)
+- ✅ Create skeleton first, verify it works, then extend
+- ✅ Prefer simple, obvious solutions over clever ones
+- ✅ Maximum 3-5 basic tests initially
+- ❌ NO exploration phase - execute immediately
+- ❌ NO reading examples or documentation
+- ❌ NO over-engineering or complex patterns
+
+Expected: 3-4 iterations, 30 seconds total time.
+If you exceed 5 iterations or 1 minute, you are over-engineering.`
+        : '';
+
       messages.push({
         role: 'user',
-        content: promptText,
+        content: promptText + platformGuidance + simpleTaskGuidance,
       });
 
       // Strip provider prefix for the actual API call
@@ -168,8 +209,41 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
     let explorationCount = 0;
     const maxExplorationCalls = 3; // Hard limit
 
+    // Track repetitive errors to detect when agent is stuck
+    const recentErrors: Array<{ error: string; iteration: number }> = [];
+    const maxSameError = 3; // If same error 3 times, force strategy change
+
+    // Track time and compilation failures for intervention
+    const startTime = Date.now();
+    const maxDuration = 120000; // 2 minutes
+    let compilationFailures = 0;
+    const maxCompilationFailures = 3;
+
     while (iteration < this.maxIterations && !isTaskComplete) {
       iteration++;
+
+      // Check if taking too long - inject urgency
+      const elapsed = Date.now() - startTime;
+      if (elapsed > maxDuration && iteration > 5) {
+        logger.warn(
+          `[Time Limit] Task has been running for ${Math.round(elapsed / 1000)}s - forcing simplification`
+        );
+        messages.push({
+          role: 'user',
+          content: `⏰ TIME LIMIT WARNING: This task has been running for ${Math.round(elapsed / 1000)} seconds.
+
+For a simple password utility, this should take < 30 seconds total.
+
+**You are overthinking this. Simplify drastically:**
+- If files have errors: DELETE and recreate with minimal code
+- If stuck debugging: Start over with simpler approach
+- Generate small files (50 lines), not large ones (800 lines)
+- Stop exploring and start executing
+
+**Every iteration from now on should move toward completion, not exploration.**`,
+        });
+      }
+
       logger.info(`[Iteration ${iteration}] Starting agentic loop iteration`);
 
       // Prune old messages if context is getting too large (prevent 64K token limit)
@@ -246,6 +320,62 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
       logger.info(
         `[Iteration ${iteration}] Checking tool calls - toolCalls: ${JSON.stringify(toolCalls)}, length: ${toolCalls?.length}`
       );
+
+      // Check if output was truncated (finish_reason: 'length')
+      if (finishReason === 'length' && toolCalls && toolCalls.length > 0) {
+        logger.warn(
+          `[Iteration ${iteration}] Output truncated (finish_reason: 'length'). Checking tool calls...`
+        );
+
+        // Check if tool calls look incomplete
+        const hasIncompleteToolCall = toolCalls.some((tc) => {
+          const args = tc.function?.arguments || '';
+          return args.length < 20 || !args.includes('}') || args === '{}';
+        });
+
+        if (hasIncompleteToolCall) {
+          logger.error('[Output Truncation] Detected incomplete tool call due to max_tokens limit');
+
+          yield {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: '⚠️ Output truncated - tool call incomplete' }],
+            },
+          };
+
+          messages.push({
+            role: 'assistant',
+            content: 'Attempting to create file but output was truncated.',
+            tool_calls: toolCalls,
+          });
+
+          messages.push({
+            role: 'tool',
+            content: `🚨 OUTPUT TRUNCATED - Tool call cut off mid-generation!
+
+**What happened:**
+- Hit max_tokens output limit while generating tool call
+- Tool call JSON incomplete: ${JSON.stringify(toolCalls[0]?.function?.arguments || '').slice(0, 100)}...
+
+**FIX - Create files incrementally:**
+
+Instead of trying to generate a 2000-line file in one shot:
+✅ create_file with minimal skeleton (class + 1 test method)
+✅ Then update_file to add more methods one at a time
+
+OR even better:
+✅ Generate smaller, more focused test files
+✅ Focus on quality over quantity (10 good tests > 50 mediocre tests)
+
+**Do NOT retry the same massive file generation - it will truncate again.**`,
+            tool_call_id: toolCalls[0]?.id || 'truncated',
+          });
+
+          continue; // Skip execution of incomplete tool calls, go to next iteration
+        }
+      }
+
       if (!toolCalls || toolCalls.length === 0) {
         logger.info(`[Iteration ${iteration}] No tool calls and no content, finishing`);
 
@@ -370,6 +500,48 @@ Instead of calling tools repeatedly:
         }
       }
 
+      // Validate file sizes before execution - prevent massive broken files
+      for (const tc of toolCallsToExecute) {
+        if (tc.function.name === 'create_file' || tc.function.name === 'update_file') {
+          try {
+            const args = JSON.parse(tc.function.arguments);
+            const content = args.content || args.newCode || '';
+            const lineCount = content.split('\n').length;
+
+            if (lineCount > 200) {
+              logger.warn(
+                `[File Size Warning] ${tc.function.name} has ${lineCount} lines (recommended: < 200)`
+              );
+
+              // Inject warning message to guide agent toward incremental approach
+              messages.push({
+                role: 'user',
+                content: `⚠️ FILE SIZE WARNING: You're trying to ${tc.function.name} with ${lineCount} lines of code.
+
+This is a code smell that indicates:
+- Over-engineering for simple requirements
+- Trying to do too much in one file
+- High likelihood of syntax errors in large blocks
+
+RECOMMENDED APPROACH:
+1. Create a MINIMAL skeleton first (< 50 lines)
+2. Verify it compiles successfully
+3. Add functionality incrementally with update_file
+
+For test files:
+- Start with 3-5 basic tests (10-15 lines each)
+- Verify they pass
+- Add more tests incrementally
+
+Proceeding with your large file, but STRONGLY recommend simplifying.`,
+              });
+            }
+          } catch (e) {
+            // Ignore JSON parse errors here - will be caught by tool executor
+          }
+        }
+      }
+
       // CRITICAL: Add assistant message with tool_calls to conversation history
       // This is required by OpenAI/Copilot API - tool results must follow an assistant message with tool_calls
       messages.push({
@@ -380,13 +552,174 @@ Instead of calling tools repeatedly:
 
       const toolResults = await toolExecutor.executeTools(toolCallsToExecute);
 
+      // Stream tool execution results to UI immediately
+      for (const tc of toolCallsToExecute) {
+        const toolName = tc.function.name;
+        const result = toolResults.find((r) => r.tool_call_id === tc.id);
+        const status = result?.success ? '✅' : '❌';
+
+        yield {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: `${status} ${toolName}` }],
+          },
+        };
+      }
+
       // Add tool results to messages with enhanced error context
       for (const result of toolResults) {
         // For failed tools, provide helpful error context to the model
         let toolContent = result.output;
+        let sameErrorCount = 0; // Declare before use
+
         if (!result.success) {
           const toolName = toolCalls.find((tc) => tc.id === result.tool_call_id)?.function.name;
-          toolContent = `ERROR: Tool '${toolName}' failed: ${result.output}\n\nSuggestion: ${this.getToolErrorSuggestion(toolName, result.output)}`;
+
+          // Track C# compilation failures
+          if (result.output.includes('error CS') && result.output.includes('Build FAILED')) {
+            compilationFailures++;
+            logger.warn(
+              `[Compilation Failure] Count: ${compilationFailures}/${maxCompilationFailures}`
+            );
+          }
+
+          // Track repetitive errors to detect when agent is stuck in a loop
+          const errorSignature = this.getErrorSignature(result.output);
+          if (errorSignature) {
+            recentErrors.push({ error: errorSignature, iteration });
+
+            // Check if same error occurred multiple times recently
+            sameErrorCount = recentErrors.filter((e) => e.error === errorSignature).length;
+
+            if (sameErrorCount >= maxSameError) {
+              logger.error(
+                `[Repetitive Error] Same error occurred ${sameErrorCount} times: ${errorSignature}`
+              );
+              toolContent = `🚨 CRITICAL: You've encountered the SAME error ${sameErrorCount} times in a row!
+
+Error: ${errorSignature}
+
+**YOU ARE STUCK IN A LOOP. Your current approach is NOT working.**
+
+What you tried (iterations ${recentErrors
+                .filter((e) => e.error === errorSignature)
+                .map((e) => e.iteration)
+                .join(', ')}):
+- Did not fix the issue
+- Made the same mistake multiple times
+- Wasted iterations on the same failed approach
+
+**STOP and change strategy:**
+
+1. ❌ DO NOT try the same fix again with slight variations
+2. ❌ DO NOT adjust escape characters manually
+3. ✅ DO read the file to see what's actually wrong
+4. ✅ DO try a COMPLETELY DIFFERENT approach
+5. ✅ DO ask yourself: "Why isn't my fix working?"
+
+**For C# errors specifically:**
+- If CS1009 (escape sequence): Use verbatim strings @"..." - this is non-negotiable
+- If update_file fails: Read file, delete problematic line, create new line
+- If compilation fails 3+ times: Delete the file and recreate it correctly
+
+**Act now or this task will fail at iteration ${this.maxIterations}.**
+
+Original error: ${result.output}`;
+
+              // Clear old errors to give fresh start after intervention
+              recentErrors.length = 0;
+            }
+          }
+
+          // Check if too many compilation failures - force simplification
+          if (compilationFailures >= maxCompilationFailures) {
+            toolContent = `🚨 CRITICAL: ${compilationFailures} COMPILATION FAILURES IN A ROW!
+
+**Your approach is fundamentally broken. STOP debugging and START OVER.**
+
+**What's happening:**
+- You've had ${compilationFailures} C# compilation failures
+- The file you generated is broken beyond repair
+- Debugging line-by-line is wasting time
+
+**MANDATORY FIX - Do this NOW:**
+1. delete_file PasswordUtility.Tests/PasswordGeneratorTests.cs
+2. create_file PasswordUtility.Tests/PasswordGeneratorTests.cs with SIMPLE, MINIMAL content:
+   - Just 3-5 basic tests (NOT 800 lines!)
+   - Use @\"...\" for ALL strings with special characters
+   - Keep each test to 10 lines max
+   - Focus on ONE thing per test
+
+**Example of what to create:**
+\`\`\`csharp
+using Xunit;
+using PasswordUtility;
+
+public class PasswordGeneratorTests
+{
+    [Fact]
+    public void GeneratePassword_ReturnsCorrectLength()
+    {
+        var gen = new PasswordGenerator();
+        var pwd = gen.GeneratePassword(12, true, true, true, true);
+        Assert.Equal(12, pwd.Length);
+    }
+    // Add 2-3 more simple tests
+}
+\`\`\`
+
+**DO NOT:**
+- Try to fix the current file (it's too broken)
+- Generate hundreds of tests
+- Use complex logic
+
+**DELETE AND RECREATE SIMPLY. NOW.**
+
+Original error: ${result.output.substring(0, 500)}`;
+            compilationFailures = 0; // Reset after intervention
+          }
+          // Standard error suggestion if not repetitive
+          else if (sameErrorCount < maxSameError) {
+            const errorSuggestion = this.getToolErrorSuggestion(toolName, result.output);
+
+            // Special handling for JSON parse errors in tool arguments
+            if (
+              result.output.includes('Expected') &&
+              result.output.includes('JSON') &&
+              (toolName === 'update_file' || toolName === 'create_file')
+            ) {
+              toolContent = `ERROR: Tool '${toolName}' failed due to JSON escaping issues: ${result.output}
+
+🚨 CRITICAL: You're trying to pass large code blocks through JSON strings, which is EXTREMELY fragile!
+
+**The problem:**
+- Your old_content/new_content has 1000+ characters
+- Contains quotes, newlines (\\n), and special characters
+- One missing escape breaks the entire JSON
+
+**IMMEDIATE FIX - Use create_file instead:**
+
+Instead of:
+❌ update_file with massive old_content (FRAGILE - will fail again)
+
+Do this:
+✅ delete_file PasswordUtility.Tests/PasswordGeneratorTests.cs
+✅ create_file PasswordUtility.Tests/PasswordGeneratorTests.cs (with full content)
+
+This avoids JSON escaping hell completely.
+
+**Alternative (if you MUST use update_file):**
+- Keep old_content SMALL (3-10 lines max)
+- Make multiple small updates instead of one giant replacement
+- But seriously, just use delete + create_file for full file replacements
+
+Original error: ${result.output}`;
+            } else {
+              toolContent = `ERROR: Tool '${toolName}' failed: ${result.output}\n\nSuggestion: ${errorSuggestion}`;
+            }
+          }
+
           logger.warn(`[Tool Error] ${toolName}: ${result.output}`);
         }
 
@@ -440,9 +773,20 @@ Instead of calling tools repeatedly:
         const normalizedResult = this.normalizeTaskFormat(accumulatedText);
 
         const hasUsage = totalInputTokens > 0 || totalOutputTokens > 0;
-        logger.info(
-          `[GitHub Copilot] Task complete - yielding result with usage: ${hasUsage}, input: ${totalInputTokens}, output: ${totalOutputTokens}`
-        );
+
+        // Log performance metrics
+        const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
+        logger.info(`
+╔════════════════════════════════════════════════════════════════════════════╗
+║ TASK COMPLETED                                                             ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║ Iterations:     ${iteration.toString().padEnd(58)} ║
+║ Duration:       ${elapsedSeconds}s${' '.repeat(55 - elapsedSeconds.toString().length)} ║
+║ Input Tokens:   ${totalInputTokens.toLocaleString().padEnd(58)} ║
+║ Output Tokens:  ${totalOutputTokens.toLocaleString().padEnd(58)} ║
+║ Total Tokens:   ${(totalInputTokens + totalOutputTokens).toLocaleString().padEnd(58)} ║
+╚════════════════════════════════════════════════════════════════════════════╝
+        `);
 
         yield {
           type: 'result',
@@ -504,8 +848,8 @@ Instead of calling tools repeatedly:
       model: mappedModel,
       messages,
       tools: ALL_TOOLS,
-      temperature: 0.3, // Lower temperature for more focused agent behavior
-      max_tokens: 4096,
+      temperature: 0.1, // Low temperature for deterministic, concise agent behavior
+      max_tokens: 16384, // High enough to prevent truncation of large tool calls (e.g., create_file with full file content)
       stream: true,
     };
 
@@ -532,6 +876,50 @@ Instead of calling tools repeatedly:
 
     if (!response.ok) {
       const errorText = await response.text();
+
+      // If it's an invalid tool call format error, log the request body for debugging
+      if (
+        errorText.includes('invalid_tool_call_format') ||
+        errorText.includes('Invalid JSON format')
+      ) {
+        logger.error('[GitHub Copilot API] Invalid tool call format detected');
+        logger.error('[GitHub Copilot API] Request messages count:', requestBody.messages.length);
+
+        // Log the last few messages to see what led to this
+        const lastMessages = requestBody.messages.slice(-3);
+        logger.error(
+          '[GitHub Copilot API] Last 3 messages:',
+          JSON.stringify(lastMessages, null, 2)
+        );
+
+        // Provide actionable error message
+        const detailedError = `GitHub Copilot rejected your tool call due to malformed JSON.
+
+**Most Common Causes:**
+1. Trying to pass huge code blocks (1000+ chars) through update_file old_content
+2. Missing escape characters in JSON strings
+3. Trailing commas in JSON objects
+4. Quotes inside string values not escaped properly
+
+**What happened:**
+- Your PREVIOUS tool call failed with a JSON error
+- You tried to fix it with ANOTHER tool call
+- That new tool call ALSO had malformed JSON
+- GitHub Copilot rejected it before even processing
+
+**How to Fix This Loop:**
+1. ✅ Use create_file instead of update_file for full file replacements
+2. ✅ Keep old_content in update_file small (< 20 lines)
+3. ✅ Use delete_file + create_file for complex updates
+4. ❌ Don't try to escape massive code blocks manually
+
+See the last 3 messages in logs to see what you tried to send.
+
+Original error: ${errorText}`;
+
+        throw new Error(detailedError);
+      }
+
       throw new Error(`GitHub Copilot API error: ${response.statusText}\n${errorText}`);
     }
 
@@ -639,6 +1027,38 @@ Instead of calling tools repeatedly:
     // Convert buffer to final tool calls if we have any
     if (toolCallsBuffer.size > 0 && !toolCalls) {
       toolCalls = Array.from(toolCallsBuffer.values()) as ToolCall[];
+
+      // Validate tool call arguments are valid JSON
+      for (const toolCall of toolCalls) {
+        if (toolCall.function?.arguments) {
+          try {
+            JSON.parse(toolCall.function.arguments);
+          } catch (err) {
+            logger.error(
+              `[Tool Call Validation] Invalid JSON in ${toolCall.function.name} arguments:`,
+              toolCall.function.arguments
+            );
+            logger.error('[Tool Call Validation] Parse error:', err);
+
+            // Try to sanitize common issues
+            let sanitized = toolCall.function.arguments;
+
+            // Remove trailing commas before closing braces/brackets
+            sanitized = sanitized.replace(/,(\s*[}\]])/g, '$1');
+
+            // Try parsing again
+            try {
+              JSON.parse(sanitized);
+              logger.warn(
+                `[Tool Call Validation] Sanitized arguments for ${toolCall.function.name}`
+              );
+              toolCall.function.arguments = sanitized;
+            } catch (sanitizeErr) {
+              logger.error('[Tool Call Validation] Sanitization failed, arguments still invalid');
+            }
+          }
+        }
+      }
     }
 
     logger.info('Parsed response:', {
@@ -682,6 +1102,35 @@ Instead of calling tools repeatedly:
     };
 
     return modelMap[model.toLowerCase()] || model;
+  }
+
+  /**
+   * Get error signature for tracking repetitive failures
+   */
+  private getErrorSignature(errorMessage: string): string | null {
+    // Extract key error patterns that indicate the same issue
+
+    // C# compilation errors - extract error code and file
+    const csErrorMatch = errorMessage.match(/(CS\d{4}).*?([^\\\/]+\.cs)/);
+    if (csErrorMatch) {
+      return `${csErrorMatch[1]}_${csErrorMatch[2]}`; // e.g., "CS1009_PasswordGeneratorTests.cs"
+    }
+
+    // dotnet command failures
+    if (errorMessage.includes('Command failed with exit code')) {
+      if (errorMessage.includes('dotnet test')) return 'dotnet_test_failed';
+      if (errorMessage.includes('dotnet build')) return 'dotnet_build_failed';
+      if (errorMessage.includes('dotnet restore')) return 'dotnet_restore_failed';
+    }
+
+    // File operation errors
+    if (errorMessage.includes('Old content not found')) return 'update_file_not_found';
+    if (errorMessage.includes('ENOENT')) return 'file_not_found';
+
+    // Generic failures
+    if (errorMessage.includes('No test is available')) return 'no_tests_available';
+
+    return null; // Not a trackable error
   }
 
   /**
@@ -750,6 +1199,109 @@ IMPORTANT: Always use -f net10.0 flag when creating projects!`;
 4. Restore again: dotnet restore
 5. Build the test project: dotnet build
 6. Run tests: dotnet test`;
+      }
+
+      // C# regex/string escaping errors - IMMEDIATE FIX REQUIRED
+      if (
+        errorMessage.includes('CS1009') || // Unrecognized escape sequence
+        (errorMessage.includes('CS1525') && errorMessage.includes('Invalid expression term')) ||
+        (errorMessage.includes('CS1010') && errorMessage.includes('Newline in constant'))
+      ) {
+        const fileMatch = errorMessage.match(/([^\\\/]+\.cs)\(/);
+        const fileName = fileMatch ? fileMatch[1] : 'the C# file';
+
+        return `🚨 CRITICAL: C# String Escape Errors - FIX IMMEDIATELY 🚨
+
+You wrote a regex pattern or string WITHOUT the @ prefix. This causes CS1009/CS1525 errors.
+
+**THE FIX (apply RIGHT NOW, not in 10 iterations):**
+
+1. Read the file to see line 57 (or the error line): read_file ${fileName}
+2. Find the pattern that looks like: Assert.Matches("[regex]", ...)
+3. Replace with: Assert.Matches(@"[regex]", ...)  ← ADD @ BEFORE THE QUOTE
+
+**Examples of WRONG vs CORRECT:**
+
+❌ WRONG (causes CS1009):
+Assert.Matches("[0-9]+", password);
+var path = "C:\\\\Users\\\\file.txt";
+var pattern = "[a-zA-Z]+";
+
+✅ CORRECT (use @ prefix):
+Assert.Matches(@"[0-9]+", password);
+var path = @"C:\\Users\\file.txt";
+var pattern = @"[a-zA-Z]+";
+
+**DO THIS RIGHT NOW:**
+1. Read ${fileName} to see the current content
+2. Find ALL regex patterns and file paths (look for patterns with [ ] or \\\\)
+3. Add @ before EVERY string that contains: [ ] \\\\ or regex characters
+4. Build again: dotnet build
+
+DO NOT try to escape backslashes manually. Use @ prefix. This is C# 101.`;
+      }
+
+      // Wrong dotnet CLI syntax - immediate correction
+      if (
+        errorMessage.includes('Invalid option') &&
+        (errorMessage.includes('--framework') || errorMessage.includes('--target-framework'))
+      ) {
+        return `🚨 WRONG DOTNET CLI SYNTAX 🚨
+
+You used: --framework net7.0
+Correct:  -f net10.0
+
+**CRITICAL FIXES:**
+1. The flag is -f NOT --framework
+2. The version MUST be net10.0 (not net7.0, not net8.0)
+
+**Correct commands:**
+✅ dotnet new console -n ProjectName -f net10.0
+✅ dotnet new xunit -n ProjectName.Tests -f net10.0
+
+**NEVER use:**
+❌ dotnet new console -n ProjectName --framework net7.0
+❌ dotnet new console -n ProjectName -f net8.0
+
+**Every .NET project you create MUST use -f net10.0**`;
+      }
+
+      // Microsoft.NET.Test.Sdk used as SDK instead of PackageReference
+      if (
+        (errorMessage.includes('Could not resolve SDK "Microsoft.NET.Test.Sdk"') ||
+          errorMessage.includes("The SDK 'Microsoft.NET.Test.Sdk' specified could not be found")) &&
+        errorMessage.includes('.csproj')
+      ) {
+        return `🚨 CRITICAL .CSPROJ ERROR - Microsoft.NET.Test.Sdk IS NOT AN SDK! 🚨
+
+YOU ARE USING IT WRONG. This is a NuGet PACKAGE, not an SDK.
+
+❌ WRONG - Using as SDK:
+<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Microsoft.NET.Test.Sdk" Version="17.11.1" />  ← WRONG!
+</Project>
+
+✅ CORRECT - Using as PackageReference:
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+</Project>
+
+**FIX NOW:**
+1. Read the .csproj file that has the error
+2. Remove any <Sdk Name="Microsoft.NET.Test.Sdk" /> tags
+3. Add <ItemGroup> with <PackageReference> entries as shown above
+4. Run: dotnet restore
+5. Run: dotnet build
+6. Run: dotnet test
+
+This is a STRUCTURAL ERROR in the .csproj file. Fix the XML structure.`;
       }
 
       // Referenced project not found
