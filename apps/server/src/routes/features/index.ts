@@ -14,6 +14,7 @@ import { createDeleteHandler } from './routes/delete.js';
 import { createAgentOutputHandler, createRawOutputHandler } from './routes/agent-output.js';
 import { createGenerateTitleHandler } from './routes/generate-title.js';
 import { createAnalyzeFeatureImpactRoute } from './routes/analyze-impact.js';
+import planningFilesRouter from './routes/planning-files.js';
 import type { SettingsService } from '../../services/settings-service.js';
 
 export function createFeaturesRoutes(
@@ -44,6 +45,9 @@ export function createFeaturesRoutes(
       createAnalyzeFeatureImpactRoute(settingsService)
     );
   }
+
+  // Planning files routes
+  router.use('', planningFilesRouter);
 
   return router;
 }

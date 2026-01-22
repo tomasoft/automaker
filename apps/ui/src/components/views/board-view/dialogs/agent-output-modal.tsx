@@ -34,7 +34,7 @@ interface AgentOutputModalProps {
   projectPath?: string;
 }
 
-type ViewMode = 'summary' | 'parsed' | 'raw' | 'changes';
+type ViewMode = 'summary' | 'parsed' | 'raw' | 'changes' | 'plan' | 'findings' | 'progress';
 
 export function AgentOutputModal({
   open,
@@ -71,6 +71,12 @@ export function AgentOutputModal({
     }>
   >([]);
   const [skillWarnings, setSkillWarnings] = useState<string[]>([]);
+  const [planningFiles, setPlanningFiles] = useState<{
+    taskPlan: { content: string; updatedAt: string } | null;
+    findings: { content: string; updatedAt: string } | null;
+    progress: { content: string; updatedAt: string } | null;
+  }>({ taskPlan: null, findings: null, progress: null });
+  const [planningFilesLoading, setPlanningFilesLoading] = useState(false);
 
   // Extract summary from output
   const summary = useMemo(() => extractSummary(output), [output]);
@@ -88,6 +94,33 @@ export function AgentOutputModal({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [output]);
+
+  // Load planning files for persistent mode
+  useEffect(() => {
+    if (!open) return;
+
+    const loadPlanningFiles = async () => {
+      const api = getElectronAPI();
+      if (!api?.features) return;
+
+      setPlanningFilesLoading(true);
+      try {
+        const resolvedProjectPath = projectPathProp || (window as any).__currentProject?.path;
+        if (!resolvedProjectPath) return;
+
+        const result = await api.features.getPlanningFiles(resolvedProjectPath, featureId);
+        if (result.success && result.files) {
+          setPlanningFiles(result.files);
+        }
+      } catch (error) {
+        console.error('Failed to load planning files:', error);
+      } finally {
+        setPlanningFilesLoading(false);
+      }
+    };
+
+    loadPlanningFiles();
+  }, [open, featureId, projectPathProp]);
 
   // Load existing output from file
   useEffect(() => {
@@ -474,6 +507,48 @@ export function AgentOutputModal({
                 <FileText className="w-3.5 h-3.5" />
                 Raw
               </button>
+              {planningFiles.taskPlan && (
+                <button
+                  onClick={() => setViewMode('plan')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    effectiveViewMode === 'plan'
+                      ? 'bg-primary/20 text-primary shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                  }`}
+                  data-testid="view-mode-plan"
+                >
+                  <ClipboardList className="w-3.5 h-3.5" />
+                  Plan
+                </button>
+              )}
+              {planningFiles.findings && (
+                <button
+                  onClick={() => setViewMode('findings')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    effectiveViewMode === 'findings'
+                      ? 'bg-primary/20 text-primary shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                  }`}
+                  data-testid="view-mode-findings"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  Findings
+                </button>
+              )}
+              {planningFiles.progress && (
+                <button
+                  onClick={() => setViewMode('progress')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    effectiveViewMode === 'progress'
+                      ? 'bg-primary/20 text-primary shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                  }`}
+                  data-testid="view-mode-progress"
+                >
+                  <List className="w-3.5 h-3.5" />
+                  Progress
+                </button>
+              )}
             </div>
           </div>
           <DialogDescription
@@ -564,6 +639,39 @@ export function AgentOutputModal({
         ) : effectiveViewMode === 'summary' && summary ? (
           <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
             <Markdown>{summary}</Markdown>
+          </div>
+        ) : effectiveViewMode === 'plan' && planningFiles.taskPlan ? (
+          <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
+            {planningFilesLoading ? (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                Loading plan...
+              </div>
+            ) : (
+              <Markdown>{planningFiles.taskPlan.content}</Markdown>
+            )}
+          </div>
+        ) : effectiveViewMode === 'findings' && planningFiles.findings ? (
+          <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
+            {planningFilesLoading ? (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                Loading findings...
+              </div>
+            ) : (
+              <Markdown>{planningFiles.findings.content}</Markdown>
+            )}
+          </div>
+        ) : effectiveViewMode === 'progress' && planningFiles.progress ? (
+          <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
+            {planningFilesLoading ? (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                Loading progress...
+              </div>
+            ) : (
+              <Markdown>{planningFiles.progress.content}</Markdown>
+            )}
           </div>
         ) : (
           <>

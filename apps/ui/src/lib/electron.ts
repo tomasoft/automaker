@@ -504,6 +504,19 @@ export interface FeaturesAPI {
     projectPath: string,
     featureId: string
   ) => Promise<{ success: boolean; content?: string | null; error?: string }>;
+  getPlanningFiles: (
+    projectPath: string,
+    featureId: string
+  ) => Promise<{
+    success: boolean;
+    files?: {
+      taskPlan: { content: string; updatedAt: string; metadata?: any } | null;
+      findings: { content: string; updatedAt: string; metadata?: any } | null;
+      progress: { content: string; updatedAt: string; metadata?: any } | null;
+    };
+    exists?: boolean;
+    error?: string;
+  }>;
   generateTitle: (
     description: string
   ) => Promise<{ success: boolean; title?: string; error?: string }>;
@@ -2855,6 +2868,24 @@ function createMockFeaturesAPI(): FeaturesAPI {
       const agentOutputPath = `${projectPath}/.automaker/features/${featureId}/agent-output.md`;
       const content = mockFileSystem[agentOutputPath];
       return { success: true, content: content || null };
+    },
+
+    getPlanningFiles: async (projectPath: string, featureId: string) => {
+      console.log('[Mock] Getting planning files:', { projectPath, featureId });
+      const planningDir = `${projectPath}/.automaker/features/${featureId}/planning`;
+      const taskPlan = mockFileSystem[`${planningDir}/task_plan.md`];
+      const findings = mockFileSystem[`${planningDir}/findings.md`];
+      const progress = mockFileSystem[`${planningDir}/progress.md`];
+
+      return {
+        success: true,
+        files: {
+          taskPlan: taskPlan ? { content: taskPlan, updatedAt: new Date().toISOString() } : null,
+          findings: findings ? { content: findings, updatedAt: new Date().toISOString() } : null,
+          progress: progress ? { content: progress, updatedAt: new Date().toISOString() } : null,
+        },
+        exists: !!(taskPlan || findings || progress),
+      };
     },
 
     generateTitle: async (description: string) => {

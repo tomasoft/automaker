@@ -318,6 +318,27 @@ export type AutoModeEvent =
         isStale: boolean;
       }>;
       warnings: string[];
+    }
+  | {
+      type: 'planning-files:updated';
+      featureId: string;
+      projectPath?: string;
+      file?: string;
+      action: string;
+    }
+  | {
+      type: 'planning-files:catchup-generated';
+      featureId: string;
+      projectPath?: string;
+      strategy: 'verbatim' | 'llm-summary';
+      messageCount: number;
+    }
+  | {
+      type: 'planning-files:agent-stuck';
+      featureId: string;
+      projectPath?: string;
+      errorCount: number;
+      lastError?: string;
     };
 
 export type SpecRegenerationEvent =

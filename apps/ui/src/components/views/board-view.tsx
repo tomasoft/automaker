@@ -38,6 +38,7 @@ import {
   PlanApprovalDialog,
   ImportWorkItemsDialog,
 } from './board-view/dialogs';
+import { AgentStuckModal } from './board-view/dialogs/agent-stuck-modal';
 import { PipelineSettingsDialog } from './board-view/dialogs/pipeline-settings-dialog';
 import { CreateWorktreeDialog } from './board-view/dialogs/create-worktree-dialog';
 import { DeleteWorktreeDialog } from './board-view/dialogs/delete-worktree-dialog';
@@ -147,6 +148,14 @@ export function BoardView() {
 
   // Pipeline settings dialog state
   const [showPipelineSettings, setShowPipelineSettings] = useState(false);
+
+  // Agent stuck modal state
+  const [showAgentStuckModal, setShowAgentStuckModal] = useState(false);
+  const [agentStuckData, setAgentStuckData] = useState<{
+    featureId: string;
+    errorCount: number;
+    lastError?: string;
+  } | null>(null);
 
   // Follow-up state hook
   const {
@@ -744,6 +753,18 @@ export function BoardView() {
           // Feature completed or errored - remove from pending if still there
           if (event.featureId) {
             pendingFeaturesRef.current.delete(event.featureId);
+          }
+          break;
+
+        case 'planning-files:agent-stuck':
+          // Agent is stuck and needs intervention
+          if ('featureId' in event && 'errorCount' in event) {
+            setAgentStuckData({
+              featureId: event.featureId as string,
+              errorCount: event.errorCount as number,
+              lastError: 'lastError' in event ? (event.lastError as string) : undefined,
+            });
+            setShowAgentStuckModal(true);
           }
           break;
       }
@@ -1610,6 +1631,35 @@ export function BoardView() {
           setSelectedWorktreeForAction(null);
         }}
       />
+
+      {/* Agent Stuck Modal */}
+      {agentStuckData && (
+        <AgentStuckModal
+          open={showAgentStuckModal}
+          onClose={() => setShowAgentStuckModal(false)}
+          featureId={agentStuckData.featureId}
+          featureName={
+            hookFeatures.find((f) => f.id === agentStuckData.featureId)?.title || 'Unknown Feature'
+          }
+          errorCount={agentStuckData.errorCount}
+          lastError={agentStuckData.lastError}
+          onResumeWithGuidance={async (guidance) => {
+            // TODO: Implement resume with guidance - inject guidance message and continue
+            console.log('Resume with guidance:', guidance);
+            toast.info('Resume with guidance - not yet implemented');
+          }}
+          onSkipTask={async () => {
+            // TODO: Implement skip task - mark task as blocked, move to next
+            console.log('Skip task');
+            toast.info('Skip task - not yet implemented');
+          }}
+          onRestartTask={async () => {
+            // TODO: Implement restart task - clear progress, restart from beginning
+            console.log('Restart task');
+            toast.info('Restart task - not yet implemented');
+          }}
+        />
+      )}
     </div>
   );
 }
