@@ -20,6 +20,9 @@ export type EventType =
   | 'feature:follow-up-completed'
   | 'feature:verified'
   | 'feature:committed'
+  | 'planning:file-updated'
+  | 'planning:catchup-generated'
+  | 'planning:agent-stuck'
   | 'project:analysis-started'
   | 'project:analysis-progress'
   | 'project:analysis-completed'
@@ -39,9 +42,6 @@ export type EventType =
   | 'ideation:idea-created'
   | 'ideation:idea-updated'
   | 'ideation:idea-deleted'
-  | 'ideation:idea-converted'
-  | 'planning-files:updated'
-  | 'planning-files:catchup-generated'
-  | 'planning-files:agent-stuck';
+  | 'ideation:idea-converted';
 
 export type EventCallback = (type: EventType, payload: unknown) => void;

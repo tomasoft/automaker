@@ -1,412 +1,368 @@
 /**
- * Planning Files Service - Manus-style persistent markdown planning
+ * Planning Files Service - Persistent planning pattern implementation
  *
- * Implements the "planning-with-files" pattern inspired by Manus AI:
- * - Persistent markdown files for planning, findings, and progress
- * - Session recovery across context resets
- * - Automatic progress logging and plan re-reads
- * - Phase rotation with Quick Index for navigation
+ * Implements Manus-style persistent markdown planning files:
+ * - task_plan.md: Shared plan with phase markers and checkboxes
+ * - findings.md: Accumulated research and findings
+ * - progress.md: Per-task execution logs with timestamps
+ *
+ * Includes session recovery to restore context after resets
  */
 
 import path from 'path';
 import * as secureFs from '../lib/secure-fs.js';
 import { createLogger } from '@automaker/utils';
+import type {
+  CatchupReport,
+  CatchupStrategy,
+  PlanningFileMetrics,
+  PlanningFileStatus,
+  QuickIndex,
+  ProgressRotationIndex,
+  TaskSection,
+  AgentSession,
+  ConversationMessage,
+} from '@automaker/types';
 import type { EventEmitter } from '../lib/events.js';
 import { ProviderFactory } from '../providers/provider-factory.js';
-import type { ExecuteOptions, EventType } from '@automaker/types';
 
 const logger = createLogger('PlanningFiles');
 
+// Helper function to check if file exists
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await secureFs.stat(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
 const PLANNING_FILES_VERSION = 'v1';
-const CATCHUP_MESSAGE_THRESHOLD = 20; // Use LLM summary if more than this many messages
-
-export interface PlanningFilesMetadata {
-  version: string;
-  createdAt: string;
-  featureId: string;
-  projectPath: string;
-  currentPhase?: string;
-  errorReReadCount: number; // Track error-triggered re-reads
-}
-
-export interface CatchupReport {
-  messageCount: number;
-  strategy: 'verbatim' | 'llm-summary';
-  modelUsed?: string;
-  truncated: boolean;
-  content: string;
-}
-
-export interface ProgressEntry {
-  timestamp: string;
-  taskId?: string;
-  toolName: string;
-  input: unknown;
-  output: string;
-  success: boolean;
-}
-
-export interface TaskMarker {
-  id: string;
-  title: string;
-  line: number;
-}
-
-export interface QuickIndex {
-  tasks: TaskMarker[];
-  keyImplementations: Array<{ description: string; file: string; line: number }>;
-}
+const CATCHUP_MESSAGE_THRESHOLD = 20;
 
 export class PlanningFilesService {
-  private eventEmitter: EventEmitter;
-
-  constructor(eventEmitter: EventEmitter) {
-    this.eventEmitter = eventEmitter;
-  }
+  constructor(private eventEmitter: EventEmitter) {}
 
   /**
    * Initialize planning files for a feature
-   * Creates task_plan.md, findings.md, and progress.md with version headers
    */
   async initializePlanningFiles(
     projectPath: string,
     featureId: string,
-    featureName: string,
-    initialPlan?: string
+    featureTitle: string,
+    spec?: string
   ): Promise<void> {
     const planningDir = this.getPlanningDir(projectPath, featureId);
+
+    // Ensure planning directory exists
     await secureFs.mkdir(planningDir, { recursive: true });
 
-    const metadata: PlanningFilesMetadata = {
-      version: PLANNING_FILES_VERSION,
-      createdAt: new Date().toISOString(),
-      featureId,
-      projectPath,
-      errorReReadCount: 0,
-    };
-
-    // Create task_plan.md
+    // Create task_plan.md if it doesn't exist
     const taskPlanPath = path.join(planningDir, 'task_plan.md');
-    const taskPlanContent = `<!-- planning-files-${PLANNING_FILES_VERSION} -->
-<!-- metadata: ${JSON.stringify(metadata)} -->
+    if (!(await fileExists(taskPlanPath))) {
+      const taskPlanContent = this.generateTaskPlanTemplate(featureTitle, spec);
+      await secureFs.writeFile(taskPlanPath, taskPlanContent);
+      logger.info(`Created task_plan.md for feature ${featureId}`);
+    }
 
-# Task Plan: ${featureName}
-
-${initialPlan || '## Status\n\n⏳ Planning in progress...\n\n## Phases\n\n*To be generated*\n\n## Tasks\n\n*To be generated*'}
-
-## Notes
-
-*Add any important context or decisions here*
-`;
-    await secureFs.writeFile(taskPlanPath, taskPlanContent);
-
-    // Create findings.md
+    // Create findings.md if it doesn't exist
     const findingsPath = path.join(planningDir, 'findings.md');
-    const findingsContent = `<!-- planning-files-${PLANNING_FILES_VERSION} -->
+    if (!(await fileExists(findingsPath))) {
+      const findingsContent = this.generateFindingsTemplate(featureTitle);
+      await secureFs.writeFile(findingsPath, findingsContent);
+      logger.info(`Created findings.md for feature ${featureId}`);
+    }
 
-# Research Findings: ${featureName}
-
-## Overview
-
-*Document research findings, external documentation, and key discoveries here*
-
-## Key Findings
-
-*To be added during research*
-`;
-    await secureFs.writeFile(findingsPath, findingsContent);
-
-    // Create progress.md
+    // Create progress.md if it doesn't exist
     const progressPath = path.join(planningDir, 'progress.md');
-    const progressContent = `<!-- planning-files-${PLANNING_FILES_VERSION} -->
+    if (!(await fileExists(progressPath))) {
+      const progressContent = this.generateProgressTemplate(featureTitle);
+      await secureFs.writeFile(progressPath, progressContent);
+      logger.info(`Created progress.md for feature ${featureId}`);
+    }
 
-# Progress Log: ${featureName}
-
-Started: ${new Date().toISOString()}
-
-## Current Session
-
-*Task execution logs will appear here*
-`;
-    await secureFs.writeFile(progressPath, progressContent);
-
-    this.eventEmitter.emit('planning-files:updated' as EventType, {
+    this.eventEmitter.emit('planning:file-updated', {
       featureId,
       projectPath,
+      files: ['task_plan.md', 'findings.md', 'progress.md'],
       action: 'initialized',
     });
-
-    logger.info(`Initialized planning files for feature ${featureId}`);
   }
 
   /**
-   * Get the planning directory path for a feature
+   * Get planning directory path
    */
-  getPlanningDir(projectPath: string, featureId: string): string {
+  private getPlanningDir(projectPath: string, featureId: string): string {
     return path.join(projectPath, '.automaker', 'features', featureId, 'planning');
   }
 
   /**
-   * Read task_plan.md content
+   * Generate task_plan.md template
    */
-  async readTaskPlan(projectPath: string, featureId: string): Promise<string | null> {
-    const planPath = path.join(this.getPlanningDir(projectPath, featureId), 'task_plan.md');
-    try {
-      return (await secureFs.readFile(planPath, 'utf-8')) as string;
-    } catch (error) {
-      logger.warn(`Failed to read task_plan.md for ${featureId}:`, error);
-      return null;
-    }
+  private generateTaskPlanTemplate(featureTitle: string, spec?: string): string {
+    const now = new Date().toISOString();
+
+    return `<!-- planning-files-${PLANNING_FILES_VERSION} -->
+# Task Plan: ${featureTitle}
+
+**Created:** ${now}  
+**Status:** Planning
+
+## Goal
+
+${spec ? spec.substring(0, 500) + (spec.length > 500 ? '...\n\n_See full spec in feature.json_' : '') : 'Define the goal and requirements for this feature.'}
+
+## Phases
+
+### Phase 1: Foundation
+- [ ] Task 001: Setup and initial structure
+- [ ] Task 002: Core dependencies
+
+### Phase 2: Implementation
+- [ ] Task 003: Main functionality
+- [ ] Task 004: Integration points
+
+### Phase 3: Testing & Polish
+- [ ] Task 005: Tests
+- [ ] Task 006: Documentation
+
+## Current Focus
+
+**Current Phase:** Phase 1 - Foundation  
+**Current Task:** Not started
+
+## Risks & Blockers
+
+_None identified yet_
+
+## Notes
+
+- Update checkboxes as tasks complete
+- Log errors in progress.md
+- Save research findings to findings.md after 2+ read operations
+`;
   }
 
   /**
-   * Update task_plan.md content
+   * Generate findings.md template
    */
-  async updateTaskPlan(projectPath: string, featureId: string, content: string): Promise<void> {
-    const planPath = path.join(this.getPlanningDir(projectPath, featureId), 'task_plan.md');
-    await secureFs.writeFile(planPath, content);
-    this.eventEmitter.emit('planning-files:updated' as EventType, {
-      featureId,
-      projectPath,
-      file: 'task_plan.md',
-      action: 'updated',
-    });
+  private generateFindingsTemplate(featureTitle: string): string {
+    const now = new Date().toISOString();
+
+    return `<!-- planning-files-${PLANNING_FILES_VERSION} -->
+# Findings: ${featureTitle}
+
+**Created:** ${now}
+
+## Research Notes
+
+_Save findings here after 2+ Read/Browser tool operations_
+
+## Key Discoveries
+
+_Document important findings that affect implementation_
+
+## Architecture Insights
+
+_Notes about system architecture relevant to this feature_
+
+## Dependencies
+
+_External dependencies, libraries, or services discovered_
+`;
   }
 
   /**
-   * Append to findings.md
+   * Generate progress.md template
    */
-  async appendFinding(
+  private generateProgressTemplate(featureTitle: string): string {
+    const now = new Date().toISOString();
+
+    return `<!-- planning-files-${PLANNING_FILES_VERSION} -->
+# Progress Log: ${featureTitle}
+
+**Created:** ${now}
+
+## Execution Log
+
+_Tool executions, errors, and progress updates will be logged here_
+
+---
+`;
+  }
+
+  /**
+   * Append to progress.md
+   */
+  async appendToProgress(
     projectPath: string,
     featureId: string,
-    finding: string,
-    category?: string
+    content: string,
+    taskId?: string,
+    taskName?: string
   ): Promise<void> {
-    const findingsPath = path.join(this.getPlanningDir(projectPath, featureId), 'findings.md');
-    let current = '';
-    try {
-      current = (await secureFs.readFile(findingsPath, 'utf-8')) as string;
-    } catch {
-      // File may not exist yet
+    const progressPath = path.join(this.getPlanningDir(projectPath, featureId), 'progress.md');
+
+    let existingContent = '';
+    if (await fileExists(progressPath)) {
+      existingContent = (await secureFs.readFile(progressPath, 'utf-8')) as string;
     }
 
     const timestamp = new Date().toISOString();
-    const entry = `\n### ${category || 'Finding'} - ${timestamp}\n\n${finding}\n`;
-    await secureFs.writeFile(findingsPath, current + entry);
+    let entry = `\n### ${timestamp}`;
 
-    this.eventEmitter.emit('planning-files:updated' as EventType, {
+    if (taskId && taskName) {
+      entry += ` - [${taskId}] ${taskName}`;
+    }
+
+    entry += `\n\n${content}\n\n---\n`;
+
+    await secureFs.writeFile(progressPath, existingContent + entry);
+
+    this.eventEmitter.emit('planning:file-updated', {
       featureId,
       projectPath,
-      file: 'findings.md',
-      action: 'appended',
+      files: ['progress.md'],
+      action: 'append',
     });
   }
 
   /**
-   * Append to progress.md with task section marker
+   * Update task_plan.md with new content (for task tracking)
    */
-  async appendProgress(
-    projectPath: string,
-    featureId: string,
-    entry: ProgressEntry
-  ): Promise<void> {
+  async updateTaskPlan(projectPath: string, featureId: string, content: string): Promise<void> {
+    const taskPlanPath = path.join(this.getPlanningDir(projectPath, featureId), 'task_plan.md');
+    await secureFs.writeFile(taskPlanPath, content);
+
+    this.eventEmitter.emit('planning:file-updated', {
+      featureId,
+      projectPath,
+      fileType: 'task_plan',
+      action: 'update',
+    });
+  }
+
+  /**
+   * Read task plan
+   */
+  async readTaskPlan(projectPath: string, featureId: string): Promise<string | null> {
+    const taskPlanPath = path.join(this.getPlanningDir(projectPath, featureId), 'task_plan.md');
+
+    if (!(await fileExists(taskPlanPath))) {
+      return null;
+    }
+
+    return (await secureFs.readFile(taskPlanPath, 'utf-8')) as string;
+  }
+
+  /**
+   * Read findings
+   */
+  async readFindings(projectPath: string, featureId: string): Promise<string | null> {
+    const findingsPath = path.join(this.getPlanningDir(projectPath, featureId), 'findings.md');
+
+    if (!(await fileExists(findingsPath))) {
+      return null;
+    }
+
+    return (await secureFs.readFile(findingsPath, 'utf-8')) as string;
+  }
+
+  /**
+   * Read progress
+   */
+  async readProgress(projectPath: string, featureId: string): Promise<string | null> {
     const progressPath = path.join(this.getPlanningDir(projectPath, featureId), 'progress.md');
-    let current = '';
-    try {
-      current = (await secureFs.readFile(progressPath, 'utf-8')) as string;
-    } catch {
-      // File may not exist yet
+
+    if (!(await fileExists(progressPath))) {
+      return null;
     }
 
-    // Check if we need to add a task section marker
-    let content = current;
-    if (entry.taskId && !current.includes(`## [${entry.taskId}]`)) {
-      content += `\n## [${entry.taskId}] Started - ${entry.timestamp}\n`;
-    }
-
-    // Add progress entry
-    const status = entry.success ? '✅' : '❌';
-    const progressLine = `\n**${entry.timestamp}** ${status} **${entry.toolName}**\n`;
-    const inputLine = `  - Input: \`${JSON.stringify(entry.input).substring(0, 200)}${JSON.stringify(entry.input).length > 200 ? '...' : ''}\`\n`;
-    const outputLine = `  - Output: ${entry.output.substring(0, 500)}${entry.output.length > 500 ? '...' : ''}\n`;
-
-    content += progressLine + inputLine + outputLine;
-    await secureFs.writeFile(progressPath, content);
-
-    this.eventEmitter.emit('planning-files:updated' as EventType, {
-      featureId,
-      projectPath,
-      file: 'progress.md',
-      action: 'appended',
-      taskId: entry.taskId,
-    });
+    return (await secureFs.readFile(progressPath, 'utf-8')) as string;
   }
 
   /**
-   * Rotate progress.md to progress-phaseN.md and generate Quick Index
+   * Get planning file status
    */
-  async rotateProgress(projectPath: string, featureId: string, phaseNumber: number): Promise<void> {
+  async getPlanningFileStatus(projectPath: string, featureId: string): Promise<PlanningFileStatus> {
     const planningDir = this.getPlanningDir(projectPath, featureId);
+    const taskPlanPath = path.join(planningDir, 'task_plan.md');
+    const findingsPath = path.join(planningDir, 'findings.md');
     const progressPath = path.join(planningDir, 'progress.md');
-    const archivePath = path.join(planningDir, `progress-phase${phaseNumber}.md`);
 
-    let currentProgress = '';
-    try {
-      currentProgress = (await secureFs.readFile(progressPath, 'utf-8')) as string;
-    } catch {
-      logger.warn(`No progress.md found to rotate for phase ${phaseNumber}`);
-      return;
+    const taskPlanExists = await fileExists(taskPlanPath);
+    const findingsExists = await fileExists(findingsPath);
+    const progressExists = await fileExists(progressPath);
+
+    let lastUpdated: Date | null = null;
+    let version = PLANNING_FILES_VERSION;
+
+    if (taskPlanExists) {
+      const stats = await secureFs.stat(taskPlanPath);
+      lastUpdated = stats.mtime;
+
+      // Check version from file content
+      const content = (await secureFs.readFile(taskPlanPath, 'utf-8')) as string;
+      const versionMatch = content.match(/<!-- planning-files-(v\d+) -->/);
+      if (versionMatch) {
+        version = versionMatch[1];
+      }
     }
 
-    // Generate Quick Index
-    const index = this.generateQuickIndex(currentProgress);
-    const indexContent = this.formatQuickIndex(index);
-
-    // Prepend index to archived content
-    const archivedContent = `${indexContent}\n\n---\n\n${currentProgress}`;
-    await secureFs.writeFile(archivePath, archivedContent);
-
-    // Reset progress.md for new phase
-    const newProgressContent = `<!-- planning-files-${PLANNING_FILES_VERSION} -->
-
-# Progress Log - Phase ${phaseNumber + 1}
-
-Started: ${new Date().toISOString()}
-
-## Current Phase
-
-*Phase ${phaseNumber + 1} execution logs will appear here*
-
-> See progress-phase${phaseNumber}.md for previous phase
-`;
-    await secureFs.writeFile(progressPath, newProgressContent);
-
-    this.eventEmitter.emit('planning-files:updated' as EventType, {
-      featureId,
-      projectPath,
-      file: 'progress.md',
-      action: 'rotated',
-      phase: phaseNumber,
-    });
-
-    logger.info(`Rotated progress.md to phase ${phaseNumber} for feature ${featureId}`);
+    return {
+      taskPlanExists,
+      findingsExists,
+      progressExists,
+      version,
+      lastUpdated,
+      isStale: false, // Will be determined by detectStaleFiles
+    };
   }
 
   /**
-   * Generate Quick Index from progress content
-   */
-  private generateQuickIndex(content: string): QuickIndex {
-    const lines = content.split('\n');
-    const tasks: TaskMarker[] = [];
-    const keyImplementations: Array<{ description: string; file: string; line: number }> = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // Find task markers: ## [T001] Task Name
-      const taskMatch = line.match(/^##\s*\[([^\]]+)\]\s*(.+)/);
-      if (taskMatch) {
-        tasks.push({
-          id: taskMatch[1],
-          title: taskMatch[2].replace(/Started - .+$/, '').trim(),
-          line: i + 1,
-        });
-      }
-
-      // Find key implementations (lines with "✅ Implemented:" or similar)
-      if (line.includes('✅') && (line.includes('Implemented') || line.includes('Created'))) {
-        const description = line.replace(/^\*\*.*?\*\*\s*✅\s*/, '').trim();
-        keyImplementations.push({
-          description,
-          file: `progress.md`, // Reference to the archived file
-          line: i + 1,
-        });
-      }
-    }
-
-    return { tasks, keyImplementations };
-  }
-
-  /**
-   * Format Quick Index as markdown
-   */
-  private formatQuickIndex(index: QuickIndex): string {
-    let content = `## Quick Index\n\n### Tasks\n\n`;
-
-    if (index.tasks.length === 0) {
-      content += '*No tasks found*\n';
-    } else {
-      for (const task of index.tasks) {
-        content += `- [${task.id}] ${task.title} → Line ${task.line}\n`;
-      }
-    }
-
-    content += `\n### Key Implementations\n\n`;
-
-    if (index.keyImplementations.length === 0) {
-      content += '*No key implementations logged*\n';
-    } else {
-      for (const impl of index.keyImplementations.slice(0, 10)) {
-        // Limit to top 10
-        content += `- ${impl.description} → Line ${impl.line}\n`;
-      }
-    }
-
-    return content;
-  }
-
-  /**
-   * Detect stale planning files (session recovery)
-   * Returns session data that occurred after last planning file update
+   * Detect if planning files are stale (outdated compared to agent sessions)
    */
   async detectStaleFiles(
     projectPath: string,
     featureId: string
-  ): Promise<{ isStale: boolean; lastUpdate: Date | null; sessionData?: unknown[] }> {
-    const planningDir = this.getPlanningDir(projectPath, featureId);
-    const planPath = path.join(planningDir, 'task_plan.md');
+  ): Promise<{ isStale: boolean; lastSessionEnd?: Date; planningLastUpdate?: Date }> {
+    const status = await this.getPlanningFileStatus(projectPath, featureId);
 
-    let lastPlanUpdate: Date | null = null;
-    try {
-      const stats = await secureFs.stat(planPath);
-      lastPlanUpdate = stats.mtime;
-    } catch {
-      return { isStale: false, lastUpdate: null };
+    if (!status.taskPlanExists || !status.lastUpdated) {
+      return { isStale: false };
     }
 
-    // Scan agent sessions for this project
+    // Check agent sessions directory for this project
     const sessionsDir = path.join(projectPath, '.automaker', 'agent-sessions');
-    let sessionFiles: string[] = [];
-    try {
-      sessionFiles = await secureFs.readdir(sessionsDir);
-    } catch {
-      return { isStale: false, lastUpdate: lastPlanUpdate };
+
+    if (!(await fileExists(sessionsDir))) {
+      return { isStale: false };
     }
 
-    const lostMessages: unknown[] = [];
+    const sessionFiles = await secureFs.readdir(sessionsDir);
+    let mostRecentSessionEnd: Date | null = null;
 
+    // Find most recent session for this project
     for (const sessionFile of sessionFiles) {
       if (!sessionFile.endsWith('.json')) continue;
 
       try {
         const sessionPath = path.join(sessionsDir, sessionFile);
         const sessionContent = (await secureFs.readFile(sessionPath, 'utf-8')) as string;
-        const session = JSON.parse(sessionContent);
+        const session: any = JSON.parse(sessionContent);
 
-        // Check if session is for this project and feature
-        if (session.projectPath !== projectPath || session.featureId !== featureId) {
-          continue;
-        }
+        // Check if session is for this project
+        if (session.projectPath !== projectPath) continue;
 
-        // Check if session has messages after last plan update
-        if (session.endTime && new Date(session.endTime) > lastPlanUpdate) {
-          // Extract messages that occurred after plan update
-          if (session.messages && Array.isArray(session.messages)) {
-            for (const msg of session.messages) {
-              if (msg.timestamp && new Date(msg.timestamp) > lastPlanUpdate) {
-                lostMessages.push(msg);
-              }
-            }
+        // Check if session ended after planning files were last updated
+        if (session.endTime) {
+          const sessionEndDate = new Date(session.endTime);
+          if (!mostRecentSessionEnd || sessionEndDate > mostRecentSessionEnd) {
+            mostRecentSessionEnd = sessionEndDate;
           }
         }
       } catch (error) {
@@ -414,168 +370,168 @@ Started: ${new Date().toISOString()}
       }
     }
 
-    return {
-      isStale: lostMessages.length > 0,
-      lastUpdate: lastPlanUpdate,
-      sessionData: lostMessages.length > 0 ? lostMessages : undefined,
-    };
+    if (mostRecentSessionEnd && mostRecentSessionEnd > status.lastUpdated) {
+      return {
+        isStale: true,
+        lastSessionEnd: mostRecentSessionEnd,
+        planningLastUpdate: status.lastUpdated,
+      };
+    }
+
+    return { isStale: false, planningLastUpdate: status.lastUpdated };
   }
 
   /**
-   * Generate catchup report for session recovery
-   * Uses LLM summary for >20 messages, verbatim otherwise
+   * Generate catchup report from lost session messages
    */
   async generateCatchupReport(
     projectPath: string,
     featureId: string,
-    lostMessages: unknown[],
     model: string
-  ): Promise<CatchupReport> {
+  ): Promise<CatchupReport | null> {
+    const staleCheck = await this.detectStaleFiles(projectPath, featureId);
+
+    if (!staleCheck.isStale || !staleCheck.lastSessionEnd || !staleCheck.planningLastUpdate) {
+      return null;
+    }
+
+    // Find messages from sessions that occurred after planning files were updated
+    const lostMessages = await this.extractLostMessages(
+      projectPath,
+      staleCheck.planningLastUpdate,
+      staleCheck.lastSessionEnd
+    );
+
+    if (lostMessages.length === 0) {
+      return null;
+    }
+
     const messageCount = lostMessages.length;
+    let catchupContent: string;
+    let strategy: CatchupStrategy;
+    let modelUsed: string | undefined;
+    let truncated = false;
 
-    // Verbatim strategy for small number of messages
-    if (messageCount <= CATCHUP_MESSAGE_THRESHOLD) {
-      const content = this.formatMessagesVerbatim(lostMessages);
-      this.eventEmitter.emit('planning-files:catchup-generated' as EventType, {
-        featureId,
-        projectPath,
-        messageCount,
-        strategy: 'verbatim',
-        truncated: false,
-      });
-
-      return {
-        messageCount,
-        strategy: 'verbatim',
-        truncated: false,
-        content,
-      };
+    // Hybrid strategy: LLM summary if >20 messages, else verbatim
+    if (messageCount > CATCHUP_MESSAGE_THRESHOLD) {
+      try {
+        const summary = await this.summarizeMessages(lostMessages, model);
+        catchupContent = this.formatCatchupWithSummary(messageCount, summary);
+        strategy = 'llm-summary';
+        modelUsed = model;
+      } catch (error) {
+        logger.error('Failed to generate LLM summary, falling back to truncated:', error);
+        catchupContent = this.formatCatchupVerbatim(lostMessages, true);
+        strategy = 'truncated';
+        truncated = true;
+      }
+    } else {
+      catchupContent = this.formatCatchupVerbatim(lostMessages, false);
+      strategy = 'verbatim';
     }
 
-    // LLM summary strategy for many messages
-    try {
-      const summary = await this.summarizeMessagesWithLLM(lostMessages, model, projectPath);
-      this.eventEmitter.emit('planning-files:catchup-generated' as EventType, {
-        featureId,
-        projectPath,
+    const report: CatchupReport = {
+      hasStaleFiles: true,
+      messagesLost: messageCount,
+      catchupContent,
+      metrics: {
         messageCount,
-        strategy: 'llm-summary',
-        modelUsed: model,
-        truncated: false,
-      });
+        strategy,
+        modelUsed,
+        truncated,
+      },
+    };
 
-      return {
-        messageCount,
-        strategy: 'llm-summary',
-        modelUsed: model,
-        truncated: false,
-        content: summary,
-      };
-    } catch (error) {
-      logger.error('Failed to generate LLM summary, falling back to verbatim:', error);
+    this.eventEmitter.emit('planning:catchup-generated', {
+      featureId,
+      projectPath,
+      metrics: report.metrics,
+    });
 
-      // Fallback to verbatim (last 20 messages)
-      const recentMessages = lostMessages.slice(-20);
-      const content = this.formatMessagesVerbatim(recentMessages);
-
-      this.eventEmitter.emit('planning-files:catchup-generated' as EventType, {
-        featureId,
-        projectPath,
-        messageCount,
-        strategy: 'verbatim',
-        truncated: true,
-        error: String(error),
-      });
-
-      return {
-        messageCount,
-        strategy: 'verbatim',
-        truncated: true,
-        content: `⚠️ LLM summarization failed. Showing last ${recentMessages.length} of ${messageCount} messages.\n\n${content}`,
-      };
-    }
+    return report;
   }
 
   /**
-   * Format messages as verbatim markdown
+   * Extract messages from sessions that occurred after planning files were updated
    */
-  private formatMessagesVerbatim(messages: unknown[]): string {
-    let content = `# Session Recovery - ${messages.length} Messages\n\n`;
-    content += `*The following conversation occurred after the last planning file update:*\n\n`;
+  private async extractLostMessages(
+    projectPath: string,
+    planningLastUpdate: Date,
+    sessionEndTime: Date
+  ): Promise<ConversationMessage[]> {
+    const sessionsDir = path.join(projectPath, '.automaker', 'agent-sessions');
+    const sessionFiles = await secureFs.readdir(sessionsDir);
+    const lostMessages: ConversationMessage[] = [];
 
-    for (const msg of messages) {
-      if (typeof msg === 'object' && msg !== null) {
-        const message = msg as Record<string, unknown>;
-        const timestamp = message.timestamp
-          ? new Date(String(message.timestamp)).toISOString()
-          : 'Unknown';
-        const role = message.role || 'unknown';
-        const contentText = this.extractMessageContent(message);
+    for (const sessionFile of sessionFiles) {
+      if (!sessionFile.endsWith('.json')) continue;
 
-        content += `**[${timestamp}] ${String(role).toUpperCase()}:**\n\n${contentText}\n\n---\n\n`;
+      try {
+        const sessionPath = path.join(sessionsDir, sessionFile);
+        const sessionContent = (await secureFs.readFile(sessionPath, 'utf-8')) as string;
+        const session: any = JSON.parse(sessionContent);
+
+        // Check if session is for this project
+        if (session.projectPath !== projectPath) continue;
+
+        // Check if session occurred in the time window
+        const sessionStart = new Date(session.createdAt);
+        const sessionEnd = session.endTime ? new Date(session.endTime) : new Date();
+
+        if (sessionStart > planningLastUpdate && sessionEnd <= sessionEndTime) {
+          // Extract messages from this session
+          if (session.messages && Array.isArray(session.messages)) {
+            lostMessages.push(...session.messages);
+          }
+        }
+      } catch (error) {
+        logger.warn(`Failed to extract messages from session ${sessionFile}:`, error);
       }
     }
 
-    return content;
-  }
-
-  /**
-   * Extract text content from message object
-   */
-  private extractMessageContent(message: Record<string, unknown>): string {
-    if (typeof message.content === 'string') {
-      return message.content;
-    }
-    if (Array.isArray(message.content)) {
-      return message.content
-        .map((block) => {
-          if (typeof block === 'object' && block !== null && 'text' in block) {
-            return String(block.text);
-          }
-          return JSON.stringify(block);
-        })
-        .join('\n');
-    }
-    return JSON.stringify(message.content || message);
+    return lostMessages;
   }
 
   /**
    * Summarize messages using LLM
    */
-  private async summarizeMessagesWithLLM(
-    messages: unknown[],
-    model: string,
-    projectPath: string
-  ): Promise<string> {
-    const verbatim = this.formatMessagesVerbatim(messages);
-
-    const prompt = `You are helping recover context after a session reset. The following conversation happened but was not reflected in the planning files.
-
-Please provide a concise summary highlighting:
-1. Key decisions made
-2. Implementation progress
-3. Errors encountered and solutions attempted
-4. Files created or modified
-5. Any blocked or incomplete tasks
-
-${verbatim}
-
-Provide a structured summary in markdown format.`;
-
+  private async summarizeMessages(messages: ConversationMessage[], model: string): Promise<string> {
     const provider = ProviderFactory.getProviderForModel(model);
 
-    const executeOptions: ExecuteOptions = {
-      prompt,
-      model,
-      cwd: projectPath,
-      maxTurns: 1, // Single completion, no tool use
-      systemPrompt: 'You are a technical assistant helping summarize development context.',
-    };
+    // Build conversation text
+    const conversationText = messages
+      .map((msg) => {
+        const role = msg.role.toUpperCase();
+        const content = Array.isArray(msg.content)
+          ? msg.content.map((c) => (typeof c === 'string' ? c : c.text || '')).join('\n')
+          : msg.content;
+        return `${role}: ${content}`;
+      })
+      .join('\n\n');
+
+    const summarizePrompt = `Summarize the following conversation that occurred after the planning files were last updated. Focus on:
+- Key decisions made
+- Files created or modified
+- Errors encountered and how they were resolved
+- Important discoveries or insights
+- Current progress status
+
+Provide a concise summary suitable for context recovery.
+
+CONVERSATION:
+${conversationText}`;
+
+    const systemPrompt = `You are a technical summarizer. Create concise, factual summaries of development conversations.`;
 
     let summary = '';
-    const stream = provider.executeQuery(executeOptions);
 
-    for await (const msg of stream) {
+    for await (const msg of provider.executeQuery({
+      prompt: summarizePrompt,
+      model,
+      systemPrompt,
+      cwd: '/', // Not used for summarization
+      maxTurns: 1,
+    })) {
       if (msg.type === 'assistant' && msg.message?.content) {
         for (const block of msg.message.content) {
           if (block.type === 'text') {
@@ -585,88 +541,165 @@ Provide a structured summary in markdown format.`;
       }
     }
 
-    return summary || verbatim; // Fallback to verbatim if no summary generated
+    return summary;
   }
 
   /**
-   * Extract metadata from planning file
+   * Format catchup report with LLM summary
    */
-  async getPlanningMetadata(
-    projectPath: string,
-    featureId: string
-  ): Promise<PlanningFilesMetadata | null> {
-    const planPath = path.join(this.getPlanningDir(projectPath, featureId), 'task_plan.md');
-    try {
-      const content = (await secureFs.readFile(planPath, 'utf-8')) as string;
-      const metadataMatch = content.match(/<!-- metadata: ({.+?}) -->/);
-      if (metadataMatch) {
-        return JSON.parse(metadataMatch[1]) as PlanningFilesMetadata;
+  private formatCatchupWithSummary(messageCount: number, summary: string): string {
+    return `## Session Recovery
+
+⚠️ **Context recovery in progress**
+
+Your planning files (task_plan.md, findings.md, progress.md) were last updated before ${messageCount} conversation messages occurred. Those messages have been summarized below to restore context.
+
+### Summary of Lost Context
+
+${summary}
+
+### Action Required
+
+1. Review the summary above
+2. Update task_plan.md with any completed tasks
+3. Update findings.md with any discoveries mentioned
+4. Update progress.md with any errors or approaches that failed
+
+---
+`;
+  }
+
+  /**
+   * Format catchup report with verbatim messages
+   */
+  private formatCatchupVerbatim(messages: ConversationMessage[], truncate: boolean): string {
+    const displayMessages = truncate ? messages.slice(-20) : messages;
+    const truncatedCount = truncate ? messages.length - displayMessages.length : 0;
+
+    let content = `## Session Recovery
+
+⚠️ **Context recovery in progress**
+
+Your planning files were last updated before ${messages.length} conversation messages occurred. ${
+      truncate
+        ? `Showing the last 20 messages (${truncatedCount} earlier messages truncated).`
+        : 'Full conversation below.'
+    }
+
+### Lost Messages
+
+`;
+
+    for (const msg of displayMessages) {
+      const role = msg.role.toUpperCase();
+      const text = Array.isArray(msg.content)
+        ? msg.content.map((c) => (typeof c === 'string' ? c : c.text || '')).join('\n')
+        : msg.content;
+
+      content += `**${role}:**\n${text}\n\n`;
+    }
+
+    content += `### Action Required
+
+1. Review the messages above
+2. Update task_plan.md with any completed tasks
+3. Update findings.md with any discoveries mentioned
+4. Update progress.md with any errors or approaches that failed
+
+---
+`;
+
+    return content;
+  }
+
+  /**
+   * Rotate progress.md to archived file and generate Quick Index
+   */
+  async rotateProgressFile(projectPath: string, featureId: string, phase: number): Promise<void> {
+    const planningDir = this.getPlanningDir(projectPath, featureId);
+    const progressPath = path.join(planningDir, 'progress.md');
+
+    if (!(await fileExists(progressPath))) {
+      logger.warn(`Cannot rotate progress.md - file doesn't exist for feature ${featureId}`);
+      return;
+    }
+
+    const progressContent = (await secureFs.readFile(progressPath, 'utf-8')) as string;
+
+    // Generate Quick Index
+    const quickIndex = this.generateQuickIndex(progressContent);
+
+    // Create archived file with index
+    const archivedFileName = `progress-phase${phase}.md`;
+    const archivedPath = path.join(planningDir, archivedFileName);
+
+    const archivedContent = `<!-- planning-files-${PLANNING_FILES_VERSION} -->
+# Progress Log - Phase ${phase} (Archived)
+
+## Quick Index
+
+### Tasks
+${quickIndex.tasks.map((t: any) => `- [${t.taskId}] ${t.taskName} → Line ${t.lineNumber}`).join('\n')}
+
+### Key Implementations
+${quickIndex.keyImplementations.map((k: any) => `- ${k.description} → ${archivedFileName}#L${k.lineNumber}`).join('\n')}
+
+---
+
+${progressContent}
+`;
+
+    await secureFs.writeFile(archivedPath, archivedContent);
+
+    // Reset progress.md for next phase
+    const featureName = `Feature ${featureId}`;
+    const newProgressContent = this.generateProgressTemplate(featureName);
+    await secureFs.writeFile(progressPath, newProgressContent);
+
+    logger.info(`Rotated progress.md to ${archivedFileName} for feature ${featureId}`);
+
+    this.eventEmitter.emit('planning:file-updated', {
+      featureId,
+      projectPath,
+      files: ['progress.md', archivedFileName],
+      action: 'rotate',
+      phase,
+    });
+  }
+
+  /**
+   * Generate Quick Index from progress content
+   */
+  private generateQuickIndex(progressContent: string): QuickIndex {
+    const tasks: ProgressRotationIndex[] = [];
+    const keyImplementations: ProgressRotationIndex[] = [];
+    const lines = progressContent.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Match task headers: ### 2026-01-21T14:30:00.000Z - [T001] Task Name
+      const taskMatch = line.match(/^###\s+[\d-:TZ.]+\s+-\s+\[([^\]]+)\]\s+(.+)$/);
+      if (taskMatch) {
+        tasks.push({
+          taskId: taskMatch[1],
+          taskName: taskMatch[2],
+          lineNumber: i + 1,
+        });
       }
-    } catch {
-      // File doesn't exist or no metadata
-    }
-    return null;
-  }
 
-  /**
-   * Update metadata in planning file
-   */
-  async updatePlanningMetadata(
-    projectPath: string,
-    featureId: string,
-    updates: Partial<PlanningFilesMetadata>
-  ): Promise<void> {
-    const planPath = path.join(this.getPlanningDir(projectPath, featureId), 'task_plan.md');
-    let content = '';
-    try {
-      content = (await secureFs.readFile(planPath, 'utf-8')) as string;
-    } catch {
-      return; // File doesn't exist
+      // Match key implementations: ✅ Implemented: description
+      const implMatch = line.match(/^✅\s+Implemented:\s+(.+)$/);
+      if (implMatch) {
+        keyImplementations.push({
+          taskId: '', // Not task-specific
+          taskName: implMatch[1],
+          lineNumber: i + 1,
+          description: implMatch[1],
+        });
+      }
     }
 
-    const metadataMatch = content.match(/<!-- metadata: ({.+?}) -->/);
-    if (!metadataMatch) return;
-
-    const currentMetadata = JSON.parse(metadataMatch[1]) as PlanningFilesMetadata;
-    const newMetadata = { ...currentMetadata, ...updates };
-
-    const newContent = content.replace(
-      /<!-- metadata: {.+?} -->/,
-      `<!-- metadata: ${JSON.stringify(newMetadata)} -->`
-    );
-
-    await secureFs.writeFile(planPath, newContent);
-  }
-
-  /**
-   * Increment error re-read count
-   */
-  async incrementErrorReReadCount(projectPath: string, featureId: string): Promise<number> {
-    const metadata = await this.getPlanningMetadata(projectPath, featureId);
-    if (!metadata) return 0;
-
-    const newCount = (metadata.errorReReadCount || 0) + 1;
-    await this.updatePlanningMetadata(projectPath, featureId, { errorReReadCount: newCount });
-    return newCount;
-  }
-
-  /**
-   * Reset error re-read count
-   */
-  async resetErrorReReadCount(projectPath: string, featureId: string): Promise<void> {
-    await this.updatePlanningMetadata(projectPath, featureId, { errorReReadCount: 0 });
-  }
-
-  /**
-   * Check if planning files exist
-   */
-  async planningFilesExist(projectPath: string, featureId: string): Promise<boolean> {
-    const planPath = path.join(this.getPlanningDir(projectPath, featureId), 'task_plan.md');
-    try {
-      await secureFs.access(planPath);
-      return true;
-    } catch {
-      return false;
-    }
+    return { tasks, keyImplementations };
   }
 }

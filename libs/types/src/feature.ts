@@ -163,6 +163,9 @@ export interface Feature {
   thinkingLevel?: ThinkingLevel;
   planningMode?: PlanningMode;
   requirePlanApproval?: boolean;
+  // Planning-with-files feature (Manus-style persistent planning)
+  // When true (default), creates task_plan.md, findings.md, progress.md for goal tracking
+  usePlanningFiles?: boolean;
   planSpec?: {
     status: 'pending' | 'generating' | 'generated' | 'approved' | 'rejected';
     content?: string;

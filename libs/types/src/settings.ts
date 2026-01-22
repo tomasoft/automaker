@@ -65,7 +65,7 @@ export type ThemeMode =
 export type KanbanCardDetailLevel = 'minimal' | 'standard' | 'detailed';
 
 /** PlanningMode - Planning levels for feature generation workflows */
-export type PlanningMode = 'skip' | 'lite' | 'spec' | 'full' | 'persistent';
+export type PlanningMode = 'skip' | 'lite' | 'spec' | 'full';
 
 /** ThinkingLevel - Extended thinking levels for Claude models (reasoning intensity) */
 export type ThinkingLevel = 'none' | 'low' | 'medium' | 'high' | 'ultrathink';
@@ -744,6 +744,10 @@ export interface GlobalSettings {
   enabledCursorModels: CursorModelId[];
   /** Default Cursor model selection when switching to Cursor CLI */
   cursorDefaultModel: CursorModelId;
+
+  // Azure DevOps Auth
+  /** Persisted Azure DevOps auth tokens by session ID */
+  azureAuthTokens?: Record<string, any>;
 
   // Input Configuration
   /** User's keyboard shortcut bindings */

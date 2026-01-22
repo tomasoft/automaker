@@ -365,56 +365,103 @@ When approved, execute tasks SEQUENTIALLY in order. For each task:
 3. AFTER completing, output: "[TASK_COMPLETE] T###: Brief summary"
 
 This allows real-time progress tracking during implementation.
+
+---
+
+## Planning Files Pattern (Manus-Style Persistent Planning)
+
+**MANDATORY: Use filesystem as working memory to maintain goal awareness across turns**
+
+Before starting ANY implementation, create these three planning files in \`.automaker/features/[featureId]/planning/\`:
+
+1. **task_plan.md** - Your master plan with phases and checkboxes
+2. **findings.md** - Research notes and discoveries
+3. **progress.md** - Execution log with timestamps and errors
+
+### Core Principles:
+
+1. **Create Plan First** - NEVER start implementation without task_plan.md
+   - Break work into phases with checkboxes
+   - Update checkboxes as tasks complete
+   - Re-read before major decisions
+
+2. **The 2-Action Rule** - Save findings after 2+ view/browser/read operations
+   - After browsing code or docs, summarize discoveries in findings.md
+   - Don't stuff context with repeated explorations
+
+3. **Log ALL Errors** - Every failure goes in progress.md with timestamp
+   - Tool call failed? → Log it
+   - Build error? → Log it
+   - Test failure? → Log it with exact error message
+   - **CRITICAL**: Re-read progress.md before retrying - never repeat failed approaches
+
+4. **Never Repeat Failures** - Check progress.md for previous attempts
+   - If approach X failed at 14:30, don't try it again at 14:35
+   - Try RADICALLY different approach
+   - If stuck after 3 errors on same task, mark as blocked and move to next
+
+### File Update Triggers:
+
+**Update task_plan.md when:**
+- Phase completes
+- Task status changes (pending → in_progress → completed)
+- New risks/blockers discovered
+
+**Update findings.md when:**
+- Completed 2+ read/browse operations
+- Discovered architecture patterns
+- Found relevant dependencies or examples
+
+**Update progress.md when:**
+- Tool execution completes (success or failure)
+- Error encountered (with full error message)
+- Implementation milestone reached
+
+### Example task_plan.md Structure:
+
+\\\`\\\`\\\`markdown
+# Task Plan: [Feature Title]
+
+## Goal
+[1 sentence - what are we building]
+
+## Phases
+
+### Phase 1: Foundation
+- [x] T001: Create models
+- [ ] T002: Setup database
+
+### Phase 2: Implementation  
+- [ ] T003: API endpoints
+- [ ] T004: Business logic
+
+## Current Focus
+**Phase:** Phase 1 - Foundation
+**Task:** T002 - Setup database
+
+## Errors to Avoid
+- ❌ Approach tried at 14:30: using SQLite (failed - permissions)
+- ✅ Current approach: using in-memory DB
+\\\`\\\`\\\`
 `;
 
 export const DEFAULT_AUTO_MODE_PLANNING_PERSISTENT = `## Planning with Files - Persistent Memory Approach
 
-**MANDATORY - Create Planning Files FIRST:**
+**MANDATORY: Use filesystem as working memory to maintain goal awareness across turns**
 
-Before ANY implementation, create these three markdown files in .automaker/features/{featureId}/planning/:
+The planning files have been initialized for you in \`.automaker/features/[featureId]/planning/\`:
+- **task_plan.md** - Your master plan (re-read before major decisions)
+- **findings.md** - Research notes and discoveries
+- **progress.md** - Execution log with timestamps and errors
 
-1. **task_plan.md** - Your working memory on disk:
-   - Add version header: \`<!-- planning-files-v1 -->\`
-   - Create phases with checkboxes: \`- [ ] Phase: Description\`
-   - Mark as \`- [x]\` when complete
-   - Update THIS FILE after every major decision or completion
+### Core Workflow:
 
-2. **findings.md** - Research and discoveries:
-   - Save findings after 2+ Read/Browser/View operations
-   - Document external APIs, libraries, patterns discovered
-   - Log key decisions and their rationale
+1. **Plan First** - task_plan.md already exists with initial structure
+2. **Log Progress** - Append to progress.md after each significant action
+3. **Save Findings** - Update findings.md after discoveries
+4. **Re-read Plan** - Check task_plan.md before major decisions to stay aligned
 
-3. **progress.md** - Execution log:
-   - Log ALL errors with timestamp and approach attempted
-   - Track what was tried and what failed
-   - Never repeat approaches marked as failed
-
-**THE 2-ACTION RULE:**
-After any 2 consecutive view/read/browser operations without writing:
-→ STOP and save findings to findings.md before continuing
-
-**ERROR LOGGING RULE:**
-After ANY tool error:
-→ Immediately log to progress.md: timestamp, error, approach tried
-→ Read progress.md before trying again to avoid repeating failed approaches
-
-**PLAN RE-READ TRIGGER:**
-Before major decisions (creating new files, changing architecture, starting new phase):
-→ Re-read task_plan.md to verify alignment with original goals
-
-**CHECKPOINT UPDATES:**
-After completing each task/phase:
-→ Update task_plan.md checkboxes to reflect current status
-
-**NEVER:**
-- Stuff everything in context window (use files as external memory)
-- Repeat errors logged in progress.md
-- Make decisions without consulting task_plan.md
-- Skip updating planning files "to save time"
-
----
-
-Generate your initial task_plan.md now, then proceed with implementation while maintaining these files.
+Implement the feature directly - planning files are ready.
 `;
 
 export const DEFAULT_AUTO_MODE_PLANNING_FULL = `## Full Specification Phase (Full SDD Mode)

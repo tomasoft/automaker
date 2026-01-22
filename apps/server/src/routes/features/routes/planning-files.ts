@@ -1,162 +1,131 @@
 /**
- * Planning Files Routes
- * Get planning files content for a feature (task_plan.md, findings.md, progress.md)
+ * Planning files routes - Get planning file content and status
+ * POST /planning-file endpoint - Get task_plan.md, findings.md, or progress.md content
+ * POST /planning-status endpoint - Get status of all planning files
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { getErrorMessage, logError } from '../common.js';
 import path from 'path';
 import * as secureFs from '../../../lib/secure-fs.js';
-import { createLogger } from '@automaker/utils';
-import { getAutomakerDir } from '@automaker/platform';
 
-const logger = createLogger('PlanningFilesRoutes');
-const router = Router();
+function getFeatureDir(projectPath: string, featureId: string): string {
+  return path.join(projectPath, '.automaker', 'features', featureId);
+}
 
 /**
- * GET /api/features/:projectPath/:featureId/planning-files/:fileName
- * Fetch a specific planning file
+ * Handler for getting planning file content
  */
-router.get(
-  '/:projectPath/:featureId/planning-files/:fileName',
-  async (req: Request, res: Response) => {
+export function createPlanningFileHandler() {
+  return async (req: Request, res: Response): Promise<void> => {
     try {
-      const { projectPath, featureId, fileName } = req.params;
+      const { projectPath, featureId, fileType } = req.body as {
+        projectPath: string;
+        featureId: string;
+        fileType: 'task_plan' | 'findings' | 'progress';
+      };
 
-      // Validate fileName (only allow these specific files)
-      const allowedFiles = ['task_plan.md', 'findings.md', 'progress.md'];
-      if (!allowedFiles.includes(fileName)) {
-        return res.status(400).json({
+      if (!projectPath || !featureId || !fileType) {
+        res.status(400).json({
           success: false,
-          error: `Invalid file name. Allowed: ${allowedFiles.join(', ')}`,
+          error: 'projectPath, featureId, and fileType are required',
         });
+        return;
       }
 
-      // Construct path to planning file
-      const automakerDir = getAutomakerDir(projectPath);
-      const planningFilePath = path.join(automakerDir, 'features', featureId, 'planning', fileName);
-
-      // Check if file exists
-      try {
-        await secureFs.access(planningFilePath);
-      } catch (error) {
-        return res.status(404).json({
+      // Validate file type
+      const validTypes = ['task_plan', 'findings', 'progress'];
+      if (!validTypes.includes(fileType)) {
+        res.status(400).json({
           success: false,
-          error: 'Planning file not found',
-          exists: false,
+          error: `Invalid file type. Must be one of: ${validTypes.join(', ')}`,
         });
+        return;
       }
 
-      // Read file content
-      const content = await secureFs.readFile(planningFilePath, 'utf-8');
+      const featureDir = getFeatureDir(projectPath, featureId);
+      const planningDir = path.join(featureDir, 'planning');
+      const filePath = path.join(planningDir, `${fileType}.md`);
 
-      // Extract metadata from HTML comment if present
-      let metadata = null;
-      const metadataMatch = (content as string).match(/<!-- metadata: (.+?) -->/);
-      if (metadataMatch) {
-        try {
-          metadata = JSON.parse(metadataMatch[1]);
-        } catch (e) {
-          logger.warn(`Failed to parse metadata from ${fileName}:`, e);
-        }
-      }
-
-      // Get file stats for timestamp info
-      const stats = await secureFs.stat(planningFilePath);
+      // Read file content (ENOENT handled as null)
+      const content = (await secureFs.readFile(filePath, 'utf-8')) as string;
 
       res.json({
         success: true,
+        available: true,
         content,
-        metadata,
-        fileName,
-        updatedAt: stats.mtime.toISOString(),
-        exists: true,
       });
     } catch (error) {
-      logger.error('Failed to fetch planning file:', error);
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
+      // Handle file not found gracefully
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        res.json({
+          success: true,
+          available: false,
+          content: '',
+        });
+        return;
+      }
+
+      logError(error, 'Get planning file failed');
+      res.status(500).json({ success: false, error: getErrorMessage(error) });
     }
-  }
-);
+  };
+}
 
 /**
- * GET /api/features/:projectPath/:featureId/planning-files
- * Fetch all planning files at once
+ * Handler for getting planning files status
  */
-router.get('/:projectPath/:featureId/planning-files', async (req: Request, res: Response) => {
-  try {
-    const { projectPath, featureId } = req.params;
-
-    const automakerDir = getAutomakerDir(projectPath);
-    const planningDir = path.join(automakerDir, 'features', featureId, 'planning');
-
-    // Check if planning directory exists
+export function createPlanningStatusHandler() {
+  return async (req: Request, res: Response): Promise<void> => {
     try {
-      await secureFs.access(planningDir);
-    } catch (error) {
-      return res.json({
-        success: true,
-        files: {
-          taskPlan: null,
-          findings: null,
-          progress: null,
-        },
-        exists: false,
-      });
-    }
+      const { projectPath, featureId } = req.body as {
+        projectPath: string;
+        featureId: string;
+      };
 
-    // Read all three files
-    const fileNames = ['task_plan.md', 'findings.md', 'progress.md'];
-    const results: Record<string, any> = {};
+      if (!projectPath || !featureId) {
+        res.status(400).json({
+          success: false,
+          error: 'projectPath and featureId are required',
+        });
+        return;
+      }
 
-    for (const fileName of fileNames) {
-      const filePath = path.join(planningDir, fileName);
+      const featureDir = getFeatureDir(projectPath, featureId);
+      const planningDir = path.join(featureDir, 'planning');
 
-      try {
-        await secureFs.access(filePath);
-        const content = await secureFs.readFile(filePath, 'utf-8');
-        const stats = await secureFs.stat(filePath);
+      // Check each file
+      const files: Record<string, { exists: boolean; lastModified?: string }> = {};
+      const fileTypes = ['task_plan', 'findings', 'progress'];
 
-        // Extract metadata
-        let metadata = null;
-        const metadataMatch = (content as string).match(/<!-- metadata: (.+?) -->/);
-        if (metadataMatch) {
-          try {
-            metadata = JSON.parse(metadataMatch[1]);
-          } catch (e) {
-            logger.warn(`Failed to parse metadata from ${fileName}:`, e);
+      for (const fileType of fileTypes) {
+        const filePath = path.join(planningDir, `${fileType}.md`);
+
+        try {
+          const stats = await secureFs.stat(filePath);
+          files[fileType] = {
+            exists: true,
+            lastModified: stats.mtime.toISOString(),
+          };
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            files[fileType] = { exists: false };
+          } else {
+            throw error;
           }
         }
-
-        results[fileName] = {
-          content,
-          metadata,
-          updatedAt: stats.mtime.toISOString(),
-          exists: true,
-        };
-      } catch (error) {
-        results[fileName] = null;
       }
+
+      const available = Object.values(files).some((f) => f.exists);
+
+      res.json({
+        success: true,
+        available,
+        files,
+      });
+    } catch (error) {
+      logError(error, 'Get planning status failed');
+      res.status(500).json({ success: false, error: getErrorMessage(error) });
     }
-
-    res.json({
-      success: true,
-      files: {
-        taskPlan: results['task_plan.md'],
-        findings: results['findings.md'],
-        progress: results['progress.md'],
-      },
-      exists: true,
-    });
-  } catch (error) {
-    logger.error('Failed to fetch planning files:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-export default router;
+  };
+}

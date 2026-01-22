@@ -38,13 +38,13 @@ import {
   PlanApprovalDialog,
   ImportWorkItemsDialog,
 } from './board-view/dialogs';
-import { AgentStuckModal } from './board-view/dialogs/agent-stuck-modal';
 import { PipelineSettingsDialog } from './board-view/dialogs/pipeline-settings-dialog';
 import { CreateWorktreeDialog } from './board-view/dialogs/create-worktree-dialog';
 import { DeleteWorktreeDialog } from './board-view/dialogs/delete-worktree-dialog';
 import { CommitWorktreeDialog } from './board-view/dialogs/commit-worktree-dialog';
 import { CreatePRDialog } from './board-view/dialogs/create-pr-dialog';
 import { CreateBranchDialog } from './board-view/dialogs/create-branch-dialog';
+import { AgentStuckModal } from './board-view/dialogs/agent-stuck-modal';
 import { WorktreePanel } from './board-view/worktree-panel';
 import type { PRInfo, WorktreeInfo } from './board-view/worktree-panel/types';
 import { COLUMNS } from './board-view/constants';
@@ -149,12 +149,13 @@ export function BoardView() {
   // Pipeline settings dialog state
   const [showPipelineSettings, setShowPipelineSettings] = useState(false);
 
-  // Agent stuck modal state
+  // Agent stuck intervention modal state
   const [showAgentStuckModal, setShowAgentStuckModal] = useState(false);
   const [agentStuckData, setAgentStuckData] = useState<{
     featureId: string;
+    featureTitle: string;
     errorCount: number;
-    lastError?: string;
+    recentErrors: string[];
   } | null>(null);
 
   // Follow-up state hook
@@ -755,18 +756,6 @@ export function BoardView() {
             pendingFeaturesRef.current.delete(event.featureId);
           }
           break;
-
-        case 'planning-files:agent-stuck':
-          // Agent is stuck and needs intervention
-          if ('featureId' in event && 'errorCount' in event) {
-            setAgentStuckData({
-              featureId: event.featureId as string,
-              errorCount: event.errorCount as number,
-              lastError: 'lastError' in event ? (event.lastError as string) : undefined,
-            });
-            setShowAgentStuckModal(true);
-          }
-          break;
       }
     });
 
@@ -803,6 +792,32 @@ export function BoardView() {
 
     return unsubscribe;
   }, []);
+
+  // Listen for agent stuck events (planning:agent-stuck)
+  useEffect(() => {
+    const api = getElectronAPI();
+    if (!api?.autoMode) return;
+
+    const unsubscribe = api.autoMode.onEvent((event: AutoModeEvent) => {
+      if (!currentProject) return;
+
+      // Check if this is an agent stuck event (via metadata)
+      if ((event as any).metadata?.eventType === 'planning:agent-stuck') {
+        const metadata = (event as any).metadata;
+        const feature = hookFeatures.find((f) => f.id === metadata.featureId);
+
+        setAgentStuckData({
+          featureId: metadata.featureId,
+          featureTitle: feature?.description || 'Unknown Feature',
+          errorCount: metadata.errorCount || 0,
+          recentErrors: metadata.recentErrors || [],
+        });
+        setShowAgentStuckModal(true);
+      }
+    });
+
+    return unsubscribe;
+  }, [currentProject, hookFeatures]);
 
   useEffect(() => {
     if (!autoMode.isRunning || !currentProject) {
@@ -1632,31 +1647,38 @@ export function BoardView() {
         }}
       />
 
-      {/* Agent Stuck Modal */}
+      {/* Agent Stuck Intervention Modal */}
       {agentStuckData && (
         <AgentStuckModal
           open={showAgentStuckModal}
-          onClose={() => setShowAgentStuckModal(false)}
+          onClose={() => {
+            setShowAgentStuckModal(false);
+            setAgentStuckData(null);
+          }}
           featureId={agentStuckData.featureId}
-          featureName={
-            hookFeatures.find((f) => f.id === agentStuckData.featureId)?.title || 'Unknown Feature'
-          }
+          featureTitle={agentStuckData.featureTitle}
           errorCount={agentStuckData.errorCount}
-          lastError={agentStuckData.lastError}
-          onResumeWithGuidance={async (guidance) => {
-            // TODO: Implement resume with guidance - inject guidance message and continue
-            console.log('Resume with guidance:', guidance);
-            toast.info('Resume with guidance - not yet implemented');
+          recentErrors={agentStuckData.recentErrors}
+          onRetry={() => {
+            // Find the feature and retry it
+            const feature = hookFeatures.find((f) => f.id === agentStuckData.featureId);
+            if (feature) {
+              handleResumeFeature(feature);
+            }
           }}
-          onSkipTask={async () => {
-            // TODO: Implement skip task - mark task as blocked, move to next
-            console.log('Skip task');
-            toast.info('Skip task - not yet implemented');
+          onStop={() => {
+            // Find the feature and stop it
+            const feature = hookFeatures.find((f) => f.id === agentStuckData.featureId);
+            if (feature) {
+              handleForceStopFeature(feature);
+            }
           }}
-          onRestartTask={async () => {
-            // TODO: Implement restart task - clear progress, restart from beginning
-            console.log('Restart task');
-            toast.info('Restart task - not yet implemented');
+          onEditPlan={() => {
+            // Open the output modal to let user edit the plan
+            const feature = hookFeatures.find((f) => f.id === agentStuckData.featureId);
+            if (feature) {
+              handleViewOutput(feature);
+            }
           }}
         />
       )}

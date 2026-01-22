@@ -614,14 +614,14 @@ Proceeding with your large file, but STRONGLY recommend simplifying.`,
           const isWriteTool = ['create_file', 'update_file', 'write_file'].includes(toolName);
           if (isWriteTool) {
             try {
-              await this.planningService.appendProgress(this.projectPath, this.featureId, {
-                taskId: 'auto',
-                timestamp: new Date().toISOString(),
-                toolName,
-                input: JSON.parse(toolCall?.function.arguments || '{}'),
-                output: result.output.substring(0, 500),
-                success: result.success,
-              });
+              const progressContent = `**Tool:** ${toolName}\n**Status:** ${result.success ? '✅ Success' : '❌ Failed'}\n**Output:** ${result.output.substring(0, 500)}${result.output.length > 500 ? '...' : ''}`;
+              await this.planningService.appendToProgress(
+                this.projectPath,
+                this.featureId,
+                progressContent,
+                'auto',
+                toolName
+              );
             } catch (err) {
               logger.debug('[Planning] Could not log progress:', err);
             }

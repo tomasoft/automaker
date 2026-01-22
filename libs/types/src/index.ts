@@ -60,6 +60,18 @@ export { specOutputSchema } from './spec.js';
 // Enhancement types
 export type { EnhancementMode, EnhancementExample } from './enhancement.js';
 
+// Planning files types
+export type {
+  CatchupStrategy,
+  PlanningFileMetrics,
+  PlanningFileStatus,
+  CatchupReport,
+  TaskSection,
+  ProgressRotationIndex,
+  QuickIndex,
+  PlanCheckpointContext,
+} from './planning.js';
+
 // Prompt customization types
 export type {
   CustomPrompt,

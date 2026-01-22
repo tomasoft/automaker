@@ -1356,8 +1356,13 @@ export class HttpApiClient implements ElectronAPI {
       this.post('/api/features/delete', { projectPath, featureId }),
     getAgentOutput: (projectPath: string, featureId: string) =>
       this.post('/api/features/agent-output', { projectPath, featureId }),
-    getPlanningFiles: (projectPath: string, featureId: string) =>
-      this.get(`/api/features/${projectPath}/${featureId}/planning-files`),
+    getPlanningFile: (
+      projectPath: string,
+      featureId: string,
+      fileType: 'task_plan' | 'findings' | 'progress'
+    ) => this.post('/api/features/planning-file', { projectPath, featureId, fileType }),
+    getPlanningStatus: (projectPath: string, featureId: string) =>
+      this.post('/api/features/planning-status', { projectPath, featureId }),
     generateTitle: (description: string) =>
       this.post('/api/features/generate-title', { description }),
     analyzeImpact: (feature: any, projectPath: string) =>

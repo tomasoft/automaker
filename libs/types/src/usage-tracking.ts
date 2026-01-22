@@ -124,12 +124,12 @@ export interface LogUsageRequest {
     | 'verification'
     | 'spec-generation'
     | 'agent'
-    | 'feature-generation'
+    | 'suggestions'
     | 'backlog-planning'
+    | 'feature-generation'
+    | 'prompt-enhancement'
     | 'file-description'
     | 'image-description'
-    | 'prompt-enhancement'
-    | 'suggestions'
     | 'ideation';
   tokens: TokenUsage;
   cost?: CostBreakdown; // Optional, will be calculated if not provided

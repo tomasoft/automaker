@@ -10,7 +10,6 @@
  */
 
 import { ProviderFactory } from '../providers/provider-factory.js';
-import { PlanningFilesService } from './planning-files-service.js';
 import type {
   ExecuteOptions,
   Feature,
@@ -46,6 +45,8 @@ import {
 import { FeatureLoader } from './feature-loader.js';
 import type { SettingsService } from './settings-service.js';
 import { WikiService } from './wiki-service.js';
+import { PlanningFilesService } from './planning-files-service.js';
+import { PlanCheckpointManager } from '../lib/plan-checkpoint-manager.js';
 import mammoth from 'mammoth';
 import { pipelineService, PipelineService } from './pipeline-service.js';
 import {
@@ -545,22 +546,6 @@ export class AutoModeService {
         const planningPrefix = await this.getPlanningPromptPrefix(feature);
         prompt = planningPrefix + featurePrompt;
 
-        // Initialize planning files for persistent mode
-        if (feature.planningMode && feature.planningMode === 'persistent') {
-          try {
-            await this.planningFilesService.initializePlanningFiles(
-              projectPath,
-              featureId,
-              feature.title || 'Untitled Feature',
-              feature.description || ''
-            );
-            logger.info(`Initialized planning files for feature ${featureId} in persistent mode`);
-          } catch (error) {
-            logger.error(`Failed to initialize planning files:`, error);
-            // Don't fail the feature execution, just log the error
-          }
-        }
-
         // Emit planning mode info
         if (feature.planningMode && feature.planningMode !== 'skip') {
           this.emitAutoModeEvent('planning_started', {
@@ -604,6 +589,34 @@ export class AutoModeService {
       logger.info(`First 500 chars of prompt:\n${prompt.substring(0, 500)}...`);
       logger.info(`${'='.repeat(80)}\n`);
 
+      // Initialize planning files for persistent planning pattern (default: enabled)
+      const usePlanningFiles = feature.usePlanningFiles !== false; // Default true
+      if (usePlanningFiles) {
+        await this.planningFilesService.initializePlanningFiles(
+          projectPath,
+          featureId,
+          feature.title || `Feature ${featureId}`,
+          feature.spec
+        );
+        logger.info(`Initialized planning files for feature ${featureId}`);
+
+        // Check for stale planning files and generate catchup report if needed
+        const catchupReport = await this.planningFilesService.generateCatchupReport(
+          projectPath,
+          featureId,
+          model
+        );
+        if (catchupReport && catchupReport.hasStaleFiles) {
+          logger.info(
+            `Generated catchup report for feature ${featureId}: ${catchupReport.messagesLost} messages recovered`
+          );
+          // Prepend catchup report to prompt
+          prompt = catchupReport.catchupContent + '\n\n' + prompt;
+        }
+      } else {
+        logger.info(`Planning files disabled for feature ${featureId}`);
+      }
+
       // Run the agent with the feature's model and images
       // Context files are passed as system prompt for higher priority
       await this.runAgent(
@@ -621,6 +634,7 @@ export class AutoModeService {
           systemPrompt: contextFilesPrompt || undefined,
           autoLoadClaudeMd,
           thinkingLevel: feature.thinkingLevel,
+          usePlanningFiles, // Pass planning files flag to runAgent
         }
       );
 
@@ -890,24 +904,6 @@ Complete the pipeline step instructions above. Review the previous work and appl
   async resumeFeature(projectPath: string, featureId: string, useWorktrees = false): Promise<void> {
     if (this.runningFeatures.has(featureId)) {
       throw new Error('already running');
-    }
-
-    // Check for stale planning files in persistent mode
-    try {
-      const feature = await this.loadFeature(projectPath, featureId);
-      if (feature && feature.planningMode === 'persistent') {
-        const staleInfo = await this.planningFilesService.detectStaleFiles(projectPath, featureId);
-
-        if (staleInfo.isStale && staleInfo.lastUpdate) {
-          const ageMs = Date.now() - staleInfo.lastUpdate.getTime();
-          const hours = Math.round(ageMs / 3600000);
-          logger.warn(`Stale planning files detected for feature ${featureId} (${hours}h old)`);
-          // Note: Could emit event here to notify UI if needed
-        }
-      }
-    } catch (err) {
-      // Don't fail resume if planning file check fails
-      logger.debug('Could not check planning file staleness:', err);
     }
 
     // Check if context exists in .automaker directory
@@ -1892,6 +1888,78 @@ Format your response as a structured markdown document.`;
     }
   }
 
+  /**
+   * Detect task completions from agent text and update task_plan.md checkboxes
+   */
+  private async detectAndTrackTaskCompletion(
+    projectPath: string,
+    featureId: string,
+    textBlock: string,
+    usePlanningFiles: boolean
+  ): Promise<void> {
+    if (!usePlanningFiles) return;
+
+    // Look for patterns indicating task completion:
+    // - "completed T001", "finished T002", "done with T003"
+    // - "✅ T001", "✓ T001"
+    // - "T001: [completed/done/finished]"
+    const taskCompletionPatterns = [
+      /(?:completed|finished|done(?:\s+with)?|✅|✓)\s+T(\d{3})/gi,
+      /T(\d{3})\s*:?\s*(?:completed|done|finished)/gi,
+    ];
+
+    const completedTaskIds = new Set<string>();
+    for (const pattern of taskCompletionPatterns) {
+      const matches = textBlock.matchAll(pattern);
+      for (const match of matches) {
+        completedTaskIds.add(`T${match[1]}`);
+      }
+    }
+
+    if (completedTaskIds.size === 0) return;
+
+    try {
+      // Read current task_plan.md
+      const taskPlan = await this.planningFilesService.readTaskPlan(projectPath, featureId);
+      if (!taskPlan) return;
+
+      let updatedPlan = taskPlan;
+      let changesCount = 0;
+
+      // Update checkboxes for completed tasks
+      for (const taskId of completedTaskIds) {
+        // Replace - [ ] T### with - [x] T###
+        const uncheckedPattern = new RegExp(`- \\[ \\] ${taskId}:`, 'g');
+        if (uncheckedPattern.test(updatedPlan)) {
+          updatedPlan = updatedPlan.replace(uncheckedPattern, `- [x] ${taskId}:`);
+          changesCount++;
+          logger.info(`Marked task ${taskId} as completed in task_plan.md`);
+        }
+      }
+
+      if (changesCount > 0) {
+        // Write updated task_plan.md
+        await this.planningFilesService.updateTaskPlan(projectPath, featureId, updatedPlan);
+
+        // Count total completed tasks
+        const totalCompleted = (updatedPlan.match(/- \[x\]/g) || []).length;
+        const totalTasks = (updatedPlan.match(/- \[[ x]\] T\d{3}/g) || []).length;
+
+        // Update planSpec with progress
+        await this.updateFeaturePlanSpec(projectPath, featureId, {
+          tasksCompleted: totalCompleted,
+          tasksTotal: totalTasks,
+        });
+
+        logger.info(
+          `Task progress for ${featureId}: ${totalCompleted}/${totalTasks} tasks completed`
+        );
+      }
+    } catch (error) {
+      logger.warn('Failed to track task completion:', error);
+    }
+  }
+
   private async loadPendingFeatures(projectPath: string): Promise<Feature[]> {
     // Features are stored in .automaker directory
     const featuresDir = getFeaturesDir(projectPath);
@@ -2424,11 +2492,13 @@ This helps parse your summary correctly in the output logs.`;
       systemPrompt?: string;
       autoLoadClaudeMd?: boolean;
       thinkingLevel?: ThinkingLevel;
+      usePlanningFiles?: boolean; // Enable/disable planning-with-files pattern
     }
   ): Promise<void> {
     const finalProjectPath = options?.projectPath || projectPath;
     const planningMode = options?.planningMode || 'skip';
     const previousContent = options?.previousContent;
+    const usePlanningFiles = options?.usePlanningFiles !== false; // Default true
 
     // Check if this planning mode can generate a spec/plan that needs approval
     // - spec and full always generate specs
@@ -2534,23 +2604,15 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
     // Get provider for this model
     // For custom agents (Copilot, Local LLM), enable agenticMode for full codebase access
     const isCustomAgent = finalModel.startsWith('copilot-') || finalModel.startsWith('local-llm-');
-
-    // Get feature for planning mode check
-    const feature = await this.loadFeature(projectPath, featureId);
-    const isPersistentMode = feature?.planningMode === 'persistent';
-
     const provider = isCustomAgent
       ? ProviderFactory.getProviderForModel(finalModel, {
           agenticMode: true,
           projectRoot: workDir,
-          planningService: isPersistentMode ? this.planningFilesService : undefined,
-          featureId: isPersistentMode ? featureId : undefined,
-          projectPath: isPersistentMode ? projectPath : undefined,
         })
       : ProviderFactory.getProviderForModel(finalModel);
 
     logger.info(
-      `Using provider "${provider.getName()}" for model "${finalModel}"${isCustomAgent ? ' (agentic mode enabled)' : ''}${isPersistentMode ? ' with planning-files' : ''}`
+      `Using provider "${provider.getName()}" for model "${finalModel}"${isCustomAgent ? ' (agentic mode enabled)' : ''}`
     );
 
     // Build prompt content with images using utility
@@ -2714,6 +2776,14 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
                     "Please check your ANTHROPIC_API_KEY, or run 'claude login' to re-authenticate."
                 );
               }
+
+              // Detect task completions from agent output
+              await this.detectAndTrackTaskCompletion(
+                projectPath,
+                featureId,
+                block.text || '',
+                usePlanningFiles
+              );
 
               // Schedule incremental file write (debounced)
               scheduleWrite();
@@ -3003,9 +3073,10 @@ After generating the revised spec, output:
                       parsedTasks,
                       taskIndex,
                       approvedPlanContent,
+                      userFeedback,
                       projectPath,
                       featureId,
-                      userFeedback
+                      usePlanningFiles // Pass planning files flag
                     );
 
                     // Execute task with dedicated agent
@@ -3169,6 +3240,20 @@ Implement all the changes described in the plan above.`;
                 input: block.input,
               });
 
+              // Log to progress.md if planning files are enabled
+              if (usePlanningFiles) {
+                try {
+                  const toolSummary = `Tool: ${block.name}${block.input && typeof block.input === 'object' && 'path' in block.input ? ` (${block.input.path})` : ''}`;
+                  await this.planningFilesService.appendToProgress(
+                    projectPath,
+                    featureId,
+                    toolSummary
+                  );
+                } catch (err) {
+                  logger.warn('Failed to log tool use to progress.md:', err);
+                }
+              }
+
               // Also add to file output for persistence
               if (responseText.length > 0 && !responseText.endsWith('\n')) {
                 responseText += '\n';
@@ -3193,6 +3278,18 @@ Implement all the changes described in the plan above.`;
           // Log tool executions (especially execute_command) to agent output for test validation
           if (msg.result && typeof msg.result === 'object' && 'tool' in msg.result) {
             const toolResult = msg.result as { tool?: string; output?: string; error?: string };
+
+            // Log execute_command results to progress.md
+            if (usePlanningFiles && toolResult.tool === 'execute_command') {
+              try {
+                const status = toolResult.error ? '❌ Failed' : '✅ Success';
+                const summary = `${status}: Command execution`;
+                await this.planningFilesService.appendToProgress(projectPath, featureId, summary);
+              } catch (err) {
+                logger.warn('Failed to log command result to progress.md:', err);
+              }
+            }
+
             if (toolResult.tool === 'execute_command' && (toolResult.output || toolResult.error)) {
               const toolLog = `\n\n---\n**Tool: ${toolResult.tool}**\n\n\`\`\`\n${toolResult.output || toolResult.error}\n\`\`\`\n---\n\n`;
               responseText += toolLog;
@@ -3297,12 +3394,19 @@ Review the previous work and continue the implementation. If the feature appears
     allTasks: ParsedTask[],
     taskIndex: number,
     planContent: string,
+    userFeedback: string | undefined,
     projectPath: string,
     featureId: string,
-    userFeedback?: string
+    usePlanningFiles = true // Default true for planning-with-files
   ): Promise<string> {
     const completedTasks = allTasks.slice(0, taskIndex);
     const remainingTasks = allTasks.slice(taskIndex + 1);
+
+    // Read current task_plan.md for up-to-date status (if planning files enabled)
+    let currentPlan: string | null = null;
+    if (usePlanningFiles) {
+      currentPlan = await this.planningFilesService.readTaskPlan(projectPath, featureId);
+    }
 
     let prompt = `# Task Execution: ${task.id}
 
@@ -3318,24 +3422,6 @@ ${task.phase ? `**Phase:** ${task.phase}` : ''}
 ## Context
 
 `;
-
-    // For persistent mode, inject task_plan.md
-    try {
-      const feature = await this.loadFeature(projectPath, featureId);
-      if (feature && feature.planningMode === 'persistent') {
-        const taskPlan = await this.planningFilesService.readTaskPlan(projectPath, featureId);
-        if (taskPlan) {
-          prompt += `### 📋 Current Plan (task_plan.md)
-
-${taskPlan}
-
-`;
-        }
-      }
-    } catch (err) {
-      // If we can't read planning file, continue without it
-      logger.debug('Could not read task_plan.md for task prompt:', err);
-    }
 
     // Show what's already done
     if (completedTasks.length > 0) {
@@ -3365,6 +3451,20 @@ ${userFeedback}
 `;
     }
 
+    // Inject current task_plan.md for goal awareness
+    if (currentPlan) {
+      prompt += `### Current Planning Files
+
+**task_plan.md** (your master plan - checkboxes show progress):
+\`\`\`markdown
+${currentPlan}
+\`\`\`
+
+**IMPORTANT**: Update task_plan.md checkboxes as you complete this task.
+
+`;
+    }
+
     // Add relevant excerpt from plan (just the task-related part to save context)
     prompt += `### Reference: Full Plan
 <details>
@@ -3376,7 +3476,9 @@ ${planContent}
 1. Focus ONLY on completing task ${task.id}: "${task.description}"
 2. Do not work on other tasks
 3. Use the existing codebase patterns
-4. When done, summarize what you implemented
+4. Log any errors in progress.md with timestamp
+5. When done, update task_plan.md to mark this task complete
+6. Summarize what you implemented
 
 Begin implementing task ${task.id} now.`;
 

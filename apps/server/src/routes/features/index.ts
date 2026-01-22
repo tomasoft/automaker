@@ -14,7 +14,7 @@ import { createDeleteHandler } from './routes/delete.js';
 import { createAgentOutputHandler, createRawOutputHandler } from './routes/agent-output.js';
 import { createGenerateTitleHandler } from './routes/generate-title.js';
 import { createAnalyzeFeatureImpactRoute } from './routes/analyze-impact.js';
-import planningFilesRouter from './routes/planning-files.js';
+import { createPlanningFileHandler, createPlanningStatusHandler } from './routes/planning-files.js';
 import type { SettingsService } from '../../services/settings-service.js';
 
 export function createFeaturesRoutes(
@@ -36,6 +36,8 @@ export function createFeaturesRoutes(
   router.post('/agent-output', createAgentOutputHandler(featureLoader));
   router.post('/raw-output', createRawOutputHandler(featureLoader));
   router.post('/generate-title', createGenerateTitleHandler());
+  router.post('/planning-file', createPlanningFileHandler());
+  router.post('/planning-status', createPlanningStatusHandler());
 
   // Impact analysis route (requires settingsService)
   if (settingsService) {
@@ -45,9 +47,6 @@ export function createFeaturesRoutes(
       createAnalyzeFeatureImpactRoute(settingsService)
     );
   }
-
-  // Planning files routes
-  router.use('', planningFilesRouter);
 
   return router;
 }

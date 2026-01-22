@@ -215,10 +215,11 @@ export const TOOL_PRESETS = {
 
 /**
  * Max turns presets for different use cases
+ * Note: Increased from 50 to 75 to accommodate planning file re-reads
  */
 export const MAX_TURNS = {
   /** Quick operations that shouldn't need many iterations */
-  quick: 50,
+  quick: 75,
 
   /** Standard operations */
   standard: 100,

@@ -20,7 +20,7 @@ export function createCheckAzureAuthHandler() {
 
       logger.info(`[check-auth] Request received, sessionId from query: ${sessionId}`);
 
-      let authManager: AzureDevOpsAuthManager | null = null;
+      let authManager: AzureDevOpsAuthManager | null | undefined = null;
       let actualSessionId: string | undefined;
 
       if (sessionId) {

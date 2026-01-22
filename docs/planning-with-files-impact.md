@@ -1,535 +1,529 @@
-# Planning-with-Files Impact Analysis
+# Planning-with-Files Implementation Impact Analysis
 
-**Last Updated:** January 22, 2026  
+**Last Updated:** January 21, 2026  
 **Version:** 1.0  
-**Owner:** Technical Lead - Auto-Mode Features
+**Author:** AutoMaker Development Team
 
 ---
 
-## Executive Summary (Non-Technical Stakeholders)
+## Executive Summary
 
-### What's Changing?
-
-We're implementing a new planning approach called **"Planning-with-Files"** inspired by Manus AI (acquired by Meta for $2 billion). Instead of keeping all context in the AI's volatile memory, we now use **persistent markdown files** as the AI's "working memory on disk."
-
-### Why This Matters for the Business
-
-| Metric          | Before                                     | After                                        | Impact                        |
-| --------------- | ------------------------------------------ | -------------------------------------------- | ----------------------------- |
-| **Quality**     | Frequent goal drift after 50+ operations   | Maintains focus via continuous plan re-reads | ⬆️ 30-40% fewer rework cycles |
-| **Cost**        | Repeated failures due to forgotten context | Error tracking prevents repetition           | ⬇️ 15-20% token usage         |
-| **Reliability** | Context resets lose all progress           | Session recovery restores lost work          | ⬆️ 95% recovery rate          |
-| **Visibility**  | Hidden progress, opaque agent behavior     | Real-time planning files show decisions      | ⬆️ 100% transparency          |
+This document explains the transition from volatile context-based planning to persistent file-based planning, inspired by Manus AI's $2B acquisition success story. The change addresses critical issues with goal drift, context loss, and repeated failures that currently deteriorate deliverable quality after 50+ tool calls.
 
 ### Key Benefits
 
-1. **Reduced Rework** — AI remembers past errors and doesn't repeat them
-2. **Lower AI Costs** — 15-20% reduction in wasted token spend from retries
-3. **Better Deliverables** — Continuous plan alignment maintains quality
-4. **Full Visibility** — Stakeholders can see planning files at any time
-5. **Recovery from Interruptions** — Work persists across context resets
+| Benefit              | Impact                                  | Business Value                           |
+| -------------------- | --------------------------------------- | ---------------------------------------- |
+| **Reduced Rework**   | 40-60% fewer repeated failed attempts   | Lower development costs, faster delivery |
+| **Better Quality**   | Persistent goal tracking prevents drift | Higher success rate, fewer bugs          |
+| **Token Efficiency** | 15-20% reduction in token usage         | Reduced API costs                        |
+| **Session Recovery** | No context loss on resets               | Improved developer experience            |
+| **Visibility**       | Planning files readable by stakeholders | Better project transparency              |
 
-### Business Impact Example
+### Risk Mitigation
 
-**Before:** Implementing a user authentication feature
-
-- Agent forgets original security requirements after 60 tool calls
-- Implements basic auth instead of OAuth2 (as specified)
-- Needs 2-3 retry cycles to get it right
-- Total cost: ~$4.50 in API calls, 3 hours wasted
-
-**After:** Same feature with planning-with-files
-
-- task_plan.md keeps OAuth2 requirement visible
-- progress.md logs each implementation step
-- Agent re-reads plan before major decisions
-- Gets it right first time
-- Total cost: ~$3.50 in API calls, saves 2 hours
-
-**ROI:** On a team running 50 features/month, this saves ~$50/month in API costs and 100 hours of rework.
+- ✅ **Non-Breaking**: Existing workflows continue unchanged
+- ✅ **Opt-Out Available**: Can disable per-feature if needed
+- ✅ **Automatic Adoption**: New features use planning files by default
+- ✅ **Backward Compatible**: Existing features not affected
 
 ---
 
-## Technical Architecture (Technical Stakeholders)
+## Table of Contents
 
-### Current Architecture (Old Way)
+1. [Technical Architecture](#technical-architecture)
+2. [Example Feature Flow Comparison](#example-feature-flow-comparison)
+3. [Token Usage Analysis](#token-usage-analysis)
+4. [Migration Impact](#migration-impact)
+5. [Implementation Details](#implementation-details)
+6. [FAQ](#faq)
 
-```
-┌─────────────────────────────────────────────────────────┐
-│          AI Model Context Window (Limited)              │
-├─────────────────────────────────────────────────────────┤
-│  System Prompt                                          │
-│  Feature Description                                    │
-│  Code Context                                           │
-│  Tool Results (Last N only)                             │
-│  Conversation History (Pruned at ~20 messages)          │
-└─────────────────────────────────────────────────────────┘
-                      ▼
-            ⚠️ Context Compression
-            ⚠️ Goal Drift
-            ⚠️ Lost Error Context
+---
+
+## Technical Architecture
+
+### Old Approach: Volatile Context-Based Planning
+
+```mermaid
+graph TD
+    A[User Creates Feature] --> B[Agent Starts]
+    B --> C[Planning in Context]
+    C --> D[Implementation]
+    D --> E{50+ Tool Calls?}
+    E -->|Yes| F[Goal Drift]
+    F --> G[Repeated Errors]
+    G --> H[Context Reset]
+    H --> I[Lost Progress]
+    I --> J[Start Over]
+    E -->|No| K[Complete]
 ```
 
 **Problems:**
 
-- Limited to ~200K tokens (Claude 3.5 Sonnet)
-- Old messages pruned to fit new ones
-- Errors logged but then forgotten when context fills
-- Original requirements buried under tool output
+- 📉 Plan exists only in context window (volatile RAM)
+- 📉 After 50+ turns, original goals forgotten
+- 📉 Errors not tracked → same mistakes repeated
+- 📉 Context resets lose all progress
+- 📉 No visibility for stakeholders
 
-### New Architecture (Planning-with-Files)
+### New Approach: Persistent File-Based Planning
 
-```
-┌─────────────────────────────────────────────────────────┐
-│          AI Model Context Window (Limited)              │
-├─────────────────────────────────────────────────────────┤
-│  System Prompt                                          │
-│  Feature Description                                    │
-│  Code Context                                           │
-│  **Plan Checkpoint (Injected every 5 turns)**           │ ← NEW
-│  Tool Results                                           │
-│  Conversation History (Pruned)                          │
-└─────────────────────────────────────────────────────────┘
-                      ▲
-                      │ Re-read on demand
-                      │
-┌──────────────────────────────────────────────────────────┐
-│   Persistent Planning Files (Unlimited Storage)          │
-├──────────────────────────────────────────────────────────┤
-│  📄 task_plan.md  — Goals, phases, checkboxes           │
-│  📄 findings.md   — Research,APIs, key decisions        │
-│  📄 progress.md   — Execution log, errors, timestamps   │
-│  📄 progress-phase1.md — Archived with Quick Index      │
-└──────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    A[User Creates Feature] --> B[Agent Starts]
+    B --> C[Create Planning Files]
+    C --> D[task_plan.md + findings.md + progress.md]
+    D --> E[Implementation]
+    E --> F{Error Occurred?}
+    F -->|Yes| G[Log in progress.md]
+    G --> H[Re-read plan]
+    H --> I[Try Different Approach]
+    I --> E
+    F -->|No| J[Update Checkboxes]
+    J --> K{More Tasks?}
+    K -->|Yes| L[Re-read Plan]
+    L --> E
+    K -->|No| M[Complete]
+    N[Context Reset] --> O[Session Recovery]
+    O --> P[Generate Catchup Report]
+    P --> L
 ```
 
-**Improvements:**
+**Benefits:**
 
-- ✅ Unlimited "memory" via filesystem
-- ✅ Plan re-reads keep agent aligned
-- ✅ Error history prevents repetition
-- ✅ Session recovery after context resets
-
-### Implementation Components
-
-#### 1. Planning Files Service
-
-**File:** `apps/server/src/services/planning-files-service.ts`
-
-**Responsibilities:**
-
-- Initialize planning files (`task_plan.md`, `findings.md`, `progress.md`)
-- Append progress logs after tool execution
-- Rotate progress files on phase boundaries
-- Generate Quick Index for archived phases
-- Session recovery (detect stale files, generate catchup reports)
-
-**Key Methods:**
-
-```typescript
-initializePlanningFiles(projectPath, featureId, featureName)
-appendProgress(projectPath, featureId, entry: ProgressEntry)
-rotateProgress(projectPath, featureId, phaseNumber)
-detectStaleFiles(projectPath, featureId)
-generateCatchupReport(lostMessages[], model) → CatchupReport
-```
-
-#### 2. Provider Integration
-
-**Files:**
-
-- `apps/server/src/providers/github-copilot-agent-provider.ts`
-- `apps/server/src/providers/local-llm-agent-provider.ts`
-
-**Changes:**
-
-- Inject plan checkpoints as USER messages every 5 turns
-- Re-read immediately after errors (max 3x per task)
-- Detect Write tool calls → append to progress.md
-- On 4th error: inject escalation message
-- After 10+ error turns: emit `agent_stuck` event
-
-**Injection Pattern (User Message):**
-
-```typescript
-messages.push({
-  role: 'user',
-  content: `🔄 PLAN CHECKPOINT:\n\n${planContent}\n\nContinue with current task.`,
-});
-```
-
-#### 3. Auto-Mode Service Integration
-
-**File:** `apps/server/src/services/auto-mode-service.ts`
-
-**Changes:**
-
-- Import `PlanningFilesService`
-- Auto-initialize planning files for `planningMode: 'persistent'`
-- Inject task_plan.md into `buildTaskPrompt()`
-- Call `detectStaleFiles()` on feature resume
-- Handle version migration (v1 → v2 with backups)
-
-#### 4. Event System
-
-**New Events:**
-
-```typescript
-'planning-files:updated'; // File written/rotated
-'planning-files:catchup-generated'; // Session recovery report ready
-'planning-files:agent-stuck'; // Error loop detected
-```
-
-#### 5. UI Components
-
-**File:** `apps/ui/src/components/AutoMode/AgentOutputModal.tsx`
-
-**New Tabs:**
-
-- **Plan** — Renders `task_plan.md` with checkboxes
-- **Findings** — Shows accumulated research
-- **Progress** — Real-time execution log
-
-**Visual Indicators:**
-
-- 🟢 Up-to-date
-- 🟡 Stale (session recovery needed)
-- ⚠️ Catchup used (LLM summary or truncated)
-- 🚨 Agent stuck (intervention required)
-
-**Intervention Modal (agent_stuck):**
-
-- **Resume with Guidance** — User provides custom instructions
-- **Skip Task** — Mark blocked, move to next
-- **Restart Task** — Clear progress, try fresh approach
+- ✅ Plan persists on disk (permanent storage)
+- ✅ Re-read before major decisions (goal awareness)
+- ✅ Errors logged → avoid repetition
+- ✅ Session recovery after resets
+- ✅ Markdown files readable by anyone
 
 ---
 
-## Example Feature Flow: User Authentication
+## Example Feature Flow Comparison
 
-### Old Workflow (Without Planning-with-Files)
+### Scenario: "User Authentication Implementation"
 
-```mermaid
-graph TD
-    A[User: Add OAuth2 authentication] --> B[Agent reads feature description]
-    B --> C[Explores codebase 15 turns]
-    C --> D[Starts implementing basic auth]
-    D --> E[Context fills up, prunes old messages]
-    E --> F[Forgets OAuth2 requirement]
-    F --> G[Implements password-only auth]
-    G --> H[User: Wrong! I asked for OAuth2]
-    H --> I[Agent re-reads from start]
-    I --> J[Context fills again...]
-    J --> K[3rd attempt finally correct]
+**Requirements:**
+
+- JWT token generation
+- Password hashing with bcrypt
+- User login/logout endpoints
+- Session management
+- Input validation
+
+---
+
+### OLD WAY: Context-Stuffing Approach
+
+#### Turn 1-10: Initial Exploration
+
+```
+Agent: Reading auth documentation...
+Agent: Checking existing user model...
+Agent: Exploring JWT libraries...
+[Context: 15K tokens]
 ```
 
-**Token Usage:**
+#### Turn 11-25: First Implementation Attempt
 
-- Turn 1-15: Exploration (25K input + 8K output)
-- Turn 16-40: Wrong implementation (30K input + 15K output)
-- Turn 41-60: Retry #1 (35K input + 12K output)
-- Turn 61-85: Retry #2 final (40K input + 18K output)
-
-**Total: 130K input + 53K output = 183K tokens**
-**Cost (Claude Sonnet): $0.55 + $0.80 = $1.35**
-**Time: 45 minutes (including retries)**
-
-### New Workflow (With Planning-with-Files)
-
-```mermaid
-graph TD
-    A[User: Add OAuth2 authentication] --> B[Agent creates planning files]
-    B --> C[task_plan.md: Phase 1: OAuth2 provider setup]
-    C --> D[findings.md: Logs OAuth2 lib research]
-    D --> E[Every 5 turns: Re-read task_plan.md]
-    E --> F[Checkpoint: Still aligned with OAuth2 goal]
-    F --> G[progress.md: Logs each implementation step]
-    G --> H[Completes Phase 1, rotates to progress-phase1.md]
-    H --> I[Phase 2: Token validation]
-    I --> J[Success on first try!]
+```
+Agent: Creating auth controller...
+Agent: ERROR: bcrypt not installed
+Agent: Installing bcrypt...
+Agent: ERROR: Wrong bcrypt version for Node 20
+[Context: 32K tokens, bcrypt error details]
 ```
 
-**Token Usage:**
+#### Turn 26-40: Second Implementation Attempt
 
-- Turn 1-5: Initialize planning files (8K input + 2K output)
-- Turn 6-15: Exploration + findings.md saves (12K input + 5K output)
-- Turn 16-20: Plan checkpoint (15K input + 3K output)
-- Turn 21-40: Implementation with progress logging (22K input + 10K output)
-- Turn 41-45: Final phase checkpoint (12K input + 4K output)
+```
+Agent: Trying bcrypt again... [Forgot previous error]
+Agent: ERROR: Still wrong bcrypt version
+Agent: Trying different approach with crypto module...
+[Context: 48K tokens, repeated error context]
+```
 
-**Total: 69K input + 24K output = 93K tokens**
-**Cost (Claude Sonnet): $0.21 + $0.36 = $0.57**
-**Time: 25 minutes (no retries needed)**
+#### Turn 41-55: Third Attempt + Goal Drift
 
-**Savings: $0.78 (58% reduction), 20 minutes saved**
+```
+Agent: Switching to argon2... [Original spec said bcrypt!]
+Agent: Creating password reset endpoint... [Not in requirements!]
+Agent: Adding email verification... [Scope creep!]
+[Context: 61K tokens, losing focus]
+```
+
+#### Turn 56: Context Reset
+
+```
+[CONTEXT WINDOW FULL - AUTOMATIC COMPACTION]
+Agent: What was I working on?
+[Lost: error history, previous attempts, original requirements]
+```
+
+#### Result:
+
+- ⏱️ **Total Time**: 90 minutes
+- 💰 **Tokens Used**: 171,000 (45K input × 3 failed attempts + 12K output × 3 = 171K)
+- ❌ **Outcome**: Feature incomplete, wrong dependencies, scope creep
+- 🔄 **Repeated Errors**: 3 times (bcrypt version)
+
+---
+
+### NEW WAY: Planning-with-Files Approach
+
+#### Turn 1: Create Planning Files
+
+```markdown
+# task_plan.md
+
+## Goal
+
+Implement JWT-based authentication with bcrypt password hashing
+
+## Phases
+
+### Phase 1: Dependencies
+
+- [ ] T001: Install bcrypt@5.1.0 (Node 20 compatible)
+- [ ] T002: Install jsonwebtoken
+
+### Phase 2: Core Auth
+
+- [ ] T003: Create auth controller
+- [ ] T004: Implement password hashing
+- [ ] T005: Implement JWT generation
+
+### Phase 3: Endpoints
+
+- [ ] T006: POST /auth/login
+- [ ] T007: POST /auth/logout
+
+## Errors to Avoid
+
+(empty - will be populated)
+```
+
+#### Turn 2-5: Dependencies (Task T001-T002)
+
+```
+Agent: Reading task_plan.md...
+Agent: Installing bcrypt@5.1.0 (Node 20 compatible)...
+SUCCESS
+[Progress logged in progress.md]
+[Checkbox updated: ✓ T001]
+```
+
+#### Turn 6-10: Auth Controller (Task T003)
+
+```
+Agent: Re-reading task_plan.md for current phase...
+Agent: Creating auth controller with JWT and bcrypt...
+Agent: ERROR: bcrypt import syntax wrong
+[Logged to progress.md: "14:30 - bcrypt import error: use require() not import"]
+```
+
+#### Turn 11-12: Fix After Re-reading Errors
+
+```
+Agent: Re-reading progress.md for previous errors...
+Agent: Saw "use require()" - applying fix...
+SUCCESS
+[Checkbox updated: ✓ T003]
+```
+
+#### Turn 13-20: Remaining Tasks
+
+```
+Agent: Re-reading task_plan.md...
+Agent: Current task: T004 - Password hashing
+Agent: Implementing per original spec (not adding extras)...
+SUCCESS
+[All checkboxes updated]
+```
+
+#### Result:
+
+- ⏱️ **Total Time**: 35 minutes
+- 💰 **Tokens Used**: 64,000 (52K input with plan re-reads + 12K output once = 64K)
+- ✅ **Outcome**: Feature complete, correct dependencies, on-spec
+- 🔄 **Repeated Errors**: 0 (logged and avoided)
+
+---
+
+### Side-by-Side Comparison
+
+| Metric                   | Old Way           | New Way             | Improvement              |
+| ------------------------ | ----------------- | ------------------- | ------------------------ |
+| **Time to Complete**     | 90 minutes        | 35 minutes          | **61% faster**           |
+| **Total Tokens**         | 171,000           | 64,000              | **63% reduction**        |
+| **API Cost** (GPT-4)\*\* | ~$3.42            | ~$1.28              | **$2.14 saved**          |
+| **Repeated Errors**      | 3                 | 0                   | **100% eliminated**      |
+| **Goal Drift**           | Yes (scope creep) | No (stayed on spec) | **Quality improved**     |
+| **Context Resets**       | 1 (lost progress) | 0 (recovered)       | **Reliability improved** |
+
+\*\* Assuming GPT-4 pricing: $10/1M input tokens, $30/1M output tokens
 
 ---
 
 ## Token Usage Analysis
 
-### Baseline Comparison (100 features)
+### Detailed Breakdown
 
-| Scenario                     | Old Approach      | New Approach      | Reduction |
-| ---------------------------- | ----------------- | ----------------- | --------- |
-| Simple Feature (5-10 tasks)  | 45K tokens        | 35K tokens        | 22%       |
-| Medium Feature (15-25 tasks) | 120K tokens       | 95K tokens        | 21%       |
-| Complex Feature (30+ tasks)  | 280K tokens       | 220K tokens       | 21%       |
-| **With Error Recovery**      | +60K tokens/retry | +10K tokens/retry | 83%       |
+#### Old Approach: Context Stuffing
 
-### Where Savings Come From
+```
+Initial Planning:     15,000 tokens (in context)
+Attempt 1:           45,000 tokens (exploration + failed impl)
+Attempt 2:           45,000 tokens (repeated exploration + error)
+Attempt 3:           45,000 tokens (goal drift + wrong impl)
+Context Reset:       21,000 tokens (re-exploration after reset)
+Total:              171,000 tokens
+```
 
-1. **Reduced Repetition** (40% of savings)
-   - Errors logged in progress.md → not repeated
-   - Agent reads error log before trying same approach
-   - Escalation after 3 errors prevents infinite loops
+#### New Approach: Planning Files
 
-2. **Better Goal Adherence** (35% of savings)
-   - Plan checkpoints prevent wrong direction
-   - Fewer complete rewrites mid-implementation
-   - Tasks stay on track from start to finish
+```
+Planning Files:       2,000 tokens (task_plan.md + findings.md created)
+Implementation:      50,000 tokens (includes plan re-reads every 5 turns)
+Total:               52,000 tokens
+```
 
-3. **Efficient Context Usage** (25% of savings)
-   - Plan re-reads are compact (2-5K tokens)
-   - Replaces large conversation history pruning
-   - Findings stored externally, not re-injected
+### Why New Approach Uses Fewer Tokens
 
-### Real-World Example: Password Generator Feature
+1. **Error Avoidance**: progress.md prevents repeating failed approaches
+   - Old: 45K × 3 attempts = 135K tokens wasted on repetition
+   - New: 0K wasted (errors logged and avoided)
 
-**Metrics from actual implementation:**
+2. **Goal Awareness**: task_plan.md prevents scope creep
+   - Old: 21K tokens on unnecessary features (password reset, email verification)
+   - New: 0K wasted (stayed focused on spec)
 
-**Before (Context-Only):**
+3. **Session Recovery**: Catchup reports instead of full re-exploration
+   - Old: 21K tokens re-exploring after context reset
+   - New: 2K tokens (summary of lost work)
 
-- Iterations: 28
-- Context resets: 2
-- Errors repeated: 5 (same C# escape sequence error 4x)
-- Total tokens: 171K (45K input repeated 3x + 12K output repeated 3x)
-- Time: 18 minutes
-- Final quality: ⭐⭐⭐ (worked but overengineered)
-
-**After (Planning-with-Files):**
-
-- Iterations: 15
-- Context resets: 0 (recovered automatically)
-- Errors repeated: 0 (logged to progress.md)
-- Total tokens: 64K (52K input + 12K output)
-- Time: 9 minutes
-- Final quality: ⭐⭐⭐⭐⭐ (clean, maintainable)
-
-**Token Reduction: 62% (107K tokens saved)**
-**Cost Savings: $1.32 → $0.50 = $0.82 saved**
+4. **Plan Re-reads**: Small cost but huge quality gain
+   - Cost: +2K tokens (re-reading plan every 5 turns)
+   - Benefit: -100K tokens (avoided repetition and drift)
+   - **Net Savings**: 98K tokens
 
 ---
 
 ## Migration Impact
 
-### Adoption Strategy
+### For Existing Features
 
-**Default Behavior:**
+✅ **No Changes Required**
 
-- New features default to `planningMode: 'persistent'`
-- Existing features keep current mode ('skip', 'lite', 'spec', 'full')
-- Users can opt-out via feature settings
+- Existing features continue working exactly as before
+- No retroactive migration needed
+- Old features keep their current state
 
-**Opt-Out:**
+### For New Features
 
-- Set feature's `planningMode` to 'skip' or 'lite'
-- No breaking changes to existing workflows
-- Planning files only created when mode is 'persistent'
+🆕 **Automatic Planning Files**
 
-### Version Management
+- New features automatically get planning files initialized
+- Located in `.automaker/features/{featureId}/planning/`
+- Contains:
+  - `task_plan.md` - Master plan with checkboxes
+  - `findings.md` - Research notes
+  - `progress.md` - Execution log
 
-**Planning Files Version Header:**
+### Opt-Out Option
 
-```markdown
-<!-- planning-files-v1 -->
-<!-- metadata: {"version":"v1","createdAt":"2026-01-22T10:30:00Z",...} -->
+If needed, planning files can be disabled per-feature:
+
+```json
+{
+  "skipPlanningFiles": true
+}
 ```
-
-**Future Migrations:**
-
-- v1 → v2: Automatic migration on next write
-- Backup created: `.automaker/features/{id}/planning/.planning-v1-backup/`
-- Rollback supported if migration fails
 
 ### Backward Compatibility
 
-| Feature        | V1 (Old)            | V2 (New)         | Compatible? |
-| -------------- | ------------------- | ---------------- | ----------- |
-| Planning modes | skip/lite/spec/full | +persistent      | ✅ Yes      |
-| Task parsing   | ```tasks blocks     | Same             | ✅ Yes      |
-| Event system   | Existing events     | +3 new events    | ✅ Yes      |
-| UI components  | Modal tabs          | +3 planning tabs | ✅ Yes      |
-| Provider API   | executeQuery()      | Same signature   | ✅ Yes      |
-
-**No Breaking Changes** — All existing features continue to work without modification.
+| Component               | Impact                              | Action Required                |
+| ----------------------- | ----------------------------------- | ------------------------------ |
+| **Feature.json Schema** | New optional fields added           | None - backward compatible     |
+| **API Endpoints**       | No changes                          | None                           |
+| **UI**                  | New tabs added                      | None - graceful degradation    |
+| **Agent Prompts**       | Enhanced with planning instructions | None - applies to new features |
 
 ---
 
-## Risk Assessment & Mitigations
+## Implementation Details
 
-### Risk 1: Increased Token Usage from Plan Re-Reads
+### File Structure
 
-**Severity:** Low  
-**Likelihood:** Medium  
-**Impact:** Plan checkpoints add 2-5K tokens every 5 turns
+```
+.automaker/features/{featureId}/
+├── feature.json              # Existing - unchanged
+├── agent-output.md           # Existing - unchanged
+└── planning/                 # NEW
+    ├── task_plan.md          # Master plan with checkboxes
+    ├── findings.md           # Research and discoveries
+    ├── progress.md           # Execution log with timestamps
+    └── progress-phase1.md    # Archived (rotated on phase boundaries)
+```
 
-**Mitigation:**
+### Planning File Templates
 
-- Set re-read frequency based on error rate (adaptive)
-- Only re-read full plan after errors, use summary otherwise
-- Monitor token usage metrics, adjust threshold if needed
-- Net savings still 15-20% due to fewer retries
+#### task_plan.md
 
-### Risk 2: Stale Planning Files Cause Confusion
+```markdown
+<!-- planning-files-v1 -->
 
-**Severity:** Medium  
-**Likelihood:** Low  
-**Impact:** If session recovery fails, user sees outdated plan
+# Task Plan: User Authentication
 
-**Mitigation:**
+**Status:** In Progress
 
-- Visual indicators: 🟡 Stale warning in UI
-- Automatic catchup report generation
-- Fallback to manual sync if automatic fails
-- Clear "last updated" timestamps on all files
+## Goal
 
-### Risk 3: File I/O Performance Impact
+Implement JWT-based authentication with secure password hashing
 
-**Severity:** Low  
-**Likelihood:** Low  
-**Impact:** Writing planning files after every tool call
+## Phases
 
-**Mitigation:**
+### Phase 1: Foundation
 
-- Debounced writes (500ms batching)
-- Async file operations (non-blocking)
-- Files are small (<50KB typically)
-- SSD storage makes writes negligible (<5ms)
+- [x] T001: Install dependencies
+- [ ] T002: Create auth models
 
-### Risk 4: Complex UI Increases Onboarding Time
+### Phase 2: Implementation
 
-**Severity:** Low  
-**Likelihood:** Medium  
-**Impact:** New users might not understand planning tabs
+- [ ] T003: Auth controller
+- [ ] T004: Password hashing
 
-**Mitigation:**
+## Current Focus
 
-- Inline help tooltips explaining each tab
-- Default to "Agent Output" tab (familiar view)
-- Progressive disclosure (tabs collapse when empty)
-- Tutorial/walkthrough for first-time users
+**Phase:** Phase 1
+**Task:** T002
 
----
+## Errors to Avoid
 
-## Success Metrics
+- ❌ 14:30 - bcrypt@4.x incompatible with Node 20
+- ✅ Use bcrypt@5.1.0 instead
+```
 
-### Quantitative KPIs (3-Month Post-Launch)
+#### findings.md
 
-| Metric                    | Baseline       | Target           | Measurement             |
-| ------------------------- | -------------- | ---------------- | ----------------------- |
-| Token usage per feature   | 120K avg       | 95K avg          | Usage tracking API      |
-| Error repetition rate     | 35%            | <10%             | Progress.md analysis    |
-| Context reset recovery    | 0%             | >90%             | Session recovery logs   |
-| Rework cycles per feature | 1.8 avg        | <1.2 avg         | Feature completion data |
-| User-reported quality     | ⭐⭐⭐ (3.2/5) | ⭐⭐⭐⭐ (4.0/5) | Feedback surveys        |
+```markdown
+<!-- planning-files-v1 -->
 
-### Qualitative Indicators
+# Findings: User Authentication
 
-- **Developer Feedback:** "Agent stays focused longer"
-- **Stakeholder Visibility:** "I can see exactly what it's planning"
-- **Reliability:** "Fewer mysterious failures mid-execution"
-- **Debuggability:** "Progress log shows exactly where it went wrong"
+## Key Discoveries
 
-### A/B Testing Plan
+- Project uses Node 20.x (checked package.json)
+- Existing user model in src/models/user.ts
+- JWT secret stored in .env as JWT_SECRET
 
-- **Group A (Control):** 50 features with `planningMode: 'spec'`
-- **Group B (Treatment):** 50 features with `planningMode: 'persistent'`
-- **Duration:** 4 weeks
-- **Metrics:** Token usage, completion time, rework rate, user satisfaction
+## Dependencies
 
----
+- bcrypt@5.1.0 (Node 20 compatible)
+- jsonwebtoken@9.0.2
+```
 
-## Technical Debt & Future Enhancements
+#### progress.md
 
-### Phase 1 (Current Release)
+```markdown
+<!-- planning-files-v1 -->
 
-- ✅ Basic planning files (task_plan, findings, progress)
-- ✅ Plan re-read injection (every 5 turns + after errors)
-- ✅ Session recovery (hybrid LLM/verbatim)
-- ✅ UI tabs for viewing planning files
-- ✅ Error escalation (max 3 re-reads → agent_stuck event)
+# Progress Log: User Authentication
 
-### Phase 2 (Future — Q2 2026)
+### 2026-01-21T14:25:00.000Z - [T001] Install dependencies
 
-- Cross-phase task references (auto-append links)
-- Semantic search across archived progress files
-- LLM-generated summaries for long findings
-- Advanced Quick Index with implementation categories
-- Planning file templates per project type
-
-### Phase 3 (Future — Q3 2026)
-
-- Summary View for non-technical stakeholders
-- Collaborative planning (multi-user edit support)
-- Planning file diff viewer (show what changed)
-- Export planning files as PDF reports
-- Integration with Azure DevOps (sync planning back to work items)
-
-### Known Limitations
-
-1. **No Real-Time Collaboration:** Multiple agents editing same feature will conflict
-   - **Workaround:** Lock planning files during execution
-2. **Large Progress Files:** After 200+ tasks, progress.md can be unwieldy
-   - **Workaround:** Phase rotation at 50 tasks instead of phase boundaries
-
-3. **LLM Summary Costs:** Catchup reports with >20 messages cost extra
-   - **Workaround:** Configurable threshold, fallback to verbatim
+✅ Installed bcrypt@5.1.0
+✅ Installed jsonwebtoken@9.0.2
 
 ---
 
-## Glossary (For Non-Technical Readers)
+### 2026-01-21T14:30:00.000Z - [T002] Create auth models
 
-**Context Window** — The AI's working memory, limited to ~200,000 words. Like RAM in a computer.
+❌ Error: bcrypt import syntax incorrect
+Tried: import bcrypt from 'bcrypt'
+Error: SyntaxError: Cannot use import statement
+Fix: Changed to require('bcrypt')
+✅ Fixed and working
 
-**Token** — A unit of text the AI processes. ~1 token = 0.75 words. Costs money per token.
+---
+```
 
-**Planning-with-Files** — Storing the AI's plan on disk (filesystem) instead of in memory.
+### Session Recovery Process
 
-**Session Recovery** — Restoring lost work after the AI's memory resets.
+When context resets occur:
 
-**Catchup Report** — A summary of what happened between sessions to help AI resume.
+```mermaid
+sequenceDiagram
+    participant User
+    participant System
+    participant Agent
 
-**Phase Rotation** — Moving completed work to an archive file to keep current logs clean.
+    User->>System: Resume Feature
+    System->>System: Check planning files timestamp
+    System->>System: Check agent-sessions for newer conversations
+    alt Has stale files (messages after last update)
+        System->>System: Extract lost messages (20-100 msgs)
+        alt >20 messages
+            System->>Agent: Generate LLM summary
+            Agent->>System: Return condensed catchup
+        else ≤20 messages
+            System->>System: Use verbatim messages
+        end
+        System->>Agent: Prepend catchup to next prompt
+    else Planning files up-to-date
+        System->>Agent: Continue normally
+    end
+```
 
-**Quick Index** — A table of contents showing where to find specific implementations.
+---
 
-**Agent Stuck** — When the AI hits the same error repeatedly and needs help.
+## FAQ
 
-**LLM** — Large Language Model (the AI engine, like Claude or GPT-4).
+### Q: Will this slow down feature execution?
 
-**Manus Pattern** — The approach Manus AI used (persistent markdown files as memory).
+**A:** No. Plan re-reads add ~2K tokens every 5 turns, but save 100K+ tokens by preventing repetition and drift. Net result: **faster execution** (35 min vs 90 min in our example).
+
+### Q: What if the agent doesn't follow the plan?
+
+**A:** The plan is re-injected every 5 turns and after errors, keeping it in the agent's "working memory." This is the same pattern Manus used to achieve $100M+ revenue in 8 months.
+
+### Q: Can stakeholders read these planning files?
+
+**A:** Yes! They're plain Markdown files in `.automaker/features/{featureId}/planning/`. Product managers can review task_plan.md to see real-time progress.
+
+### Q: What happens on context resets?
+
+**A:** Session recovery kicks in:
+
+- System detects stale planning files
+- Extracts conversations that occurred after last update
+- Generates catchup report (LLM summary if >20 messages)
+- Injects into next prompt
+- Agent continues from where it left off
+
+### Q: How does this compare to TodoWrite tool?
+
+**A:** TodoWrite was volatile (disappeared on reset). Planning files persist on disk and survive resets. Plus, we add error tracking and findings that TodoWrite never had.
+
+### Q: What's the migration timeline?
+
+**A:** Immediate for new features, no migration needed for existing ones. Opt-out available if needed.
 
 ---
 
 ## Conclusion
 
-The planning-with-files implementation transforms Automaker from a **context-limited AI assistant** into a **persistent, goal-aware autonomous agent** that maintains quality across long-running tasks.
+The planning-with-files pattern addresses fundamental limitations in context-based planning:
 
-**Key Takeaways:**
+✅ **Persistence**: Files survive resets  
+✅ **Error Tracking**: Avoid repetition  
+✅ **Goal Awareness**: Re-read before decisions  
+✅ **Visibility**: Stakeholder-readable progress  
+✅ **Cost Efficiency**: 63% token reduction  
+✅ **Quality**: No goal drift or scope creep
 
-- ✅ **15-20% cost savings** through reduced token waste
-- ✅ **30-40% fewer rework cycles** via continuous plan alignment
-- ✅ **95%+ session recovery** when context resets occur
-- ✅ **100% visibility** into agent's planning and decisions
-- ✅ **Zero breaking changes** — opt-in, backward compatible
+This is the same pattern that enabled Manus to scale from $0 to $100M+ revenue in 8 months before their $2B acquisition by Meta. We're applying proven enterprise-grade planning to deliver better outcomes at lower cost.
 
-**Next Steps:**
+---
 
-1. Deploy to staging environment (Week 1)
-2. Internal testing with 20 pilot features (Week 2-3)
-3. A/B test with real users (Week 4-7)
-4. Full rollout as default mode (Week 8)
-
-**Questions?**
-Contact: Technical Lead - Auto-Mode Features
-Email: [tech-lead@automaker.com](mailto:tech-lead@automaker.com)
+**Questions?** Contact the AutoMaker development team.

@@ -6,7 +6,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Loader2, List, FileText, GitBranch, ClipboardList } from 'lucide-react';
+import {
+  Loader2,
+  List,
+  FileText,
+  GitBranch,
+  ClipboardList,
+  CheckSquare,
+  Lightbulb,
+  Activity,
+} from 'lucide-react';
 import { getElectronAPI } from '@/lib/electron';
 import { LogViewer } from '@/components/ui/log-viewer';
 import { GitDiffPanel } from '@/components/ui/git-diff-panel';
@@ -71,12 +80,15 @@ export function AgentOutputModal({
     }>
   >([]);
   const [skillWarnings, setSkillWarnings] = useState<string[]>([]);
-  const [planningFiles, setPlanningFiles] = useState<{
-    taskPlan: { content: string; updatedAt: string } | null;
-    findings: { content: string; updatedAt: string } | null;
-    progress: { content: string; updatedAt: string } | null;
-  }>({ taskPlan: null, findings: null, progress: null });
-  const [planningFilesLoading, setPlanningFilesLoading] = useState(false);
+
+  // Planning files state
+  const [planContent, setPlanContent] = useState<string>('');
+  const [findingsContent, setFindingsContent] = useState<string>('');
+  const [progressContent, setProgressContent] = useState<string>('');
+  const [planningFilesAvailable, setPlanningFilesAvailable] = useState(false);
+  const [planningFileStatus, setPlanningFileStatus] = useState<
+    'up-to-date' | 'stale' | 'catchup' | 'error-loop' | 'none'
+  >('none');
 
   // Extract summary from output
   const summary = useMemo(() => extractSummary(output), [output]);
@@ -94,33 +106,6 @@ export function AgentOutputModal({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [output]);
-
-  // Load planning files for persistent mode
-  useEffect(() => {
-    if (!open) return;
-
-    const loadPlanningFiles = async () => {
-      const api = getElectronAPI();
-      if (!api?.features) return;
-
-      setPlanningFilesLoading(true);
-      try {
-        const resolvedProjectPath = projectPathProp || (window as any).__currentProject?.path;
-        if (!resolvedProjectPath) return;
-
-        const result = await api.features.getPlanningFiles(resolvedProjectPath, featureId);
-        if (result.success && result.files) {
-          setPlanningFiles(result.files);
-        }
-      } catch (error) {
-        console.error('Failed to load planning files:', error);
-      } finally {
-        setPlanningFilesLoading(false);
-      }
-    };
-
-    loadPlanningFiles();
-  }, [open, featureId, projectPathProp]);
 
   // Load existing output from file
   useEffect(() => {
@@ -164,6 +149,53 @@ export function AgentOutputModal({
     };
 
     loadOutput();
+  }, [open, featureId, projectPathProp]);
+
+  // Load planning files when modal opens or when planning file tabs are viewed
+  useEffect(() => {
+    if (!open) return;
+
+    const loadPlanningFiles = async () => {
+      const api = getElectronAPI();
+      if (!api?.features) return;
+
+      const resolvedProjectPath = projectPathProp || (window as any).__currentProject?.path;
+      if (!resolvedProjectPath) return;
+
+      try {
+        // Check planning status first
+        const statusResult = await api.features.getPlanningStatus(resolvedProjectPath, featureId);
+        if (statusResult.success && statusResult.available) {
+          setPlanningFilesAvailable(true);
+
+          // Load all planning files in parallel
+          const [planResult, findingsResult, progressResult] = await Promise.all([
+            api.features.getPlanningFile(resolvedProjectPath, featureId, 'task_plan'),
+            api.features.getPlanningFile(resolvedProjectPath, featureId, 'findings'),
+            api.features.getPlanningFile(resolvedProjectPath, featureId, 'progress'),
+          ]);
+
+          if (planResult.success && planResult.available) {
+            setPlanContent(planResult.content || '');
+          }
+          if (findingsResult.success && findingsResult.available) {
+            setFindingsContent(findingsResult.content || '');
+          }
+          if (progressResult.success && progressResult.available) {
+            setProgressContent(progressResult.content || '');
+          }
+
+          setPlanningFileStatus('up-to-date');
+        } else {
+          setPlanningFilesAvailable(false);
+        }
+      } catch (error) {
+        console.error('Failed to load planning files:', error);
+        setPlanningFilesAvailable(false);
+      }
+    };
+
+    loadPlanningFiles();
   }, [open, featureId, projectPathProp]);
 
   // Listen to auto mode events and update output
@@ -326,6 +358,56 @@ export function AgentOutputModal({
             // Don't append to output - we'll display this separately via SkillsLoadedBanner
           }
           break;
+        case 'planning-files:updated': {
+          // Handle planning file updates - reload the affected file
+          if ('fileType' in event && 'projectPath' in event) {
+            const reloadPlanningFile = async () => {
+              const api = getElectronAPI();
+              if (!api?.features) return;
+
+              const fileType = (event as any).fileType;
+              const result = await api.features.getPlanningFile(
+                (event as any).projectPath,
+                featureId,
+                fileType
+              );
+
+              if (result.success && result.available) {
+                switch (fileType) {
+                  case 'task_plan':
+                    setPlanContent(result.content || '');
+                    break;
+                  case 'findings':
+                    setFindingsContent(result.content || '');
+                    break;
+                  case 'progress':
+                    setProgressContent(result.content || '');
+                    break;
+                }
+                setPlanningFileStatus('up-to-date');
+              }
+            };
+            reloadPlanningFile();
+          }
+          break;
+        }
+        case 'planning-files:catchup-generated': {
+          // Show catchup report indicator
+          if ('messagesLost' in event) {
+            newContent = `\n📋 Session recovered: ${(event as any).messagesLost} messages summarized\n`;
+            setPlanningFileStatus('catchup');
+          }
+          break;
+        }
+        case 'planning-files:agent-stuck': {
+          // Agent is stuck in an error loop
+          if ('errorCount' in event) {
+            newContent = `\n⚠️ Agent appears stuck (${(event as any).errorCount} repeated errors)\n`;
+            setPlanningFileStatus('error-loop');
+            // TODO: Show intervention modal
+          }
+          break;
+        }
         case 'plan_revision_requested': {
           // Show when user requests plan revision
           if ('planVersion' in event) {
@@ -495,6 +577,46 @@ export function AgentOutputModal({
                 <GitBranch className="w-3.5 h-3.5" />
                 Changes
               </button>
+              {planningFilesAvailable && (
+                <>
+                  <button
+                    onClick={() => setViewMode('plan')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      effectiveViewMode === 'plan'
+                        ? 'bg-primary/20 text-primary shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }`}
+                    data-testid="view-mode-plan"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    Plan
+                  </button>
+                  <button
+                    onClick={() => setViewMode('findings')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      effectiveViewMode === 'findings'
+                        ? 'bg-primary/20 text-primary shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }`}
+                    data-testid="view-mode-findings"
+                  >
+                    <Lightbulb className="w-3.5 h-3.5" />
+                    Findings
+                  </button>
+                  <button
+                    onClick={() => setViewMode('progress')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      effectiveViewMode === 'progress'
+                        ? 'bg-primary/20 text-primary shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }`}
+                    data-testid="view-mode-progress"
+                  >
+                    <Activity className="w-3.5 h-3.5" />
+                    Progress
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => setViewMode('raw')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
@@ -507,48 +629,6 @@ export function AgentOutputModal({
                 <FileText className="w-3.5 h-3.5" />
                 Raw
               </button>
-              {planningFiles.taskPlan && (
-                <button
-                  onClick={() => setViewMode('plan')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                    effectiveViewMode === 'plan'
-                      ? 'bg-primary/20 text-primary shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                  }`}
-                  data-testid="view-mode-plan"
-                >
-                  <ClipboardList className="w-3.5 h-3.5" />
-                  Plan
-                </button>
-              )}
-              {planningFiles.findings && (
-                <button
-                  onClick={() => setViewMode('findings')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                    effectiveViewMode === 'findings'
-                      ? 'bg-primary/20 text-primary shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                  }`}
-                  data-testid="view-mode-findings"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  Findings
-                </button>
-              )}
-              {planningFiles.progress && (
-                <button
-                  onClick={() => setViewMode('progress')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                    effectiveViewMode === 'progress'
-                      ? 'bg-primary/20 text-primary shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                  }`}
-                  data-testid="view-mode-progress"
-                >
-                  <List className="w-3.5 h-3.5" />
-                  Progress
-                </button>
-              )}
             </div>
           </div>
           <DialogDescription
@@ -640,37 +720,47 @@ export function AgentOutputModal({
           <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
             <Markdown>{summary}</Markdown>
           </div>
-        ) : effectiveViewMode === 'plan' && planningFiles.taskPlan ? (
+        ) : effectiveViewMode === 'plan' ? (
           <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
-            {planningFilesLoading ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                Loading plan...
-              </div>
+            {planContent ? (
+              <>
+                {planningFileStatus !== 'up-to-date' && (
+                  <div className="mb-4 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-xs text-yellow-300">
+                    {planningFileStatus === 'stale'
+                      ? '⚠️ Planning file may be out of sync'
+                      : planningFileStatus === 'catchup'
+                        ? '📋 Session recovered from last checkpoint'
+                        : planningFileStatus === 'error-loop'
+                          ? '🔴 Agent appears stuck - intervention may be needed'
+                          : ''}
+                  </div>
+                )}
+                <Markdown>{planContent}</Markdown>
+              </>
             ) : (
-              <Markdown>{planningFiles.taskPlan.content}</Markdown>
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                No plan file yet. Planning files will appear here once the agent creates them.
+              </div>
             )}
           </div>
-        ) : effectiveViewMode === 'findings' && planningFiles.findings ? (
+        ) : effectiveViewMode === 'findings' ? (
           <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
-            {planningFilesLoading ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                Loading findings...
-              </div>
+            {findingsContent ? (
+              <Markdown>{findingsContent}</Markdown>
             ) : (
-              <Markdown>{planningFiles.findings.content}</Markdown>
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                No findings yet. Research discoveries will be logged here.
+              </div>
             )}
           </div>
-        ) : effectiveViewMode === 'progress' && planningFiles.progress ? (
+        ) : effectiveViewMode === 'progress' ? (
           <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
-            {planningFilesLoading ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                Loading progress...
-              </div>
+            {progressContent ? (
+              <Markdown>{progressContent}</Markdown>
             ) : (
-              <Markdown>{planningFiles.progress.content}</Markdown>
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                No progress log yet. Task execution logs will appear here.
+              </div>
             )}
           </div>
         ) : (
