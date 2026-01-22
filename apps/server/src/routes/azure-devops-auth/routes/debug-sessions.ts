@@ -21,8 +21,8 @@ export function createDebugSessionsHandler() {
 
       // Get persisted sessions (this requires checking settings)
       const settings = await settingsService.getGlobalSettings();
-      const persistedSessions = settings.azureAuthTokens
-        ? Object.keys(settings.azureAuthTokens)
+      const persistedSessions = (settings as any).azureAuthTokens
+        ? Object.keys((settings as any).azureAuthTokens)
         : [];
 
       logger.info('Debug sessions:', {

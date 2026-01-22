@@ -367,6 +367,56 @@ When approved, execute tasks SEQUENTIALLY in order. For each task:
 This allows real-time progress tracking during implementation.
 `;
 
+export const DEFAULT_AUTO_MODE_PLANNING_PERSISTENT = `## Planning with Files - Persistent Memory Approach
+
+**MANDATORY - Create Planning Files FIRST:**
+
+Before ANY implementation, create these three markdown files in .automaker/features/{featureId}/planning/:
+
+1. **task_plan.md** - Your working memory on disk:
+   - Add version header: \`<!-- planning-files-v1 -->\`
+   - Create phases with checkboxes: \`- [ ] Phase: Description\`
+   - Mark as \`- [x]\` when complete
+   - Update THIS FILE after every major decision or completion
+
+2. **findings.md** - Research and discoveries:
+   - Save findings after 2+ Read/Browser/View operations
+   - Document external APIs, libraries, patterns discovered
+   - Log key decisions and their rationale
+
+3. **progress.md** - Execution log:
+   - Log ALL errors with timestamp and approach attempted
+   - Track what was tried and what failed
+   - Never repeat approaches marked as failed
+
+**THE 2-ACTION RULE:**
+After any 2 consecutive view/read/browser operations without writing:
+→ STOP and save findings to findings.md before continuing
+
+**ERROR LOGGING RULE:**
+After ANY tool error:
+→ Immediately log to progress.md: timestamp, error, approach tried
+→ Read progress.md before trying again to avoid repeating failed approaches
+
+**PLAN RE-READ TRIGGER:**
+Before major decisions (creating new files, changing architecture, starting new phase):
+→ Re-read task_plan.md to verify alignment with original goals
+
+**CHECKPOINT UPDATES:**
+After completing each task/phase:
+→ Update task_plan.md checkboxes to reflect current status
+
+**NEVER:**
+- Stuff everything in context window (use files as external memory)
+- Repeat errors logged in progress.md
+- Make decisions without consulting task_plan.md
+- Skip updating planning files "to save time"
+
+---
+
+Generate your initial task_plan.md now, then proceed with implementation while maintaining these files.
+`;
+
 export const DEFAULT_AUTO_MODE_PLANNING_FULL = `## Full Specification Phase (Full SDD Mode)
 
 IMPORTANT: Do NOT output exploration text, tool usage, or thinking before the spec. Start DIRECTLY with the specification format below. Silently analyze the codebase first, then output ONLY the structured specification.
@@ -667,6 +717,7 @@ export const DEFAULT_AUTO_MODE_PROMPTS: ResolvedAutoModePrompts = {
   planningLiteWithApproval: DEFAULT_AUTO_MODE_PLANNING_LITE_WITH_APPROVAL,
   planningSpec: DEFAULT_AUTO_MODE_PLANNING_SPEC,
   planningFull: DEFAULT_AUTO_MODE_PLANNING_FULL,
+  planningPersistent: DEFAULT_AUTO_MODE_PLANNING_PERSISTENT,
   featurePromptTemplate: DEFAULT_AUTO_MODE_FEATURE_PROMPT_TEMPLATE,
   followUpPromptTemplate: DEFAULT_AUTO_MODE_FOLLOW_UP_PROMPT_TEMPLATE,
   continuationPromptTemplate: DEFAULT_AUTO_MODE_CONTINUATION_PROMPT_TEMPLATE,

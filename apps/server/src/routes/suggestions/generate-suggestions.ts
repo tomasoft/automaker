@@ -249,7 +249,7 @@ Your entire response should be valid JSON starting with { and ending with }. No 
           }
         }
       }
-      if (msg.usage) {
+      if ('usage' in msg && msg.usage) {
         inputTokens = msg.usage.inputTokens || 0;
         outputTokens = msg.usage.outputTokens || 0;
       }
@@ -301,7 +301,7 @@ Your entire response should be valid JSON starting with { and ending with }. No 
           }
         }
       }
-      if (msg.usage) {
+      if ('usage' in msg && msg.usage) {
         inputTokens = msg.usage.inputTokens || 0;
         outputTokens = msg.usage.outputTokens || 0;
       }

@@ -14,6 +14,7 @@
 
 import { BaseProvider } from './base-provider.js';
 import { createLogger } from '@automaker/utils';
+import type { PlanningFilesService } from '../services/planning-files-service.js';
 import type {
   ExecuteOptions,
   ProviderMessage,
@@ -79,13 +80,28 @@ export class LocalLLMAgentProvider extends BaseProvider {
   private apiKey: string;
   private maxIterations: number;
   private projectRoot: string;
+  private planningService?: PlanningFilesService;
+  private featureId?: string;
+  private projectPath?: string;
 
-  constructor(config: { endpoint?: string; apiKey?: string; projectRoot?: string } = {}) {
+  constructor(
+    config: {
+      endpoint?: string;
+      apiKey?: string;
+      projectRoot?: string;
+      planningService?: PlanningFilesService;
+      featureId?: string;
+      projectPath?: string;
+    } = {}
+  ) {
     super(config);
     this.endpoint = config.endpoint || process.env.LOCAL_LLM_ENDPOINT || 'http://localhost:1234/v1';
     this.apiKey = config.apiKey || process.env.LOCAL_LLM_API_KEY || 'not-needed';
     this.projectRoot = config.projectRoot || process.cwd();
     this.maxIterations = 30; // Maximum number of tool-calling iterations
+    this.planningService = config.planningService;
+    this.featureId = config.featureId;
+    this.projectPath = config.projectPath;
     logger.info(`LocalLLMAgentProvider initialized with endpoint: ${this.endpoint}`);
   }
 
@@ -175,8 +191,33 @@ export class LocalLLMAgentProvider extends BaseProvider {
     let explorationCount = 0;
     const maxExplorationCalls = 3; // Hard limit
 
+    // Track errors for planning-with-files error re-read triggers
+    let consecutiveErrors = 0;
+    const MAX_ERROR_REREADS = 3;
+    let totalErrorsSinceLastSuccess = 0;
+
     while (iteration < this.maxIterations && !isTaskComplete) {
       iteration++;
+
+      // AUTO RE-READ: Every 5 turns inject task_plan.md (planning-with-files)
+      if (this.planningService && this.featureId && this.projectPath && iteration % 5 === 0) {
+        try {
+          const planContent = await this.planningService.readTaskPlan(
+            this.projectPath,
+            this.featureId
+          );
+          if (planContent) {
+            messages.push({
+              role: 'user',
+              content: `📋 PLAN RE-READ (Turn ${iteration}/5-turn auto-refresh):\n\n${planContent}`,
+            });
+            logger.info(`[Planning] Injected plan re-read at iteration ${iteration}`);
+          }
+        } catch (err) {
+          logger.debug('[Planning] Could not read task plan for auto re-read:', err);
+        }
+      }
+
       logger.info(`[Iteration ${iteration}] Starting agentic loop iteration`);
 
       // Call the model with current messages (full conversation history)
@@ -310,12 +351,69 @@ START IMPLEMENTING NOW - NO MORE EXPLORATION!`,
 
       // Add tool results to messages with enhanced error context
       for (const result of toolResults) {
+        const toolCall = toolCalls.find((tc) => tc.id === result.tool_call_id);
+        const toolName = toolCall?.function.name;
+
+        // POST-TOOL-USE PROGRESS LOGGING (planning-with-files)
+        if (this.planningService && this.featureId && this.projectPath && toolName) {
+          const isWriteTool = ['create_file', 'update_file', 'write_file'].includes(toolName);
+          if (isWriteTool) {
+            try {
+              await this.planningService.appendProgress(this.projectPath, this.featureId, {
+                taskId: 'auto',
+                timestamp: new Date().toISOString(),
+                toolName,
+                input: JSON.parse(toolCall?.function.arguments || '{}'),
+                output: result.output.substring(0, 500),
+                success: result.success,
+              });
+            } catch (err) {
+              logger.debug('[Planning] Could not log progress:', err);
+            }
+          }
+        }
+
         // For failed tools, provide helpful error context to the model
         let toolContent = result.output;
         if (!result.success) {
+          // Track consecutive errors for planning-with-files
+          consecutiveErrors++;
+          totalErrorsSinceLastSuccess++;
+
+          // ERROR RE-READ TRIGGER (planning-with-files)
+          if (this.planningService && this.featureId && this.projectPath) {
+            if (consecutiveErrors <= MAX_ERROR_REREADS) {
+              try {
+                const planContent = await this.planningService.readTaskPlan(
+                  this.projectPath,
+                  this.featureId
+                );
+                if (planContent) {
+                  messages.push({
+                    role: 'user',
+                    content: `⚠️ ERROR RE-READ (${consecutiveErrors}/${MAX_ERROR_REREADS}):\n\nReview your plan:\n${planContent}\n\nError: ${result.output.substring(0, 300)}`,
+                  });
+                  logger.warn(
+                    `[Planning] Injected error re-read ${consecutiveErrors}/${MAX_ERROR_REREADS}`
+                  );
+                }
+              } catch (err) {
+                logger.debug('[Planning] Could not read plan for error re-read:', err);
+              }
+            } else if (totalErrorsSinceLastSuccess >= MAX_ERROR_REREADS + 10) {
+              // After 10 more failures, log critical error
+              logger.error(
+                `[Planning] Agent appears stuck - ${totalErrorsSinceLastSuccess} errors since last success`
+              );
+            }
+          }
           const toolName = toolCalls.find((tc) => tc.id === result.tool_call_id)?.function.name;
           toolContent = `ERROR: Tool '${toolName}' failed: ${result.output}\n\nSuggestion: ${this.getToolErrorSuggestion(toolName, result.output)}`;
           logger.warn(`[Tool Error] ${toolName}: ${result.output}`);
+        } else {
+          // Reset error counters on success
+          consecutiveErrors = 0;
+          totalErrorsSinceLastSuccess = 0;
         }
 
         messages.push({

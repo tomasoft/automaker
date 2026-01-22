@@ -123,7 +123,14 @@ export interface LogUsageRequest {
     | 'implementation'
     | 'verification'
     | 'spec-generation'
-    | 'agent';
+    | 'agent'
+    | 'feature-generation'
+    | 'backlog-planning'
+    | 'file-description'
+    | 'image-description'
+    | 'prompt-enhancement'
+    | 'suggestions'
+    | 'ideation';
   tokens: TokenUsage;
   cost?: CostBreakdown; // Optional, will be calculated if not provided
 }

@@ -39,6 +39,9 @@ export type EventType =
   | 'ideation:idea-created'
   | 'ideation:idea-updated'
   | 'ideation:idea-deleted'
-  | 'ideation:idea-converted';
+  | 'ideation:idea-converted'
+  | 'planning-files:updated'
+  | 'planning-files:catchup-generated'
+  | 'planning-files:agent-stuck';
 
 export type EventCallback = (type: EventType, payload: unknown) => void;

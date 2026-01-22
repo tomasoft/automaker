@@ -10,6 +10,7 @@
  */
 
 import { ProviderFactory } from '../providers/provider-factory.js';
+import { PlanningFilesService } from './planning-files-service.js';
 import type {
   ExecuteOptions,
   Feature,
@@ -221,6 +222,7 @@ export class AutoModeService {
   private settingsService: SettingsService | null = null;
   private dataDir: string;
   private wikiService: WikiService;
+  private planningFilesService: PlanningFilesService;
   // Track consecutive failures to detect quota/API issues
   private consecutiveFailures: { timestamp: number; error: string }[] = [];
   private pausedDueToFailures = false;
@@ -230,6 +232,7 @@ export class AutoModeService {
     this.dataDir = dataDir;
     this.settingsService = settingsService ?? null;
     this.wikiService = new WikiService(dataDir);
+    this.planningFilesService = new PlanningFilesService(events);
   }
 
   /**
@@ -541,6 +544,22 @@ export class AutoModeService {
         const featurePrompt = await this.buildFeaturePrompt(feature);
         const planningPrefix = await this.getPlanningPromptPrefix(feature);
         prompt = planningPrefix + featurePrompt;
+
+        // Initialize planning files for persistent mode
+        if (feature.planningMode && feature.planningMode === 'persistent') {
+          try {
+            await this.planningFilesService.initializePlanningFiles(
+              projectPath,
+              featureId,
+              feature.title || 'Untitled Feature',
+              feature.description || ''
+            );
+            logger.info(`Initialized planning files for feature ${featureId} in persistent mode`);
+          } catch (error) {
+            logger.error(`Failed to initialize planning files:`, error);
+            // Don't fail the feature execution, just log the error
+          }
+        }
 
         // Emit planning mode info
         if (feature.planningMode && feature.planningMode !== 'skip') {
@@ -871,6 +890,24 @@ Complete the pipeline step instructions above. Review the previous work and appl
   async resumeFeature(projectPath: string, featureId: string, useWorktrees = false): Promise<void> {
     if (this.runningFeatures.has(featureId)) {
       throw new Error('already running');
+    }
+
+    // Check for stale planning files in persistent mode
+    try {
+      const feature = await this.loadFeature(projectPath, featureId);
+      if (feature && feature.planningMode === 'persistent') {
+        const staleInfo = await this.planningFilesService.detectStaleFiles(projectPath, featureId);
+
+        if (staleInfo.isStale && staleInfo.lastUpdate) {
+          const ageMs = Date.now() - staleInfo.lastUpdate.getTime();
+          const hours = Math.round(ageMs / 3600000);
+          logger.warn(`Stale planning files detected for feature ${featureId} (${hours}h old)`);
+          // Note: Could emit event here to notify UI if needed
+        }
+      }
+    } catch (err) {
+      // Don't fail resume if planning file check fails
+      logger.debug('Could not check planning file staleness:', err);
     }
 
     // Check if context exists in .automaker directory
@@ -2497,15 +2534,23 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
     // Get provider for this model
     // For custom agents (Copilot, Local LLM), enable agenticMode for full codebase access
     const isCustomAgent = finalModel.startsWith('copilot-') || finalModel.startsWith('local-llm-');
+
+    // Get feature for planning mode check
+    const feature = await this.loadFeature(projectPath, featureId);
+    const isPersistentMode = feature?.planningMode === 'persistent';
+
     const provider = isCustomAgent
       ? ProviderFactory.getProviderForModel(finalModel, {
           agenticMode: true,
           projectRoot: workDir,
+          planningService: isPersistentMode ? this.planningFilesService : undefined,
+          featureId: isPersistentMode ? featureId : undefined,
+          projectPath: isPersistentMode ? projectPath : undefined,
         })
       : ProviderFactory.getProviderForModel(finalModel);
 
     logger.info(
-      `Using provider "${provider.getName()}" for model "${finalModel}"${isCustomAgent ? ' (agentic mode enabled)' : ''}`
+      `Using provider "${provider.getName()}" for model "${finalModel}"${isCustomAgent ? ' (agentic mode enabled)' : ''}${isPersistentMode ? ' with planning-files' : ''}`
     );
 
     // Build prompt content with images using utility
@@ -2953,11 +2998,13 @@ After generating the revised spec, output:
                     });
 
                     // Build focused prompt for this specific task
-                    const taskPrompt = this.buildTaskPrompt(
+                    const taskPrompt = await this.buildTaskPrompt(
                       task,
                       parsedTasks,
                       taskIndex,
                       approvedPlanContent,
+                      projectPath,
+                      featureId,
                       userFeedback
                     );
 
@@ -3245,13 +3292,15 @@ Review the previous work and continue the implementation. If the feature appears
    * Build a focused prompt for executing a single task.
    * Each task gets minimal context to keep the agent focused.
    */
-  private buildTaskPrompt(
+  private async buildTaskPrompt(
     task: ParsedTask,
     allTasks: ParsedTask[],
     taskIndex: number,
     planContent: string,
+    projectPath: string,
+    featureId: string,
     userFeedback?: string
-  ): string {
+  ): Promise<string> {
     const completedTasks = allTasks.slice(0, taskIndex);
     const remainingTasks = allTasks.slice(taskIndex + 1);
 
@@ -3269,6 +3318,24 @@ ${task.phase ? `**Phase:** ${task.phase}` : ''}
 ## Context
 
 `;
+
+    // For persistent mode, inject task_plan.md
+    try {
+      const feature = await this.loadFeature(projectPath, featureId);
+      if (feature && feature.planningMode === 'persistent') {
+        const taskPlan = await this.planningFilesService.readTaskPlan(projectPath, featureId);
+        if (taskPlan) {
+          prompt += `### 📋 Current Plan (task_plan.md)
+
+${taskPlan}
+
+`;
+        }
+      }
+    } catch (err) {
+      // If we can't read planning file, continue without it
+      logger.debug('Could not read task_plan.md for task prompt:', err);
+    }
 
     // Show what's already done
     if (completedTasks.length > 0) {

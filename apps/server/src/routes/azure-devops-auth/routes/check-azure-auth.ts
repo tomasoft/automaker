@@ -26,7 +26,7 @@ export function createCheckAzureAuthHandler() {
       if (sessionId) {
         logger.info(`[check-auth] Checking for sessionId: ${sessionId}`);
         // Try to use the provided sessionId
-        authManager = azureAuthSessions.get(sessionId);
+        authManager = azureAuthSessions.get(sessionId) || null;
 
         if (authManager) {
           logger.info(`[check-auth] Found session in memory: ${sessionId}`);

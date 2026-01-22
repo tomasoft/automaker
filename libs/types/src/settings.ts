@@ -65,7 +65,7 @@ export type ThemeMode =
 export type KanbanCardDetailLevel = 'minimal' | 'standard' | 'detailed';
 
 /** PlanningMode - Planning levels for feature generation workflows */
-export type PlanningMode = 'skip' | 'lite' | 'spec' | 'full';
+export type PlanningMode = 'skip' | 'lite' | 'spec' | 'full' | 'persistent';
 
 /** ThinkingLevel - Extended thinking levels for Claude models (reasoning intensity) */
 export type ThinkingLevel = 'none' | 'low' | 'medium' | 'high' | 'ultrathink';

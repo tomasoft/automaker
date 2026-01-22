@@ -208,7 +208,7 @@ CRITICAL INSTRUCTIONS:
           JSON.stringify({ type: msg.type, subtype: (msg as any).subtype }, null, 2)
         );
 
-        if (msg.usage) {
+        if ('usage' in msg && msg.usage) {
           inputTokens = msg.usage.inputTokens || 0;
           outputTokens = msg.usage.outputTokens || 0;
         }

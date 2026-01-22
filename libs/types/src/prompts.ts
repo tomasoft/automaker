@@ -36,6 +36,9 @@ export interface AutoModePrompts {
   /** Planning mode: Comprehensive Software Design Document (full SDD mode) */
   planningFull?: CustomPrompt;
 
+  /** Planning mode: Persistent planning files with Manus-style working memory */
+  planningPersistent?: CustomPrompt;
+
   /** Template for building feature implementation prompts */
   featurePromptTemplate?: CustomPrompt;
 
@@ -133,6 +136,7 @@ export interface ResolvedAutoModePrompts {
   planningLiteWithApproval: string;
   planningSpec: string;
   planningFull: string;
+  planningPersistent: string;
   featurePromptTemplate: string;
   followUpPromptTemplate: string;
   continuationPromptTemplate: string;

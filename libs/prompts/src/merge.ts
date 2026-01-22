@@ -48,6 +48,10 @@ export function mergeAutoModePrompts(custom?: AutoModePrompts): ResolvedAutoMode
     ),
     planningSpec: resolvePrompt(custom?.planningSpec, DEFAULT_AUTO_MODE_PROMPTS.planningSpec),
     planningFull: resolvePrompt(custom?.planningFull, DEFAULT_AUTO_MODE_PROMPTS.planningFull),
+    planningPersistent: resolvePrompt(
+      custom?.planningPersistent,
+      DEFAULT_AUTO_MODE_PROMPTS.planningPersistent
+    ),
     featurePromptTemplate: resolvePrompt(
       custom?.featurePromptTemplate,
       DEFAULT_AUTO_MODE_PROMPTS.featurePromptTemplate

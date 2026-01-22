@@ -75,12 +75,18 @@ export class ProviderFactory {
    * Get the appropriate provider for a given model ID
    *
    * @param modelId Model identifier (e.g., "claude-opus-4-5-20251101", "cursor-gpt-4o", "cursor-auto")
-   * @param options Optional configuration (e.g., projectRoot for agentic providers)
+   * @param options Optional configuration (e.g., projectRoot for agentic providers, planning service for persistent mode)
    * @returns Provider instance for the model
    */
   static getProviderForModel(
     modelId: string,
-    options?: { projectRoot?: string; agenticMode?: boolean }
+    options?: {
+      projectRoot?: string;
+      agenticMode?: boolean;
+      planningService?: PlanningFilesService;
+      featureId?: string;
+      projectPath?: string;
+    }
   ): BaseProvider {
     const providerName = this.getProviderNameForModel(modelId);
 
@@ -90,6 +96,9 @@ export class ProviderFactory {
       if (providerName === 'local-llm') {
         return new LocalLLMAgentProvider({
           projectRoot: options.projectRoot || process.cwd(),
+          planningService: options.planningService,
+          featureId: options.featureId,
+          projectPath: options.projectPath,
         });
       }
 
@@ -97,6 +106,9 @@ export class ProviderFactory {
       if (providerName === 'github-copilot') {
         return new GitHubCopilotAgentProvider({
           projectRoot: options.projectRoot || process.cwd(),
+          planningService: options.planningService,
+          featureId: options.featureId,
+          projectPath: options.projectPath,
         });
       }
     }
