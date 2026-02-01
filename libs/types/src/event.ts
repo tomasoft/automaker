@@ -21,6 +21,7 @@ export type EventType =
   | 'feature:verified'
   | 'feature:committed'
   | 'planning:file-updated'
+  | 'planning-files:updated' // Real-time planning file updates for UI
   | 'planning:catchup-generated'
   | 'planning:agent-stuck'
   | 'project:analysis-started'

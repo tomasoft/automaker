@@ -137,6 +137,15 @@ export class GitHubCopilotAgentProvider extends BaseProvider {
         ? '\n\n**CRITICAL - Platform Context:**\nYou are running on WINDOWS. Use PowerShell commands only:\n- ✅ Get-Content, Select-String, Select-Object\n- ❌ NEVER use: sed, awk, head, tail, grep (these are Unix/Linux commands)\n- File paths use backslashes: C:\\path\\to\\file\n- Use PowerShell syntax for all commands'
         : '';
 
+      const outputFormattingRules = `\n\n**OUTPUT FORMATTING RULES:**
+- Write natural conversational text only
+- NEVER output tool names or checkmarks for tool usage: ❌ "✅ read_file✅ grep_search"
+- Tools are logged automatically - don't mention them
+- Good: "I've analyzed the project structure and created..."
+- Bad: "✅ list_directory✅ read_file I've analyzed..."
+- NEVER output "Phase: Verification" or similar headers
+- Focus on RESULTS, not process`;
+
       // Detect simple tasks that should complete quickly
       const simpleTaskKeywords = [
         'password',
@@ -174,7 +183,7 @@ If you exceed 5 iterations or 1 minute, you are over-engineering.`
 
       messages.push({
         role: 'user',
-        content: promptText + platformGuidance + simpleTaskGuidance,
+        content: promptText + platformGuidance + outputFormattingRules + simpleTaskGuidance,
       });
 
       // Strip provider prefix for the actual API call
@@ -292,9 +301,45 @@ For a simple password utility, this should take < 30 seconds total.
         // Work backwards from the end, keeping at least 15 messages
         let safeCutoff = Math.max(1, messages.length - 15);
 
-        // Ensure we don't start with a 'tool' message (it needs its preceding 'assistant' with tool_calls)
-        while (safeCutoff < messages.length && messages[safeCutoff].role === 'tool') {
-          safeCutoff--;
+        // CRITICAL: Ensure we don't break tool_use/tool_result pairs
+        // Move back to include the complete assistant message and ALL its tool responses
+        while (safeCutoff > 1) {
+          const msgAtCutoff = messages[safeCutoff];
+
+          // If we're starting with a 'tool' message, move back to find its assistant message
+          if (msgAtCutoff.role === 'tool') {
+            safeCutoff--;
+            continue;
+          }
+
+          // If previous message is an assistant with tool_calls, check if all tool responses are included
+          const prevMsg = messages[safeCutoff - 1];
+          if (
+            prevMsg &&
+            prevMsg.role === 'assistant' &&
+            prevMsg.tool_calls &&
+            prevMsg.tool_calls.length > 0
+          ) {
+            // Count how many tool responses follow this assistant message
+            const toolCallIds = new Set(prevMsg.tool_calls.map((tc) => tc.id));
+            let toolResponsesFound = 0;
+
+            for (let i = safeCutoff; i < messages.length && messages[i].role === 'tool'; i++) {
+              const toolCallId = messages[i].tool_call_id;
+              if (toolCallId && toolCallIds.has(toolCallId)) {
+                toolResponsesFound++;
+              }
+            }
+
+            // If not all tool responses are included, move cutoff back to before the assistant message
+            if (toolResponsesFound < prevMsg.tool_calls.length) {
+              safeCutoff--;
+              continue;
+            }
+          }
+
+          // Safe to cut here
+          break;
         }
 
         const recentMessages = messages.slice(safeCutoff);
@@ -589,19 +634,22 @@ Proceeding with your large file, but STRONGLY recommend simplifying.`,
 
       const toolResults = await toolExecutor.executeTools(toolCallsToExecute);
 
-      // Stream tool execution results to UI immediately
-      for (const tc of toolCallsToExecute) {
-        const toolName = tc.function.name;
-        const result = toolResults.find((r) => r.tool_call_id === tc.id);
-        const status = result?.success ? '✅' : '❌';
+      // Tool execution status messages - only send to UI if planning files are NOT enabled
+      // (planning files mode expects clean agent output without tool spam)
+      if (!this.planningService) {
+        for (const tc of toolCallsToExecute) {
+          const toolName = tc.function.name;
+          const result = toolResults.find((r) => r.tool_call_id === tc.id);
+          const status = result?.success ? '✅' : '❌';
 
-        yield {
-          type: 'assistant',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text: `${status} ${toolName}` }],
-          },
-        };
+          yield {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: `${status} ${toolName}` }],
+            },
+          };
+        }
       }
 
       // Add tool results to messages with enhanced error context
@@ -609,24 +657,8 @@ Proceeding with your large file, but STRONGLY recommend simplifying.`,
         const toolCall = toolCalls.find((tc) => tc.id === result.tool_call_id);
         const toolName = toolCall?.function.name;
 
-        // POST-TOOL-USE PROGRESS LOGGING (planning-with-files)
-        if (this.planningService && this.featureId && this.projectPath && toolName) {
-          const isWriteTool = ['create_file', 'update_file', 'write_file'].includes(toolName);
-          if (isWriteTool) {
-            try {
-              const progressContent = `**Tool:** ${toolName}\n**Status:** ${result.success ? '✅ Success' : '❌ Failed'}\n**Output:** ${result.output.substring(0, 500)}${result.output.length > 500 ? '...' : ''}`;
-              await this.planningService.appendToProgress(
-                this.projectPath,
-                this.featureId,
-                progressContent,
-                'auto',
-                toolName
-              );
-            } catch (err) {
-              logger.debug('[Planning] Could not log progress:', err);
-            }
-          }
-        }
+        // POST-TOOL-USE PROGRESS LOGGING removed - agents should manually log milestones
+        // Automatic per-tool logging creates spam in progress.md
 
         // For failed tools, provide helpful error context to the model
         let toolContent = result.output;
@@ -1225,6 +1257,17 @@ Original error: ${errorText}`;
     if (errorMessage.includes('No test is available')) return 'no_tests_available';
 
     return null; // Not a trackable error
+  }
+
+  /**
+   * Check if a file path is a planning file that should trigger UI updates
+   */
+  private isPlanningFile(filePath: string): 'task_plan' | 'findings' | 'progress' | null {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    if (normalizedPath.includes('/planning/task_plan.md')) return 'task_plan';
+    if (normalizedPath.includes('/planning/findings.md')) return 'findings';
+    if (normalizedPath.includes('/planning/progress.md')) return 'progress';
+    return null;
   }
 
   /**

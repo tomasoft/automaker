@@ -746,7 +746,20 @@ export function AgentOutputModal({
         ) : effectiveViewMode === 'findings' ? (
           <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
             {findingsContent ? (
-              <Markdown>{findingsContent}</Markdown>
+              <>
+                {planningFileStatus !== 'up-to-date' && planningFileStatus !== 'none' && (
+                  <div className="mb-4 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-xs text-yellow-300">
+                    {planningFileStatus === 'stale'
+                      ? '⚠️ Planning file may be out of sync'
+                      : planningFileStatus === 'catchup'
+                        ? '📋 Session recovered from last checkpoint'
+                        : planningFileStatus === 'error-loop'
+                          ? '🔴 Agent appears stuck - intervention may be needed'
+                          : ''}
+                  </div>
+                )}
+                <Markdown>{findingsContent}</Markdown>
+              </>
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 No findings yet. Research discoveries will be logged here.
@@ -756,7 +769,20 @@ export function AgentOutputModal({
         ) : effectiveViewMode === 'progress' ? (
           <div className="flex-1 overflow-y-auto bg-zinc-950 rounded-lg p-4 min-h-[400px] max-h-[60vh] scrollbar-visible">
             {progressContent ? (
-              <Markdown>{progressContent}</Markdown>
+              <>
+                {planningFileStatus !== 'up-to-date' && planningFileStatus !== 'none' && (
+                  <div className="mb-4 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-xs text-yellow-300">
+                    {planningFileStatus === 'stale'
+                      ? '⚠️ Planning file may be out of sync'
+                      : planningFileStatus === 'catchup'
+                        ? '📋 Session recovered from last checkpoint'
+                        : planningFileStatus === 'error-loop'
+                          ? '🔴 Agent appears stuck - intervention may be needed'
+                          : ''}
+                  </div>
+                )}
+                <Markdown>{progressContent}</Markdown>
+              </>
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 No progress log yet. Task execution logs will appear here.

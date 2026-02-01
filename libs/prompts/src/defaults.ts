@@ -445,23 +445,141 @@ Before starting ANY implementation, create these three planning files in \`.auto
 \\\`\\\`\\\`
 `;
 
-export const DEFAULT_AUTO_MODE_PLANNING_PERSISTENT = `## Planning with Files - Persistent Memory Approach
+export const DEFAULT_AUTO_MODE_PLANNING_PERSISTENT = `## Planning with Files - High-Performance Persistent Memory
 
-**MANDATORY: Use filesystem as working memory to maintain goal awareness across turns**
+**CRITICAL FIRST STEP: The planning files contain TEMPLATE placeholders. You MUST replace them with actual content in Turn 1.**
 
-The planning files have been initialized for you in \`.automaker/features/[featureId]/planning/\`:
-- **task_plan.md** - Your master plan (re-read before major decisions)
-- **findings.md** - Research notes and discoveries
-- **progress.md** - Execution log with timestamps and errors
+**Planning Directory**: \`.automaker/features/[featureId]/planning/\`
 
-### Core Workflow:
+Planning files (use FULL PATHS with \`update_file\` tool):
+- \`.automaker/features/[featureId]/planning/task_plan.md\` - **REPLACE ENTIRE FILE** with real task breakdown
+- \`.automaker/features/[featureId]/planning/findings.md\` - Add architecture notes
+- \`.automaker/features/[featureId]/planning/progress.md\` - Log milestones
 
-1. **Plan First** - task_plan.md already exists with initial structure
-2. **Log Progress** - Append to progress.md after each significant action
-3. **Save Findings** - Update findings.md after discoveries
-4. **Re-read Plan** - Check task_plan.md before major decisions to stay aligned
+### Mandatory Workflow:
 
-Implement the feature directly - planning files are ready.
+**🚀 TURN 1 - DO EVERYTHING UPFRONT (research + plan + start coding):**
+
+1. **Research** (5 minutes max):
+   - Read feature requirements fully
+   - \`wiki_search\` for related patterns/docs
+   - \`semantic_search\` or \`grep_search\` for similar code
+   - \`read_file\` on key existing files
+
+2. **Plan** - Use \`update_file\` to **COMPLETELY REPLACE** task_plan.md:
+   \`\`\`
+   Tool: update_file
+   Path: .automaker/features/[featureId]/planning/task_plan.md
+   New Content (FULL FILE):
+   # Task Plan: Password Utility
+   Created: 2026-01-22T10:30:00Z
+   Status: In Progress
+   
+   ## Task Breakdown
+   - [ ] T001: Create PasswordGenerator.cs with character sets
+   - [ ] T002: Implement Generate() with exclusion logic (B,0,%,$)
+   - [ ] T003: Create console UI in Program.cs
+   - [ ] T004: Add unit tests
+   - [ ] T005: Run tests and verify
+   
+   ## Current Focus
+   Starting T001: Creating PasswordGenerator class
+   \`\`\`
+
+3. **Log Initial Progress**:
+   \`\`\`
+   Tool: update_file  
+   Path: .automaker/features/[featureId]/planning/progress.md
+   Append: 
+   
+   ## 2026-01-22 10:30 - Planning Complete
+   ✅ Researched codebase
+   ✅ Created 5-task breakdown
+   🔄 Starting T001
+   \`\`\`
+
+4. **Start Coding** - Begin implementing T001 immediately
+
+**⚡ TURN 2+ - RAPID EXECUTION:**
+1. Check task_plan.md for current task (it has your REAL plan now)
+2. Code/test/fix
+3. **MANDATORY**: Update progress.md immediately after completing EACH task:
+   \`\`\`markdown
+   ## [timestamp] - Task T001: Setup Structure
+   ✅ Created PasswordGenerator.cs with character sets
+   ✅ Implemented exclusion logic (no B, 0, %, $)
+   \`\`\`
+4. Check off completed tasks in \`.automaker/features/[featureId]/planning/task_plan.md\` (change [ ] to [x])
+5. Update \`.automaker/features/[featureId]/planning/findings.md\` ONLY after significant discoveries
+
+**CRITICAL**: You MUST call \`update_file\` on progress.md after EACH task completion - not just at the end!
+
+### Progress Update Instructions:
+**CRITICAL: After completing EACH task, you must update progress.md**
+
+Use \`update_file\` to **APPEND** to \`.automaker/features/[featureId]/planning/progress.md\`:
+\`\`\`
+Tool: update_file
+Path: .automaker/features/[featureId]/planning/progress.md
+Old Content: (last 5 lines of file)
+New Content: (same last 5 lines + your new milestone entry)
+\`\`\`
+
+Example:
+\`\`\`
+Old Content:
+## 2026-01-22 10:35 - Task T001: Create PasswordGenerator
+✅ Created PasswordGenerator.cs with character sets
+✅ Implemented Generate() method
+
+New Content:
+## 2026-01-22 10:35 - Task T001: Create PasswordGenerator
+✅ Created PasswordGenerator.cs with character sets
+✅ Implemented Generate() method
+
+## 2026-01-22 10:40 - Task T002: Console UI
+✅ Added Program.cs with menu system
+✅ Tested generation - works correctly
+\`\`\`
+
+- Log MILESTONES (completed features, fixed bugs, test results)
+- DO NOT log individual tool calls (\`read_file\`, \`grep_search\`)
+- Include timestamps and task IDs
+- Keep entries concise (1-3 lines per milestone)
+
+### Progress Format (user-visible, must be clean):
+\`\`\`markdown
+## [timestamp] - Task T001: Setup Structure
+✅ Created project files: Program.cs, Models/User.cs
+✅ Added NuGet: Entity Framework Core 8.0
+⚠️  Build warning: nullable reference type on line 45 (acceptable)
+
+## [timestamp] - Task T002: Database Integration  
+🔄 Implementing DbContext with User entity...
+\`\`\`
+
+**Performance Rules:**
+- Do ALL codebase research in Turn 1 (grep, semantic search, read files)
+- Know the complete implementation plan before writing code
+- Execute rapidly in subsequent turns (less thinking, more doing)
+- Log meaningful milestones in progress.md, not "✅ read_file" spam
+- Only update findings.md for significant architectural discoveries
+
+**Forbidden:**
+❌ Leaving template structure in task_plan.md
+❌ Creating task_plan.md/findings.md/progress.md in project root (use .automaker/features/[featureId]/planning/)
+❌ Generic tasks like "Task 001: Setup and initial structure"  
+❌ Logging every tool execution ("✅ read_file", "✅ grep_search")
+❌ Deferring planning to later turns (front-load everything)
+
+**Response Format Rules:**
+- NEVER output tool names in your text responses ("✅ read_file", "❌ execute_command", etc.)
+- Tool usage is logged automatically - don't mention it
+- Write natural text: "I've analyzed the codebase..." NOT "✅ read_file ✅ grep_search I've analyzed..."
+- Only use checkmarks for actual accomplishments: "✅ Created PasswordGenerator.cs"
+- Update planning files with \`update_file\` - don't describe updates in text
+
+Start by reading requirements + wiki, then REPLACE \`.automaker/features/[featureId]/planning/task_plan.md\` with actual breakdown.
 `;
 
 export const DEFAULT_AUTO_MODE_PLANNING_FULL = `## Full Specification Phase (Full SDD Mode)

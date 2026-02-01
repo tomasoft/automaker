@@ -13,6 +13,7 @@ import {
   isAbortError,
   loadContextFiles,
   createLogger,
+  stripIncompleteToolBlocks,
 } from '@automaker/utils';
 import { ProviderFactory } from '../providers/provider-factory.js';
 import { createChatOptions, validateWorkingDirectory } from '../lib/sdk-options.js';
@@ -200,10 +201,14 @@ export class AgentService {
     };
 
     // Build conversation history from existing messages BEFORE adding current message
-    const conversationHistory = session.messages.map((msg) => ({
+    const rawHistory = session.messages.map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
+
+    // Clean conversation history to remove incomplete tool_use/tool_result pairs
+    // This prevents API errors when tool_use blocks don't have matching tool_result blocks
+    const conversationHistory = stripIncompleteToolBlocks(rawHistory);
 
     session.messages.push(userMessage);
     session.isRunning = true;

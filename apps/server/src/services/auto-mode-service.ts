@@ -638,20 +638,30 @@ export class AutoModeService {
         }
       );
 
-      // Check for pipeline steps and execute them
-      const pipelineConfig = await pipelineService.getPipelineConfig(projectPath);
-      const sortedSteps = [...(pipelineConfig?.steps || [])].sort((a, b) => a.order - b.order);
+      // Check for pipeline steps ONLY if planning-with-files is disabled
+      // When planning-with-files is enabled, the agent handles everything (Manus-style)
+      if (!usePlanningFiles) {
+        const pipelineConfig = await pipelineService.getPipelineConfig(projectPath);
+        const sortedSteps = [...(pipelineConfig?.steps || [])].sort((a, b) => a.order - b.order);
 
-      if (sortedSteps.length > 0) {
-        // Execute pipeline steps sequentially
-        await this.executePipelineSteps(
-          projectPath,
-          featureId,
-          feature,
-          sortedSteps,
-          workDir,
-          abortController,
-          autoLoadClaudeMd
+        if (sortedSteps.length > 0) {
+          logger.info(
+            `Executing ${sortedSteps.length} pipeline steps for feature ${featureId} (planning-with-files disabled)`
+          );
+          // Execute pipeline steps sequentially
+          await this.executePipelineSteps(
+            projectPath,
+            featureId,
+            feature,
+            sortedSteps,
+            workDir,
+            abortController,
+            autoLoadClaudeMd
+          );
+        }
+      } else {
+        logger.info(
+          `Skipping pipeline execution for feature ${featureId} (planning-with-files enabled - agent handles everything)`
         );
       }
 
@@ -2030,9 +2040,15 @@ Format your response as a structured markdown document.`;
    * Get the planning prompt prefix based on feature's planning mode
    */
   private async getPlanningPromptPrefix(feature: Feature): Promise<string> {
+    const usePlanningFiles = feature.usePlanningFiles !== false;
     const mode = feature.planningMode || 'skip';
 
     if (mode === 'skip') {
+      // If planning files enabled with no planning mode, use persistent planning
+      if (usePlanningFiles) {
+        const prompts = await getPromptCustomization(this.settingsService, '[AutoMode]');
+        return prompts.autoMode.planningPersistent + '\n\n---\n\n## Feature Request\n\n';
+      }
       return ''; // No planning phase
     }
 
@@ -2056,7 +2072,13 @@ Format your response as a structured markdown document.`;
       return '';
     }
 
-    return planningPrompt + '\n\n---\n\n## Feature Request\n\n';
+    // If planning files enabled, prepend persistent planning instructions
+    // This combines incremental file updates with approval workflow
+    const planningFilePrefix = usePlanningFiles
+      ? prompts.autoMode.planningPersistent + '\n\n---\n\n'
+      : '';
+
+    return planningFilePrefix + planningPrompt + '\n\n---\n\n## Feature Request\n\n';
   }
 
   /**
@@ -2608,6 +2630,9 @@ This mock response was generated because AUTOMAKER_MOCK_AGENT=true was set.
       ? ProviderFactory.getProviderForModel(finalModel, {
           agenticMode: true,
           projectRoot: workDir,
+          planningService: usePlanningFiles ? this.planningFilesService : undefined,
+          featureId,
+          projectPath: finalProjectPath,
         })
       : ProviderFactory.getProviderForModel(finalModel);
 
@@ -3033,11 +3058,85 @@ After generating the revised spec, output:
                 });
 
                 // ========================================
-                // MULTI-AGENT TASK EXECUTION
-                // Each task gets its own focused agent call
+                // IMPLEMENTATION STRATEGY
                 // ========================================
 
-                if (parsedTasks.length > 0) {
+                // When planning files are enabled: Give agent the full approved plan and let it execute everything
+                // When planning files are disabled: Split into tasks and execute each with a separate agent call
+
+                if (usePlanningFiles) {
+                  // Planning-with-files mode: Single agent handles full implementation
+                  logger.info(
+                    `Planning-with-files enabled - agent will handle full implementation (${parsedTasks.length} tasks identified)`
+                  );
+
+                  // Build continuation prompt with approved plan
+                  const continuationPrompt = `## Implementation Phase
+
+Your specification has been approved. Now implement it.
+
+## Approved Plan
+
+${approvedPlanContent}
+
+${userFeedback ? `## Additional Feedback\n\n${userFeedback}\n\n` : ''}
+
+## Instructions
+
+You have full access to the codebase. Implement ALL tasks from the approved plan.
+
+**Planning Files**: Update your progress in \`.automaker/features/${featureId}/planning/\`
+- Update task_plan.md as you complete tasks (mark [x])
+- Log milestones in progress.md after each task
+- Save findings to findings.md as you discover them
+
+Execute the complete implementation now.`;
+
+                  // Make single continuation call for full implementation
+                  const continuationStream = provider.executeQuery({
+                    prompt: continuationPrompt,
+                    model: finalModel,
+                    maxTurns: maxTurns || 100,
+                    cwd: workDir,
+                    allowedTools: allowedTools,
+                    abortController,
+                    mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
+                  });
+
+                  // Process continuation stream
+                  for await (const msg of continuationStream) {
+                    if (msg.type === 'assistant' && msg.message?.content) {
+                      for (const block of msg.message.content) {
+                        if (block.type === 'text') {
+                          responseText += block.text || '';
+                          this.emitAutoModeEvent('auto_mode_progress', {
+                            featureId,
+                            content: block.text,
+                          });
+                        } else if (block.type === 'tool_use') {
+                          this.emitAutoModeEvent('auto_mode_tool', {
+                            featureId,
+                            tool: block.name,
+                            input: block.input,
+                          });
+                        }
+                      }
+                    } else if (msg.type === 'error') {
+                      throw new Error(msg.error || 'Error during implementation');
+                    } else if (msg.type === 'result' && msg.subtype === 'success') {
+                      if (msg.usage) {
+                        inputTokens += msg.usage.inputTokens || 0;
+                        outputTokens += msg.usage.outputTokens || 0;
+                      }
+                    }
+                  }
+
+                  logger.info(
+                    `Planning-with-files implementation completed for feature ${featureId}`
+                  );
+                } else if (parsedTasks.length > 0) {
+                  // Legacy mode: Multi-agent task execution
+                  // Each task gets its own focused agent call
                   logger.info(
                     `Starting multi-agent execution: ${parsedTasks.length} tasks for feature ${featureId}`
                   );
@@ -3455,12 +3554,14 @@ ${userFeedback}
     if (currentPlan) {
       prompt += `### Current Planning Files
 
+**Planning directory**: \`.automaker/features/${featureId}/planning/\`
+
 **task_plan.md** (your master plan - checkboxes show progress):
 \`\`\`markdown
 ${currentPlan}
 \`\`\`
 
-**IMPORTANT**: Update task_plan.md checkboxes as you complete this task.
+**IMPORTANT**: Update \`.automaker/features/${featureId}/planning/task_plan.md\` checkboxes as you complete this task.
 
 `;
     }
@@ -3476,8 +3577,8 @@ ${planContent}
 1. Focus ONLY on completing task ${task.id}: "${task.description}"
 2. Do not work on other tasks
 3. Use the existing codebase patterns
-4. Log any errors in progress.md with timestamp
-5. When done, update task_plan.md to mark this task complete
+4. Log any errors in \`.automaker/features/${featureId}/planning/progress.md\` with timestamp
+5. When done, update \`.automaker/features/${featureId}/planning/task_plan.md\` to mark this task complete
 6. Summarize what you implemented
 
 Begin implementing task ${task.id} now.`;
@@ -3560,14 +3661,16 @@ Begin implementing task ${task.id} now.`;
 
     // Common patterns indicating test failures
     const failurePatterns = [
-      /\d+ failed/i,
-      /\d+ error/i,
+      /[1-9]\d*\s+failed/i, // 1+ failures (not "0 failed")
+      /failed:\s*[1-9]\d*/i, // Failed: 1+ (not "Failed: 0")
+      /[1-9]\d*\s+error/i, // 1+ errors
       /test.*failed/i,
       /failed.*test/i,
-      /playwright.*\d+.*failed/i,
-      /\d+\s+failing/i,
+      /playwright.*[1-9]\d*.*failed/i, // Playwright with 1+ failures
+      /[1-9]\d*\s+failing/i, // 1+ failing
       /×.*failed/i,
       /✗.*failed/i,
+      /❌.*failed/i,
       /error:.*test/i,
       /tests?.*did not pass/i,
       /connection.*refused/i, // Common when server isn't running
@@ -3585,7 +3688,13 @@ Begin implementing task ${task.id} now.`;
     ];
 
     // Check if any failure patterns match
-    const hasFailures = failurePatterns.some((pattern) => pattern.test(agentOutput));
+    const hasFailures = failurePatterns.some((pattern) => {
+      if (pattern.test(agentOutput)) {
+        logger.info(`Found test failure pattern: ${pattern}`);
+        return true;
+      }
+      return false;
+    });
 
     if (hasFailures) {
       logger.info('Detected test failures in agent output');
@@ -3594,20 +3703,41 @@ Begin implementing task ${task.id} now.`;
 
     // Patterns indicating successful test execution
     const successPatterns = [
-      /\d+ passed/i,
+      /\d+\s+passed/i,
+      /passed:\s*\d+/i,
       /all.*tests?.*passed/i,
       /playwright.*\d+.*passed/i,
       /✓.*passed/i,
+      /✅.*passed/i,
       /√.*passed/i,
       /tests?.*successful/i,
       /test run successful/i,
       /passed!.*\d+/i,
+      /Total\s+Tests:.*Passed:\s*\d+/is, // .NET test summary format (flexible spacing)
+      /Passed\s*:\s*\d+\s*✅/i, // Agent summary format
+      /Passed\s*:\s*[1-9]\d*/i, // Passed: 19 (1 or more)
+      /all\s+\d+\s+tests\s+passed/i, // "all 19 tests passed"
+      /\d+\s+passed.*0\s+failed/i, // "19 passed, 0 failed"
+      /Failed:\s*0/i, // Failed: 0 (explicit zero failures)
     ];
 
-    const hasSuccess = successPatterns.some((pattern) => pattern.test(agentOutput));
+    const hasSuccess = successPatterns.some((pattern) => {
+      if (pattern.test(agentOutput)) {
+        logger.info(`Found test success pattern: ${pattern}`);
+        return true;
+      }
+      return false;
+    });
 
     if (hasSuccess) {
       logger.info('Detected successful test execution in agent output');
+      return true;
+    }
+
+    // If tests were run, no failures detected, but also no explicit success
+    // Check for "0 failed" or "0 errors" which implies success
+    if (/failed:\s*0/i.test(agentOutput) || /0\s+failed/i.test(agentOutput)) {
+      logger.info('No test failures found (Failed: 0) - assuming success');
       return true;
     }
 

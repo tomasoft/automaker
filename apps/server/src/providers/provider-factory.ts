@@ -8,6 +8,7 @@
 import { BaseProvider } from './base-provider.js';
 import type { InstallationStatus, ModelDefinition } from './types.js';
 import { isCursorModel, type ModelProvider } from '@automaker/types';
+import type { PlanningFilesService } from '../services/planning-files-service.js';
 
 /**
  * Provider registration entry

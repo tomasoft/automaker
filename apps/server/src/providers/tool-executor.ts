@@ -60,6 +60,10 @@ export class ToolExecutor {
       'mkdir',
       'touch',
       'npx',
+      // PowerShell commands (read-only safe ones)
+      'Get-ChildItem',
+      'Test-Path',
+      'Get-Content',
       // Testing framework commands
       'dotnet',
       'pytest',

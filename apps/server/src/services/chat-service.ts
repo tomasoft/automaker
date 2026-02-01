@@ -14,7 +14,7 @@ import type {
   ChatSessionListItem,
   ChatType,
 } from '@automaker/types';
-import { createLogger } from '@automaker/utils';
+import { createLogger, stripIncompleteToolBlocks } from '@automaker/utils';
 import { ProviderFactory } from '../providers/provider-factory.js';
 import { getUsageTrackingService } from './usage-tracking-service.js';
 
@@ -189,10 +189,14 @@ export class ChatService {
     const provider = ProviderFactory.getProviderForModel(session.model);
 
     // For conversation context: pass previous messages as history
-    const conversationHistory = historyMessages.map((msg) => ({
+    const rawHistory = historyMessages.map((msg) => ({
       role: msg.role === 'user' ? ('user' as const) : ('assistant' as const),
       content: msg.content,
     }));
+
+    // Clean conversation history to remove incomplete tool_use/tool_result pairs
+    // This prevents API errors when tool_use blocks don't have matching tool_result blocks
+    const conversationHistory = stripIncompleteToolBlocks(rawHistory);
 
     // Stream response
     let fullResponse = '';

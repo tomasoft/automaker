@@ -34,7 +34,12 @@ import {
   getIdeationAnalysisPath,
   ensureIdeationDir,
 } from '@automaker/platform';
-import { createLogger, loadContextFiles, isAbortError } from '@automaker/utils';
+import {
+  createLogger,
+  loadContextFiles,
+  isAbortError,
+  stripIncompleteToolBlocks,
+} from '@automaker/utils';
 import { ProviderFactory } from '../providers/provider-factory.js';
 import { getUsageTrackingService } from './usage-tracking-service.js';
 import type { SettingsService } from './settings-service.js';
@@ -181,10 +186,14 @@ export class IdeationService {
       const projectPath = activeSession.session.projectPath;
 
       // Build conversation history
-      const conversationHistory = activeSession.messages.slice(0, -1).map((msg) => ({
+      const rawHistory = activeSession.messages.slice(0, -1).map((msg) => ({
         role: msg.role,
         content: msg.content,
       }));
+
+      // Clean conversation history to remove incomplete tool_use/tool_result pairs
+      // This prevents API errors when tool_use blocks don't have matching tool_result blocks
+      const conversationHistory = stripIncompleteToolBlocks(rawHistory);
 
       // Load context files
       const contextResult = await loadContextFiles({

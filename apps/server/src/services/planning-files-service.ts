@@ -11,7 +11,7 @@
 
 import path from 'path';
 import * as secureFs from '../lib/secure-fs.js';
-import { createLogger } from '@automaker/utils';
+import { createLogger, stripIncompleteToolBlocks } from '@automaker/utils';
 import type {
   CatchupReport,
   CatchupStrategy,
@@ -85,10 +85,10 @@ export class PlanningFilesService {
       logger.info(`Created progress.md for feature ${featureId}`);
     }
 
-    this.eventEmitter.emit('planning:file-updated', {
+    this.eventEmitter.emit('planning-files:updated', {
       featureId,
       projectPath,
-      files: ['task_plan.md', 'findings.md', 'progress.md'],
+      fileType: 'task_plan',
       action: 'initialized',
     });
   }
@@ -223,10 +223,10 @@ _Tool executions, errors, and progress updates will be logged here_
 
     await secureFs.writeFile(progressPath, existingContent + entry);
 
-    this.eventEmitter.emit('planning:file-updated', {
+    this.eventEmitter.emit('planning-files:updated', {
       featureId,
       projectPath,
-      files: ['progress.md'],
+      fileType: 'progress',
       action: 'append',
     });
   }
@@ -238,7 +238,7 @@ _Tool executions, errors, and progress updates will be logged here_
     const taskPlanPath = path.join(this.getPlanningDir(projectPath, featureId), 'task_plan.md');
     await secureFs.writeFile(taskPlanPath, content);
 
-    this.eventEmitter.emit('planning:file-updated', {
+    this.eventEmitter.emit('planning-files:updated', {
       featureId,
       projectPath,
       fileType: 'task_plan',
@@ -498,8 +498,15 @@ _Tool executions, errors, and progress updates will be logged here_
   private async summarizeMessages(messages: ConversationMessage[], model: string): Promise<string> {
     const provider = ProviderFactory.getProviderForModel(model);
 
+    // Clean messages to remove incomplete tool_use/tool_result pairs that would cause API errors
+    const cleanedMessages = stripIncompleteToolBlocks(messages);
+
+    logger.debug(
+      `[summarizeMessages] Cleaned ${messages.length} messages -> ${cleanedMessages.length} valid messages`
+    );
+
     // Build conversation text
-    const conversationText = messages
+    const conversationText = cleanedMessages
       .map((msg) => {
         const role = msg.role.toUpperCase();
         const content = Array.isArray(msg.content)

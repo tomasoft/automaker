@@ -22,6 +22,8 @@ export {
   normalizeContentBlocks,
   formatHistoryAsText,
   convertHistoryToMessages,
+  validateToolUsePairs,
+  stripIncompleteToolBlocks,
 } from './conversation-utils.js';
 
 // Image handling

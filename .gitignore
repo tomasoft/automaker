@@ -17,6 +17,11 @@ out/
 /.automaker/*
 /.automaker/
 
+# Planning files should only exist in .automaker/ (not project root)
+task_plan.md
+findings.md
+progress.md
+
 .worktrees/
 
 /logs
@@ -75,6 +80,26 @@ blob-report/
 
 # TypeScript
 *.tsbuildinfo
+
+# .NET / Visual Studio
+.vs/
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
 
 # Misc
 *.pem
